@@ -158,7 +158,8 @@ module.exports = function (RED)
 
         state.app.get(/^\/\.well-known\/oauth-authorization-server(\/.*)?$/, (req, res) =>
         {
-            const authId = req.params && req.params[0] ? decodeURIComponent(String(req.params[0]).replace(/^\//, '')) : '';
+            let authId = req.params && req.params[0] ? decodeURIComponent(String(req.params[0]).replace(/^\//, '')) : '';
+            if (authId.startsWith('oauth/')) authId = authId.slice('oauth/'.length);
             const node = Array.from(state.routes.values()).find(candidate =>
                 isAuthRequired(candidate) && candidate.authConfig && (!authId || candidate.authConfig.id === authId));
             if (!node) return res.status(404).json({ error: 'MCP authorization server not found' });
