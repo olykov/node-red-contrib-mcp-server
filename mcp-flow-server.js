@@ -27,6 +27,7 @@ module.exports = function (RED)
     const toolRegistry = new NodeCache({ stdTTL: 0 });
     const serverInstances = new NodeCache({ stdTTL: 0 });
     const portServers = new Map();
+    const pendingExecutions = new Map();
 
     function parseList(value)
     {
@@ -599,19 +600,19 @@ module.exports = function (RED)
         {
             return new Promise((resolve, reject) =>
             {
-                const executionMsg = { topic: 'mcp-tool-execute', payload: { toolName: tool.name, arguments: args, executionId: uuidv4() } };
-                const timeout = setTimeout(() => reject(new Error('Tool execution timeout')), 30000);
-                const responseHandler = (msg) =>
+                const executionId = uuidv4();
+                const executionMsg = { topic: 'mcp-tool-execute', payload: { toolName: tool.name, arguments: args, executionId } };
+                const timeout = setTimeout(() =>
                 {
-                    if (msg.topic === 'mcp-tool-response' && msg.payload && msg.payload.executionId === executionMsg.payload.executionId)
-                    {
-                        clearTimeout(timeout);
-                        node.removeListener('input', responseHandler);
-                        if (msg.payload.error) reject(new Error(msg.payload.error));
-                        else resolve(msg.payload.result);
-                    }
-                };
-                node.on('input', responseHandler);
+                    pendingExecutions.delete(executionId);
+                    reject(new Error('Tool execution timeout'));
+                }, 30000);
+                pendingExecutions.set(executionId, {
+                    resolve,
+                    reject,
+                    timeout,
+                    endpointId: node.endpointId
+                });
                 node.send(executionMsg);
             });
         };
@@ -713,6 +714,21 @@ module.exports = function (RED)
 
         node.on('input', function (msg)
         {
+            if (msg.topic === 'mcp-tool-response' && msg.payload && msg.payload.executionId)
+            {
+                const pending = pendingExecutions.get(msg.payload.executionId);
+                if (!pending)
+                {
+                    node.warn('Orphan MCP tool response for executionId: ' + msg.payload.executionId);
+                    return;
+                }
+                clearTimeout(pending.timeout);
+                pendingExecutions.delete(msg.payload.executionId);
+                if (msg.payload.error) pending.reject(new Error(msg.payload.error));
+                else pending.resolve(msg.payload.result);
+                return;
+            }
+
             const command = msg.topic || (msg.payload && msg.payload.command);
             switch (command)
             {
@@ -730,6 +746,13 @@ module.exports = function (RED)
 
         node.on('close', function (done)
         {
+            for (const [executionId, pending] of pendingExecutions.entries())
+            {
+                if (pending.endpointId !== node.endpointId) continue;
+                clearTimeout(pending.timeout);
+                pendingExecutions.delete(executionId);
+                pending.reject(new Error('MCP server stopped before tool execution completed'));
+            }
             if (node.isRunning) node.stopServer(() => done());
             else done();
         });

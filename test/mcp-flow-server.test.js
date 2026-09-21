@@ -329,6 +329,36 @@ describe('upstream mcp-flow-server local extensions', () => {
         await pending;
     });
 
+    it('resolves a pending tool execution when the response reaches a replacement endpoint instance', async () => {
+        const runtime = createRuntime({ id: 'endpoint-shared', serverPath: '/mcp/a' });
+        const replacement = new runtime.types['mcp-flow-server']({
+            id: 'endpoint-shared',
+            runtime: 'runtime-1',
+            serverName: 'test-replacement',
+            serverPath: '/mcp/a',
+            enablePicker: false
+        });
+        runtime.RED.events.emit('mcp-tool-register', {
+            name: 'sample_ping',
+            description: 'Sample ping',
+            endpointId: 'endpoint-shared',
+            inputSchema: { type: 'object', properties: {} }
+        });
+
+        const res = mockRes();
+        const pending = runtime.server.handleToolCall({ id: 8, params: { name: 'sample_ping', arguments: { text: 'ok' } } }, res);
+        const exec = runtime.server.sent.find(msg => msg.topic === 'mcp-tool-execute');
+        assert.strictEqual(exec.payload.toolName, 'sample_ping');
+
+        replacement.emit('input', {
+            topic: 'mcp-tool-response',
+            payload: { executionId: exec.payload.executionId, result: { ok: true, replacement: true } }
+        });
+
+        await pending;
+        assert.deepStrictEqual(res.body.result, { content: [{ type: 'text', text: JSON.stringify({ ok: true, replacement: true }) }] });
+    });
+
     it('validates picker_submit selections', async () => {
         const { server } = buildServer();
         const res = mockRes();
