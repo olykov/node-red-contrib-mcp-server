@@ -67,11 +67,11 @@ describe('mcp auth token exchange', () => {
         const authorizationServer = authorizeMetadata(req, node);
         const protectedResource = protectedResourceMetadata(req, node);
 
-        assert.strictEqual(authorizationServer.issuer, 'https://mcp.example.test/oauth/auth-1');
+        assert.strictEqual(authorizationServer.issuer, 'https://mcp.example.test');
         assert.deepStrictEqual(authorizationServer.code_challenge_methods_supported, ['S256']);
         assert.strictEqual(authorizationServer.client_id_metadata_document_supported, true);
         assert.strictEqual(Object.prototype.hasOwnProperty.call(authorizationServer, ['registration', 'endpoint'].join('_')), false);
-        assert.deepStrictEqual(protectedResource.authorization_servers, ['https://mcp.example.test/oauth/auth-1']);
+        assert.deepStrictEqual(protectedResource.authorization_servers, ['https://mcp.example.test']);
         assert.strictEqual(protectedResource.resource, 'https://mcp.example.test/mcp/test');
     });
 

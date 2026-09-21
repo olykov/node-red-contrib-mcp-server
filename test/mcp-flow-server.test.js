@@ -428,7 +428,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             const body = await res.json();
             assert.strictEqual(res.status, 200);
             assert.strictEqual(body.resource, 'https://mcp.example.test/mcp/test');
-            assert.deepStrictEqual(body.authorization_servers, ['https://mcp.example.test/oauth/auth-1']);
+            assert.deepStrictEqual(body.authorization_servers, ['https://mcp.example.test']);
 
             const legacy = await fetch('http://127.0.0.1:18111/.well-known/oauth-authorization-server/auth-1', { headers: { host: 'mcp.example.test' } });
             assert.strictEqual(legacy.status, 200);
@@ -436,7 +436,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             const pathfulIssuer = await fetch('http://127.0.0.1:18111/.well-known/oauth-authorization-server/oauth/auth-1', { headers: { host: 'mcp.example.test' } });
             const issuerBody = await pathfulIssuer.json();
             assert.strictEqual(pathfulIssuer.status, 200);
-            assert.strictEqual(issuerBody.issuer, 'https://mcp.example.test/oauth/auth-1');
+            assert.strictEqual(issuerBody.issuer, 'https://mcp.example.test');
         } finally
         {
             await new Promise(resolve => server.stopServer(() => resolve()));
