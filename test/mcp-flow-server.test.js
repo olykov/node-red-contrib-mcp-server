@@ -412,6 +412,36 @@ describe('upstream mcp-flow-server local extensions', () => {
         }
     });
 
+    it('parses allowed groups as comma-separated names so spaces inside group names are preserved', async () => {
+        const authNode = {
+            id: 'auth-1',
+            enabled: true,
+            baseScopes: 'openid profile email',
+            readAccessToken: async () => ({
+                resource: 'https://mcp.example.test/mcp/test',
+                scopes: ['resource:read'],
+                groups: ['DFF Users']
+            })
+        };
+        const { server } = buildServer({
+            auth: 'auth-1',
+            authMode: 'oauth',
+            requiredScopes: 'resource:read',
+            allowedGroups: 'AI Tools MCP Users, DFF Users',
+            __nodes: { 'auth-1': authNode },
+            __runtime: { publicBaseUrl: 'https://mcp.example.test' }
+        });
+        const res = mockRes();
+
+        await server.handleMcpHttpRequest(mockReq(
+            { jsonrpc: '2.0', id: 1, method: 'initialize' },
+            { authorization: 'Bearer configured-value' }
+        ), res);
+
+        assert.strictEqual(res.statusCode, 200);
+        assert.strictEqual(res.body.result.serverInfo.name, 'test');
+    });
+
     it('allows initialize with a valid endpoint-scoped access token', async () => {
         const authNode = {
             id: 'auth-1',

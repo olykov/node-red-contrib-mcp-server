@@ -33,6 +33,13 @@ module.exports = function (RED)
         return value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
     }
 
+    function parseCommaList(value)
+    {
+        if (Array.isArray(value)) return value.map(String).map(s => s.trim()).filter(Boolean);
+        if (typeof value !== 'string') return [];
+        return value.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
     function uniqueList(values)
     {
         return Array.from(new Set(values.filter(Boolean)));
@@ -305,7 +312,7 @@ module.exports = function (RED)
         node.enableCors = runtime ? runtime.enableCors : false;
         node.advertisedScopes = parseList(config.advertisedScopes || '');
         node.authMode = config.authMode || 'inherit';
-        node.allowedGroups = parseList(config.allowedGroups || '');
+        node.allowedGroups = parseCommaList(config.allowedGroups || '');
         node.endpointRequiredScopes = parseList(config.requiredScopes || '');
         node.adminToolsEnabled = hasAdminTools(runtime, node.serverPath);
         node.adminPort = runtime ? runtime.adminPort : 0;
