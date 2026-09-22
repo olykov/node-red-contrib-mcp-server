@@ -6,7 +6,7 @@
             name: { value: '' },
             toolName: { value: '', required: true },
             toolDescription: { value: '' },
-            endpoint: { value: '', type: 'mcp-flow-server', required: false },
+            endpoint: { value: '', required: false },
             requiredScopes: { value: '' },
             toolSchema: { value: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}' },
             autoRegister: { value: true }
@@ -21,6 +21,19 @@
             return this.name ? 'node_label_italic' : '';
         },
         oneditprepare: function() {
+            var endpointSelect = $('#node-input-endpoint');
+            var currentEndpoint = this.endpoint || '';
+            endpointSelect.empty();
+            endpointSelect.append($('<option></option>').attr('value', '').text('All MCP endpoints'));
+            if (RED.nodes && typeof RED.nodes.eachNode === 'function') {
+                RED.nodes.eachNode(function(node) {
+                    if (node.type !== 'mcp-flow-server') return;
+                    var label = node.name || node.serverName || node.id;
+                    endpointSelect.append($('<option></option>').attr('value', node.id).text(label));
+                });
+            }
+            endpointSelect.val(currentEndpoint);
+
             var schemaTemplates = {
                 simple: {
                     name: 'Simple Parameters',
@@ -138,7 +151,7 @@
 
     <div class="form-row">
         <label for="node-input-endpoint"><i class="fa fa-sitemap"></i> Endpoint</label>
-        <input type="text" id="node-input-endpoint">
+        <select id="node-input-endpoint"></select>
         <div class="mcp-help-text">Leave empty to expose the tool on every MCP endpoint.</div>
     </div>
 

@@ -7,7 +7,6 @@ module.exports = function (RED)
     const { randomUUID: uuidv4 } = require('crypto');
     const NodeCache = require('node-cache');
     const { createAdminTools } = require('./lib/admin-tools');
-    const { MCP_APP_RESOURCES, PICKER_URI } = require('./lib/mcp-app-resources');
     const {
         absoluteUrl,
         authorizeMetadata,
@@ -21,8 +20,6 @@ module.exports = function (RED)
         writeAuthFailure
     } = require('./lib/mcp-auth');
 
-    const PICKER_SUBMIT_TOOL = 'picker_submit';
-    const LEGACY_UI_RESOURCE_URI_META = 'ui/resourceUri';
 
     const toolRegistry = new NodeCache({ stdTTL: 0 });
     const serverInstances = new NodeCache({ stdTTL: 0 });
@@ -266,72 +263,9 @@ module.exports = function (RED)
                 Object.prototype.hasOwnProperty.call(value, key));
     }
 
-    function sanitizePickerOptions(options)
-    {
-        if (!Array.isArray(options)) return [];
-        const seen = new Set();
-        const out = [];
-        for (const option of options)
-        {
-            if (!option || typeof option !== 'object' || Array.isArray(option)) continue;
-            const id = typeof option.id === 'string' ? option.id.trim() : '';
-            const labelSource = typeof option.label === 'string' ? option.label : option.title;
-            const label = typeof labelSource === 'string' && labelSource.trim() ? labelSource.trim() : id;
-            const description = typeof option.description === 'string' ? option.description.trim() : '';
-            if (!id || seen.has(id)) continue;
-            seen.add(id);
-            out.push({ id, label, ...(description ? { description } : {}) });
-        }
-        return out;
-    }
-
-    function hasPickerResourceMeta(value)
-    {
-        const meta = value && value._meta && typeof value._meta === 'object' ? value._meta : {};
-        const ui = meta.ui && typeof meta.ui === 'object' ? meta.ui : {};
-        return ui.resourceUri === PICKER_URI || meta[LEGACY_UI_RESOURCE_URI_META] === PICKER_URI;
-    }
-
-    function sanitizePickerResult(result)
-    {
-        if (!hasPickerResourceMeta(result)) return result;
-        const structured = result.structuredContent && typeof result.structuredContent === 'object' &&
-            !Array.isArray(result.structuredContent) ? result.structuredContent : {};
-        const options = sanitizePickerOptions(structured.options);
-        if (!options.length) return textResult('Invalid picker payload: options must contain at least one item.', true);
-        return Object.assign({}, result, {
-            content: Array.isArray(result.content) && result.content.length ? result.content : [
-                { type: 'text', text: 'Choose an option in the picker.' }
-            ],
-            structuredContent: Object.assign({}, structured, {
-                title: typeof structured.title === 'string' && structured.title.trim() ? structured.title.trim() : 'Choose an option',
-                selectionMode: structured.selectionMode === 'multiple' ? 'multiple' : 'single',
-                options
-            }),
-            _meta: Object.assign({}, result._meta || {}, {
-                ui: Object.assign({}, (result._meta && result._meta.ui) || {}, { resourceUri: PICKER_URI }),
-                [LEGACY_UI_RESOURCE_URI_META]: PICKER_URI
-            })
-        });
-    }
-
-    function pickerSubmitResult(args)
-    {
-        const selectedIds = Array.isArray(args && args.selectedIds)
-            ? args.selectedIds.map(String).map(v => v.trim()).filter(Boolean)
-            : [];
-        const otherOption = args && typeof args.otherOption === 'string' ? args.otherOption.trim() : '';
-        const selectionMode = args && args.selectionMode === 'multiple' ? 'multiple' : 'single';
-        if (!selectedIds.length && !otherOption) return textResult('Select an option or enter other option.', true);
-        return {
-            content: [{ type: 'text', text: 'Picker selection received.' }],
-            structuredContent: { type: 'picker_selection', selectionMode, selectedIds, otherOption }
-        };
-    }
-
     function normalizeToolResult(result)
     {
-        if (isMcpResult(result)) return sanitizePickerResult(result);
+        if (isMcpResult(result)) return result;
         if (Array.isArray(result)) return { content: result };
         if (typeof result === 'string') return textResult(result);
         return textResult(JSON.stringify(result));
@@ -373,7 +307,6 @@ module.exports = function (RED)
         node.authMode = config.authMode || 'inherit';
         node.allowedGroups = parseList(config.allowedGroups || '');
         node.endpointRequiredScopes = parseList(config.requiredScopes || '');
-        node.enablePicker = config.enablePicker !== false;
         node.adminToolsEnabled = hasAdminTools(runtime, node.serverPath);
         node.adminPort = runtime ? runtime.adminPort : 0;
         node.adminToken = runtimeAdminToken(runtime);
@@ -420,8 +353,6 @@ module.exports = function (RED)
                 {
                     case 'tools/list': node.handleToolsList(request, res, req.mcpAuth); break;
                     case 'tools/call': await node.handleToolCall(request, req, res); break;
-                    case 'resources/list': node.handleResourcesList(request, res); break;
-                    case 'resources/read': node.handleResourcesRead(request, res); break;
                     case 'initialize': node.handleInitialize(request, res); break;
                     default:
                         if (request.method && request.method.endsWith('_tool')) await node.handleDirectToolCall(request, res);
@@ -484,48 +415,12 @@ module.exports = function (RED)
                 .filter(tool => !authClaims || policyAllowsTool(node, tool, authClaims))
                 .map(tool => node.toolDescriptor(tool));
 
-            if (node.enablePicker)
-            {
-                tools.push(withSecurityMeta({
-                    name: PICKER_SUBMIT_TOOL,
-                    description: 'Validate and return the selected option from the MCP Apps picker.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            selectedIds: { type: 'array', items: { type: 'string' } },
-                            otherOption: { type: 'string' },
-                            selectionMode: { type: 'string', enum: ['single', 'multiple'] }
-                        },
-                        additionalProperties: false
-                    }
-                }, node.advertisedScopes, { ui: { visibility: ['app'] } }));
-            }
-
             if (node.adminToolsEnabled)
             {
                 node.adminTools.TOOLS.forEach(tool => tools.push(withSecurityMeta(tool, node.advertisedScopes)));
             }
 
             res.json({ jsonrpc: '2.0', id: request.id, result: { tools } });
-        };
-
-        node.handleResourcesList = function (request, res)
-        {
-            const resources = node.enablePicker ? Object.values(MCP_APP_RESOURCES).map(({ uri, name, description, mimeType }) =>
-                ({ uri, name, description, mimeType })) : [];
-            res.json({ jsonrpc: '2.0', id: request.id, result: { resources } });
-        };
-
-        node.handleResourcesRead = function (request, res)
-        {
-            const uri = request.params && request.params.uri;
-            const resource = node.enablePicker && uri ? MCP_APP_RESOURCES[uri] : undefined;
-            if (!resource) return node.rpcError(res, request.id, -32602, 'Unknown resource: ' + uri);
-            res.json({
-                jsonrpc: '2.0',
-                id: request.id,
-                result: { contents: [{ uri: resource.uri, mimeType: resource.mimeType, text: resource.text, _meta: resource._meta }] }
-            });
         };
 
         node.handleToolCall = async function (request, req, res)
@@ -540,10 +435,6 @@ module.exports = function (RED)
             const args = params.arguments || {};
             try
             {
-                if (node.enablePicker && name === PICKER_SUBMIT_TOOL)
-                {
-                    return res.json({ jsonrpc: '2.0', id: request.id, result: pickerSubmitResult(args) });
-                }
                 if (node.adminToolsEnabled && node.adminTools.TOOL_NAMES.has(name))
                 {
                     const adminResult = await node.adminTools.callTool(name, args);
@@ -581,11 +472,6 @@ module.exports = function (RED)
         node.handleInitialize = function (request, res)
         {
             const capabilities = { tools: { listChanged: true } };
-            if (node.enablePicker)
-            {
-                capabilities.resources = {};
-                capabilities.extensions = { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } };
-            }
             res.json({
                 jsonrpc: '2.0',
                 id: request.id,

@@ -31,8 +31,7 @@
             authMode: { value: 'inherit' },
             allowedGroups: { value: '' },
             requiredScopes: { value: '' },
-            advertisedScopes: { value: '' },
-            enablePicker: { value: true }
+            advertisedScopes: { value: '' }
         },
         inputs: 1,
         outputs: 1,
@@ -163,14 +162,6 @@
         <input type="text" id="node-input-advertisedScopes" placeholder="openid profile email">
     </div>
 
-    <hr>
-    <h4>Local Extensions</h4>
-
-    <div class="form-row">
-        <label for="node-input-enablePicker"><i class="fa fa-list"></i> Picker App</label>
-        <input type="checkbox" id="node-input-enablePicker" style="width: auto;">
-        <span class="mcp-editor-note">Expose picker resources and picker_submit.</span>
-    </div>
 
     <hr>
     <div class="form-row">
@@ -259,8 +250,6 @@
         <dd>Optional scopes required for every tool on this endpoint.</dd>
         <dt>Base Scopes <span class="property-type">string</span></dt>
         <dd>Space- or comma-separated scopes advertised on tools exposed by this endpoint.</dd>
-        <dt>Picker App <span class="property-type">boolean</span></dt>
-        <dd>Expose picker resources and the internal <code>picker_submit</code> tool. This does not implement OAuth.</dd>
     </dl>
     <h3>Runtime</h3>
     <p>The node sends <code>mcp-tool-execute</code> messages to the flow and waits for matching <code>mcp-tool-response</code> messages.</p>

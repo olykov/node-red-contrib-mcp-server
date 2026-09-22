@@ -47,7 +47,6 @@ function createRuntime(config = {}) {
         runtime: runtimeConfig.id,
         serverName: 'test',
         serverPath: '/mcp/test',
-        enablePicker: true
     }, config);
     const server = new types['mcp-flow-server'](nodeConfig);
     return { RED, types, server, nodeMap, runtimeNode };
@@ -88,21 +87,10 @@ describe('upstream mcp-flow-server local extensions', () => {
         server.handleToolsList({ id: 1 }, res);
         const tool = res.body.result.tools.find(t => t.name === 'sample_ping');
         assert.deepStrictEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['openid', 'profile', 'email'] }]);
-        assert.ok(res.body.result.tools.some(t => t.name === 'picker_submit'));
-    });
-
-    it('serves picker MCP App resource', () => {
-        const { server } = buildServer();
-        const list = mockRes();
-        server.handleResourcesList({ id: 1 }, list);
-        assert.strictEqual(list.body.result.resources[0].uri, 'ui://picker/v4/options.html');
-        const read = mockRes();
-        server.handleResourcesRead({ id: 2, params: { uri: 'ui://picker/v4/options.html' } }, read);
-        assert.match(read.body.result.contents[0].text, /picker/i);
     });
 
     it('requires an explicit runtime config node before starting', () => {
-        const runtime = createRuntime({ runtime: '', enablePicker: false });
+        const runtime = createRuntime({ runtime: '' });
 
         assert.strictEqual(runtime.server.runtime, null);
         assert.strictEqual(runtime.server.serverPort, 0);
@@ -114,7 +102,6 @@ describe('upstream mcp-flow-server local extensions', () => {
             serverName: 'ops',
             serverPath: '/internal/mcp/ops',
             advertisedScopes: 'openid profile',
-            enablePicker: false,
             __runtime: { serverPort: 18002, enableCors: false }
         });
         RED.events.emit('mcp-tool-register', {
@@ -136,7 +123,7 @@ describe('upstream mcp-flow-server local extensions', () => {
     });
 
     it('filters registered tools by endpoint id when a binding is configured', () => {
-        const { RED, server } = buildServer({ id: 'alpha-endpoint', serverName: 'alpha', enablePicker: false });
+        const { RED, server } = buildServer({ id: 'alpha-endpoint', serverName: 'alpha' });
         RED.events.emit('mcp-tool-register', {
             name: 'shared_tool',
             description: 'Shared',
@@ -178,8 +165,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             id: 'endpoint-b',
             runtime: 'runtime-shared',
             serverName: 'b',
-            serverPath: '/mcp/b',
-            enablePicker: false
+            serverPath: '/mcp/b'
         });
 
         runtime.server.initializeServer();
@@ -208,8 +194,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             id: 'endpoint-b',
             runtime: 'runtime-b',
             serverName: 'b',
-            serverPath: '/mcp/b',
-            enablePicker: false
+            serverPath: '/mcp/b'
         });
 
         runtime.server.initializeServer();
@@ -228,14 +213,12 @@ describe('upstream mcp-flow-server local extensions', () => {
             id: 'admin-endpoint',
             serverName: 'ops',
             serverPath: '/internal/mcp/ops',
-            enablePicker: false,
             __runtime: adminRuntime
         }).server;
         const otherServer = buildServer({
             id: 'other-endpoint',
             serverName: 'other',
             serverPath: '/internal/mcp/other',
-            enablePicker: false,
             __runtime: Object.assign({ id: 'runtime-2' }, adminRuntime)
         }).server;
 
@@ -253,7 +236,6 @@ describe('upstream mcp-flow-server local extensions', () => {
         const { server } = buildServer({
             serverName: 'ops',
             serverPath: '/internal/mcp/ops',
-            enablePicker: false,
             __runtime: {
                 serverPort: 18004,
                 adminPort: 1881,
@@ -273,7 +255,6 @@ describe('upstream mcp-flow-server local extensions', () => {
             const { server } = buildServer({
                 serverName: 'ops',
                 serverPath: '/internal/mcp/ops',
-                enablePicker: false,
                 __runtime: {
                     serverPort: 18007,
                     adminPort: 1881,
@@ -292,7 +273,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
 
     it('keeps same tool name isolated across endpoint bindings', () => {
-        const { RED, server } = buildServer({ id: 'alpha-endpoint', serverName: 'alpha', enablePicker: false });
+        const { RED, server } = buildServer({ id: 'alpha-endpoint', serverName: 'alpha' });
         RED.events.emit('mcp-tool-register', {
             name: 'status_tool',
             description: 'Alpha status',
@@ -335,8 +316,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             id: 'endpoint-shared',
             runtime: 'runtime-1',
             serverName: 'test-replacement',
-            serverPath: '/mcp/a',
-            enablePicker: false
+            serverPath: '/mcp/a'
         });
         runtime.RED.events.emit('mcp-tool-register', {
             name: 'sample_ping',
@@ -359,14 +339,6 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.deepStrictEqual(res.body.result, { content: [{ type: 'text', text: JSON.stringify({ ok: true, replacement: true }) }] });
     });
 
-    it('validates picker_submit selections', async () => {
-        const { server } = buildServer();
-        const res = mockRes();
-        await server.handleToolCall({ id: 3, params: { name: 'picker_submit', arguments: { selectedIds: ['a'], otherOption: 'note' } } }, res);
-        assert.deepStrictEqual(res.body.result.structuredContent.selectedIds, ['a']);
-        assert.strictEqual(res.body.result.structuredContent.otherOption, 'note');
-    });
-
     it('returns OAuth challenge when an OAuth endpoint has no bearer token', async () => {
         const authNode = { id: 'auth-1', enabled: true, baseScopes: 'openid profile email', readAccessToken: async () => null };
         const { server } = buildServer({
@@ -374,7 +346,6 @@ describe('upstream mcp-flow-server local extensions', () => {
             authMode: 'oauth',
             requiredScopes: 'resource:read',
             allowedGroups: 'team-a',
-            enablePicker: false,
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
         });
@@ -393,7 +364,6 @@ describe('upstream mcp-flow-server local extensions', () => {
         const { server } = buildServer({
             auth: 'auth-1',
             authMode: 'oauth',
-            enablePicker: false,
             __nodes: { 'auth-1': authNode },
             __runtime: { serverPort: 18110, publicBaseUrl: 'https://mcp.example.test' }
         });
@@ -416,7 +386,6 @@ describe('upstream mcp-flow-server local extensions', () => {
         const { server } = buildServer({
             auth: 'auth-1',
             authMode: 'oauth',
-            enablePicker: false,
             __nodes: { 'auth-1': authNode },
             __runtime: { serverPort: 18111, publicBaseUrl: 'https://mcp.example.test' }
         });
@@ -460,7 +429,6 @@ describe('upstream mcp-flow-server local extensions', () => {
             authMode: 'oauth',
             requiredScopes: 'resource:read',
             allowedGroups: 'team-a',
-            enablePicker: false,
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
         });
@@ -491,7 +459,6 @@ describe('upstream mcp-flow-server local extensions', () => {
             authMode: 'oauth',
             requiredScopes: 'resource:read',
             allowedGroups: 'team-a',
-            enablePicker: false,
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
         });
@@ -533,7 +500,6 @@ describe('upstream mcp-flow-server local extensions', () => {
             authMode: 'oauth',
             requiredScopes: 'resource:read',
             allowedGroups: 'team-a',
-            enablePicker: false,
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
         });

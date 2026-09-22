@@ -12,7 +12,6 @@ Base: upstream `node-red-contrib-mcp-server@1.1.5`.
 - one local port can be owned by only one `mcp-runtime` instance;
 - `mcp-tool-registry` supports optional binding to an `mcp-flow-server` endpoint node;
 - `mcp-tool-registry` can add per-tool required scopes to descriptor metadata;
-- `mcp-flow-server` exposes the text-only MCP Apps picker resource and `picker_submit`;
 - optional read-only `get_flow` is available only when runtime admin settings are complete and the endpoint path matches the configured admin endpoint path;
 - `mcp-redis` defines memory or Redis-backed storage for OAuth state, authorization codes, and opaque access tokens;
 - `mcp-auth` defines generic OIDC settings, auth storage, and token TTLs;

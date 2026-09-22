@@ -2,7 +2,7 @@
 
 Upstream-first fork of `node-red-contrib-mcp-server@1.1.5` for MCP tool runtimes.
 
-The package keeps the upstream node model and adds endpoint-scoped MCP flow serving, picker resources, read-only admin helpers, and package-level OAuth support for MCP endpoints.
+The package keeps the upstream node model and adds endpoint-scoped MCP flow serving, read-only admin helpers, and package-level OAuth support for MCP endpoints.
 
 ## Scope
 
@@ -20,10 +20,9 @@ Included nodes:
 Local extensions:
 
 - Runtime config nodes for local MCP listener settings.
-- Endpoint nodes for logical MCP names, paths, base scopes, and picker support.
+- Endpoint nodes for logical MCP names, paths, and base scopes.
 - Endpoint-scoped and shared tool registration.
 - Per-tool required scopes in `_meta.securitySchemes`.
-- Text-only MCP Apps picker resource and `picker_submit` helper tool.
 - Optional read-only `get_flow` tool gated by runtime admin settings and an exact endpoint path.
 - OIDC-backed MCP authorization configuration.
 - Memory or Redis-backed storage for short-lived auth state and opaque access tokens.
@@ -77,7 +76,7 @@ npm link <package-name>
 
 Client metadata hosts must be allow-listed. This prevents the authorization endpoint from fetching arbitrary user-provided URLs during client metadata validation.
 
-`mcp-flow-server` defines one logical MCP endpoint on a selected runtime: MCP name, HTTP path, optional auth config, endpoint groups/scopes, base scopes, and picker support. A runtime is required.
+`mcp-flow-server` defines one logical MCP endpoint on a selected runtime: MCP name, HTTP path, optional auth config, endpoint groups/scopes, and base scopes. A runtime is required.
 
 One runtime owns one local port. Multiple endpoints may share that runtime port when their MCP paths differ.
 
@@ -103,7 +102,6 @@ msg.payload = { executionId, result };
 
 `mcp-tool-registry` can bind a tool to one endpoint. Leaving the endpoint empty exposes the tool on every endpoint in the same Node-RED runtime.
 
-`Picker App` exposes the picker resource and `picker_submit` helper tool.
 
 Admin tools expose read-only `get_flow` only when the selected runtime has Admin Port, Admin Token, and Admin Endpoint Path configured, and the endpoint path exactly matches that Admin Endpoint Path.
 
