@@ -450,7 +450,7 @@ module.exports = function (RED)
                 if (node.adminToolsEnabled && node.adminTools.TOOL_NAMES.has(name))
                 {
                     const adminResult = await node.adminTools.callTool(name, args);
-                    return res.json({ jsonrpc: '2.0', id: request.id, result: textResult(adminResult) });
+                    return res.json({ jsonrpc: '2.0', id: request.id, result: normalizeToolResult(adminResult) });
                 }
                 const tool = node.registeredTools().find(candidate => candidate.name === name);
                 if (!tool) return node.rpcError(res, request.id, -32602, 'Tool not found: ' + name);

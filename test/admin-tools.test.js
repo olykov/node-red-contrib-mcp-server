@@ -23,6 +23,8 @@ describe('lib/admin-tools', () => {
         assert.deepStrictEqual(tools.TOOLS.map(t => t.name), ['get_flow']);
         assert.ok(tools.TOOL_NAMES.has('get_flow'));
         assert.ok(!tools.TOOL_NAMES.has('deploy_flow'));
+        assert.strictEqual(tools.TOOLS[0].outputSchema.type, 'object');
+        assert.deepStrictEqual(tools.TOOLS[0].outputSchema.required, ['mode']);
     });
 
     it('lists tabs with node counts', async () => {
@@ -39,10 +41,17 @@ describe('lib/admin-tools', () => {
             })
         });
         const result = await tools.callTool('get_flow', {});
-        assert.match(result, /Node-RED flow tabs/);
-        assert.match(result, /Flow One/);
-        assert.match(result, /Nodes: 2/);
-        assert.match(result, /Flow Two\*\* \[disabled\]/);
+        assert.match(result.content[0].text, /Node-RED flow tabs/);
+        assert.match(result.content[0].text, /Flow One/);
+        assert.match(result.content[0].text, /Nodes: 2/);
+        assert.match(result.content[0].text, /Flow Two\*\* \[disabled\]/);
+        assert.deepStrictEqual(result.structuredContent, {
+            mode: 'list',
+            flows: [
+                { id: 'tab1', label: 'Flow One', disabled: false, nodeCount: 2 },
+                { id: 'tab2', label: 'Flow Two', disabled: true, nodeCount: 1 }
+            ]
+        });
     });
 
     it('returns one flow JSON by id and rejects path-like ids', async () => {
@@ -52,7 +61,9 @@ describe('lib/admin-tools', () => {
                 return { status: 200, body: { id: 'abc123', label: 'My Flow', nodes: [] } };
             }
         });
-        assert.deepStrictEqual(JSON.parse(await tools.callTool('get_flow', { id: 'abc123' })), { id: 'abc123', label: 'My Flow', nodes: [] });
+        const result = await tools.callTool('get_flow', { id: 'abc123' });
+        assert.deepStrictEqual(result.structuredContent, { mode: 'flow', id: 'abc123', flow: { id: 'abc123', label: 'My Flow', nodes: [] } });
+        assert.deepStrictEqual(JSON.parse(result.content[0].text), { id: 'abc123', label: 'My Flow', nodes: [] });
         await assert.rejects(() => tools.callTool('get_flow', { id: '../etc/passwd' }), err => err.rpcCode === -32602);
     });
 

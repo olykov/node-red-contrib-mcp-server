@@ -6,11 +6,16 @@
             name: { value: '' },
             toolName: { value: '', required: true },
             toolDescription: { value: '' },
-            endpoint: { value: '', required: false },
+            endpoint: {
+                value: '',
+                required: true,
+                validate: function(value) {
+                    return value === '__shared__' || Boolean(value);
+                }
+            },
             requiredScopes: { value: '' },
             toolSchema: { value: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}' },
             outputSchema: { value: '' },
-            autoRegister: { value: true }
         },
         inputs: 1,
         outputs: 1,
@@ -25,7 +30,8 @@
             var endpointSelect = $('#node-input-endpoint');
             var currentEndpoint = this.endpoint || '';
             endpointSelect.empty();
-            endpointSelect.append($('<option></option>').attr('value', '').text('All MCP endpoints'));
+            endpointSelect.append($('<option></option>').attr('value', '').text('Select MCP endpoint...'));
+            endpointSelect.append($('<option></option>').attr('value', '__shared__').text('Shared (All MCPs)'));
             if (RED.nodes && typeof RED.nodes.eachNode === 'function') {
                 RED.nodes.eachNode(function(node) {
                     if (node.type !== 'mcp-flow-server') return;
@@ -34,38 +40,6 @@
                 });
             }
             endpointSelect.val(currentEndpoint);
-
-            var schemaTemplates = {
-                simple: {
-                    name: 'Simple Parameters',
-                    schema: '{\n  "type": "object",\n  "properties": {\n    "input": {\n      "type": "string",\n      "description": "Input parameter"\n    }\n  },\n  "required": ["input"]\n}'
-                },
-                message: {
-                    name: 'Message Tool',
-                    schema: '{\n  "type": "object",\n  "properties": {\n    "message": {\n      "type": "string",\n      "description": "Message to process"\n    },\n    "category": {\n      "type": "string",\n      "description": "Optional category"\n    },\n    "priority": {\n      "type": "string",\n      "enum": ["low", "medium", "high"],\n      "description": "Priority level"\n    }\n  },\n  "required": ["message"]\n}'
-                },
-                calculator: {
-                    name: 'Calculator Tool',
-                    schema: '{\n  "type": "object",\n  "properties": {\n    "operation": {\n      "type": "string",\n      "enum": ["add", "subtract", "multiply", "divide"],\n      "description": "Mathematical operation"\n    },\n    "a": {\n      "type": "number",\n      "description": "First number"\n    },\n    "b": {\n      "type": "number",\n      "description": "Second number"\n    }\n  },\n  "required": ["operation", "a", "b"]\n}'
-                },
-                api: {
-                    name: 'API Call Tool',
-                    schema: '{\n  "type": "object",\n  "properties": {\n    "url": {\n      "type": "string",\n      "description": "API endpoint URL"\n    },\n    "method": {\n      "type": "string",\n      "enum": ["GET", "POST", "PUT", "DELETE"],\n      "description": "HTTP method"\n    },\n    "data": {\n      "type": "object",\n      "description": "Request payload"\n    }\n  },\n  "required": ["url"]\n}'
-                }
-            };
-
-            var templateSelect = $('#schema-templates');
-            Object.keys(schemaTemplates).forEach(function(key) {
-                templateSelect.append($('<option></option>').attr('value', key).text(schemaTemplates[key].name));
-            });
-
-            $('#load-template-btn').click(function() {
-                var selectedTemplate = $('#schema-templates').val();
-                if (selectedTemplate && schemaTemplates[selectedTemplate]) {
-                    $('#node-input-toolSchema').val(schemaTemplates[selectedTemplate].schema);
-                    RED.notify('Loaded ' + schemaTemplates[selectedTemplate].name + ' template', 'success');
-                }
-            });
 
             $('#node-input-name').on('input', function() {
                 var name = $(this).val();
@@ -107,40 +81,20 @@
 
             function formatJsonField(selector, label, allowEmpty) {
                 var schema = $(selector).val();
-                if (allowEmpty && !schema.trim()) {
-                    RED.notify(label + ' is empty', 'success');
-                    return;
-                }
+                if (allowEmpty && !schema.trim()) return true;
                 try {
                     $(selector).val(JSON.stringify(JSON.parse(schema), null, 2));
-                    RED.notify(label + ' formatted', 'success');
+                    return true;
                 } catch (error) {
-                    RED.notify('Invalid JSON: ' + error.message, 'error');
+                    RED.notify(label + ' invalid JSON: ' + error.message, 'error');
+                    return false;
                 }
             }
 
-            $('#format-schema-btn').click(function() {
-                formatJsonField('#node-input-toolSchema', 'Schema', false);
-            });
-
-            $('#format-output-schema-btn').click(function() {
-                formatJsonField('#node-input-outputSchema', 'Output schema', true);
-            });
-
-            $('#generate-message-tool-btn').click(function() {
-                $('#node-input-name').val('Process Message');
-                $('#node-input-toolName').val('process_message');
-                $('#node-input-toolDescription').val('Process a message with optional category and priority');
-                $('#node-input-toolSchema').val(schemaTemplates.message.schema);
-                RED.notify('Message tool template created', 'success');
-            });
-
-            $('#generate-calc-tool-btn').click(function() {
-                $('#node-input-name').val('Calculator');
-                $('#node-input-toolName').val('calculate');
-                $('#node-input-toolDescription').val('Perform mathematical calculations');
-                $('#node-input-toolSchema').val(schemaTemplates.calculator.schema);
-                RED.notify('Calculator tool template created', 'success');
+            $('#format-json-fields-btn').click(function() {
+                var inputOk = formatJsonField('#node-input-toolSchema', 'Input schema', false);
+                var outputOk = formatJsonField('#node-input-outputSchema', 'Output schema', true);
+                if (inputOk && outputOk) RED.notify('JSON fields formatted', 'success');
             });
 
             $('#node-input-toolName').on('input', function() {
@@ -171,42 +125,30 @@
     </div>
 
     <div class="form-row">
-        <label for="node-input-toolDescription"><i class="fa fa-info-circle"></i> Description</label>
+        <label for="node-input-toolDescription"><i class="fa fa-info-circle"></i> Tool Description</label>
         <textarea id="node-input-toolDescription" rows="2" placeholder="Describe what this tool does"></textarea>
+        <div class="mcp-help-text">Shown to MCP clients and models in the tool descriptor.</div>
     </div>
 
     <div class="form-row">
         <label for="node-input-endpoint"><i class="fa fa-sitemap"></i> Endpoint</label>
         <select id="node-input-endpoint"></select>
-        <div class="mcp-help-text">Leave empty to expose the tool on every MCP endpoint.</div>
+        <div class="mcp-help-text">Choose a specific endpoint, or explicitly choose Shared only for tools intended to be available on every MCP endpoint.</div>
     </div>
 
     <div class="form-row">
         <label for="node-input-requiredScopes"><i class="fa fa-lock"></i> Required Scopes</label>
         <input type="text" id="node-input-requiredScopes" placeholder="resource:read">
-        <div class="mcp-help-text">Space- or comma-separated scopes added to this tool descriptor.</div>
+        <div class="mcp-help-text">Optional extra OAuth scopes for this tool. Leave empty unless this tool needs stricter access than its endpoint.</div>
     </div>
 
     <hr>
     <h4>Parameter Schema</h4>
 
     <div class="form-row">
-        <label for="schema-templates"><i class="fa fa-magic"></i> Schema Templates</label>
-        <select id="schema-templates">
-            <option value="">Select a template</option>
-        </select>
-        <button type="button" id="load-template-btn" class="btn btn-secondary mcp-button-row">
-            <i class="fa fa-download"></i> Load Template
-        </button>
-    </div>
-
-    <div class="form-row">
         <label for="node-input-toolSchema"><i class="fa fa-code"></i> JSON Schema</label>
         <textarea id="node-input-toolSchema" rows="8" placeholder='{"type": "object", "properties": {}, "required": []}'></textarea>
         <div id="schema-validation" class="mcp-validation"></div>
-        <button type="button" id="format-schema-btn" class="btn btn-secondary mcp-button-row">
-            <i class="fa fa-magic"></i> Format JSON
-        </button>
     </div>
 
     <hr>
@@ -217,27 +159,22 @@
         <textarea id="node-input-outputSchema" rows="8" placeholder='{"type": "object", "properties": {}}'></textarea>
         <div class="mcp-help-text">Optional JSON Schema for structured tool results.</div>
         <div id="output-schema-validation" class="mcp-validation"></div>
-        <button type="button" id="format-output-schema-btn" class="btn btn-secondary mcp-button-row">
-            <i class="fa fa-magic"></i> Format Output JSON
-        </button>
-    </div>
-
-    <div class="form-row">
-        <label for="node-input-autoRegister"><i class="fa fa-play"></i> Auto Register</label>
-        <input type="checkbox" id="node-input-autoRegister" style="width: auto;">
     </div>
 
     <hr>
-    <h4>Quick Tool Generation</h4>
+    <h4>Editor Utilities</h4>
 
     <div class="form-row">
         <label></label>
-        <button type="button" id="generate-message-tool-btn" class="btn btn-primary" style="margin-right: 10px;">
-            <i class="fa fa-check-square-o"></i> Message Tool
+        <button type="button" id="format-json-fields-btn" class="btn btn-secondary">
+            <i class="fa fa-magic"></i> Format JSON Fields
         </button>
-        <button type="button" id="generate-calc-tool-btn" class="btn btn-primary">
-            <i class="fa fa-calculator"></i> Calculator Tool
-        </button>
+        <div class="mcp-help-text">Formats Input Schema and Output Schema. Empty Output Schema is allowed.</div>
+    </div>
+
+    <div class="form-row">
+        <label></label>
+        <div class="mcp-help-text">Tools currently register automatically on start and deploy.</div>
     </div>
 
     <style>
@@ -264,16 +201,14 @@
         <dt>Tool Name <span class="property-type">string</span></dt>
         <dd>MCP tool name. Use lowercase letters, numbers, and underscores.</dd>
         <dt>Endpoint <span class="property-type">mcp-flow-server</span></dt>
-        <dd>Optional endpoint binding. Empty makes the tool shared across all endpoints.</dd>
+        <dd>Required endpoint binding. Choose <code>Shared (All MCPs)</code> only for tools intentionally exposed on every endpoint.</dd>
         <dt>Required Scopes <span class="property-type">string</span></dt>
-        <dd>Scopes added to this tool descriptor in addition to endpoint base scopes.</dd>
+        <dd>Optional extra OAuth scopes added to this tool descriptor and enforced for tool listing and calls.</dd>
         <dt>JSON Schema <span class="property-type">JSON</span></dt>
         <dd>JSON Schema defining the tool input parameters.</dd>
         <dt>Output Schema <span class="property-type">JSON</span></dt>
         <dd>Optional JSON Schema defining the structured tool result.</dd>
-        <dt>Auto Register <span class="property-type">boolean</span></dt>
-        <dd>Register the tool when Node-RED starts.</dd>
     </dl>
     <h3>Runtime</h3>
-    <p>The registry node advertises the tool. The flow still has to return a matching <code>mcp-tool-response</code> for calls to complete.</p>
+    <p>The registry node advertises the tool automatically on start and deploy. The flow still has to return a matching <code>mcp-tool-response</code> for calls to complete.</p>
 </script>

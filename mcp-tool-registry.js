@@ -9,6 +9,11 @@ module.exports = function (RED)
         return value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
     }
 
+    function normalizeEndpoint(value)
+    {
+        return value === '__shared__' ? '' : (value || '');
+    }
+
     function endpointName(RED, endpointId)
     {
         const getNode = RED.nodes && typeof RED.nodes.getNode === 'function' ? RED.nodes.getNode.bind(RED.nodes) : null;
@@ -23,11 +28,10 @@ module.exports = function (RED)
 
         node.toolName = config.toolName || '';
         node.toolDescription = config.toolDescription || '';
-        node.endpoint = config.endpoint || '';
+        node.endpoint = normalizeEndpoint(config.endpoint);
         node.requiredScopes = parseList(config.requiredScopes || '');
         node.toolSchema = config.toolSchema || '{}';
         node.outputSchema = config.outputSchema || '';
-        node.autoRegister = config.autoRegister !== false;
         node.isRegistered = false;
 
         node.status({ fill: 'grey', shape: 'ring', text: 'unregistered' });
@@ -159,7 +163,7 @@ module.exports = function (RED)
 
                         if (msg.payload.toolName) node.toolName = msg.payload.toolName;
                         if (msg.payload.toolDescription) node.toolDescription = msg.payload.toolDescription;
-                        if (Object.prototype.hasOwnProperty.call(msg.payload, 'endpoint')) node.endpoint = msg.payload.endpoint || '';
+                        if (Object.prototype.hasOwnProperty.call(msg.payload, 'endpoint')) node.endpoint = normalizeEndpoint(msg.payload.endpoint);
                         if (Object.prototype.hasOwnProperty.call(msg.payload, 'requiredScopes')) node.requiredScopes = parseList(msg.payload.requiredScopes || '');
                         if (msg.payload.toolSchema)
                         {
@@ -222,7 +226,7 @@ module.exports = function (RED)
             }
         });
 
-        if (node.autoRegister && node.toolName) setTimeout(() => node.registerTool(), 500);
+        if (node.toolName) setTimeout(() => node.registerTool(), 500);
 
         node.on('close', function (done)
         {

@@ -10,7 +10,7 @@ Base: upstream `node-red-contrib-mcp-server@1.1.5`.
 - `mcp-flow-server` defines a logical MCP endpoint on a selected runtime and keeps the upstream request/response flow contract;
 - multiple `mcp-flow-server` nodes can share one HTTP port while serving separate endpoint paths;
 - one local port can be owned by only one `mcp-runtime` instance;
-- `mcp-tool-registry` supports optional binding to an `mcp-flow-server` endpoint node;
+- `mcp-tool-registry` requires an explicit endpoint selection, with `Shared (All MCPs)` for intentionally shared tools;
 - `mcp-tool-registry` can add per-tool required scopes to descriptor metadata;
 - optional read-only `get_flow` is available only when runtime admin settings are complete and the endpoint path matches the configured admin endpoint path;
 - `mcp-redis` defines memory or Redis-backed storage for OAuth state, authorization codes, and opaque access tokens;

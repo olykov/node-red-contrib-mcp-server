@@ -1,4 +1,4 @@
-# Node-RED MCP Server Readonly
+# Node-RED MCP Server
 
 Upstream-first fork of `node-red-contrib-mcp-server@1.1.5` for MCP tool runtimes.
 
@@ -100,7 +100,7 @@ msg.payload = { executionId, result };
 
 `mcp-flow-server` endpoint scopes and `mcp-tool-registry` required scopes are both enforced when an endpoint requires OAuth. Tool descriptors also advertise the combined scopes in `_meta.securitySchemes`.
 
-`mcp-tool-registry` can bind a tool to one endpoint. Leaving the endpoint empty exposes the tool on every endpoint in the same Node-RED runtime.
+`mcp-tool-registry` requires an explicit endpoint choice. Select a specific endpoint for endpoint-scoped tools, or select `Shared (All MCPs)` only for tools intentionally exposed on every endpoint in the same Node-RED runtime.
 
 
 Admin tools expose read-only `get_flow` only when the selected runtime has Admin Port, Admin Token, and Admin Endpoint Path configured, and the endpoint path exactly matches that Admin Endpoint Path.

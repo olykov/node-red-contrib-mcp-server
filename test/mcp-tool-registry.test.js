@@ -31,7 +31,7 @@ function buildRegistry(config = {}, nodes = {}) {
     events.on('mcp-tool-unregister', tool => emitted.push({ event: 'unregister', tool }));
     delete require.cache[require.resolve('../mcp-tool-registry')];
     require('../mcp-tool-registry')(RED);
-    const registry = new types['mcp-tool-registry'](Object.assign({ autoRegister: false }, config));
+    const registry = new types['mcp-tool-registry'](config);
     return { registry, emitted };
 }
 
@@ -72,7 +72,7 @@ describe('mcp-tool-registry', () => {
         });
     });
 
-    it('makes a tool shared when runtime update clears endpoint binding', () => {
+    it('makes a tool shared when runtime update selects the shared endpoint sentinel', () => {
         const endpoint = { id: 'endpoint-1', serverName: 'ops' };
         const { registry, emitted } = buildRegistry({
             toolName: 'read_status',
@@ -81,7 +81,7 @@ describe('mcp-tool-registry', () => {
         }, { 'endpoint-1': endpoint });
 
         registry.registerTool();
-        registry.emit('input', { topic: 'update', payload: { endpoint: '' } });
+        registry.emit('input', { topic: 'update', payload: { endpoint: '__shared__' } });
 
         assert.deepStrictEqual(emitted.map(item => item.event), ['register', 'unregister', 'register']);
         assert.strictEqual(emitted[0].tool.endpointId, 'endpoint-1');
