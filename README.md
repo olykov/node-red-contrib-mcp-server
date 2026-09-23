@@ -111,6 +111,7 @@ Admin tools expose read-only `get_flow` only when the selected runtime has Admin
 
 | Arguments | Result | Admin API read |
 | --- | --- | --- |
+| none, or `mode: "tabs"` | Paginated tab IDs, labels, disabled state and node counts | In-process runtime index |
 | `id`, or `mode: "tab_summary", id` | Groups, wired chains, key nodes, counts | `/flow/:id` |
 | `mode: "group", id, groupId` | Group members and their direct wires | `/flow/:id` |
 | `mode: "chain", id, nodeId` | Wired component containing the node | `/flow/:id` |
@@ -119,11 +120,9 @@ Admin tools expose read-only `get_flow` only when the selected runtime has Admin
 | `mode: "subflow", subflowId` | Definition and contained node index | `/flow/global` |
 | `mode: "subflow", subflowId, id` | Definition and usages on one specified tab | `/flow/global`, `/flow/:id` |
 
-Calls without a tab ID are rejected, except explicit `mode: "subflows"`. `mode: "tabs"` is not supported.
-
 Use `offset` from `meta.nextOffset` to continue a paginated response. A chain follows direct wires within one tab; link nodes expose target IDs but are not traversed into other tabs. Node details include only an allowlist of identifiers and labels. `includeCode: true` works only with `mode: "node"` and returns at most 2,000 Function code characters.
 
-`get_flow` never requests the full `/flows` export. Supply a tab ID from the Node-RED editor or another known source. Tab modes read `/flow/:id`; subflow modes read `/flow/global` and optionally the specified tab. These endpoints still make Node-RED prepare the selected flow before the palette applies its response limits. Responses cap lists at 40 items and edges at 80; Admin API reads have a 15-second timeout and a 32 MiB response limit. Graph inspection stops above 20,000 nodes or 100,000 wire visits. `meta` reports the source, scan count, returned node count and truncation.
+`get_flow` never requests the full `/flows` export. The tab index walks Node-RED's in-memory configuration once and caches only compact tab metadata until the next runtime deploy; it does not serialize or transfer full flows. `meta.cached` indicates whether the index was reused. The index excludes undeployed editor changes. Tab detail modes read `/flow/:id`; subflow modes read `/flow/global` and optionally the specified tab. These endpoints still make Node-RED prepare the selected flow before the palette applies its response limits. Responses cap lists at 40 items and edges at 80; Admin API reads have a 15-second timeout and a 32 MiB response limit. Tab indexing stops above 100,000 configuration nodes; graph inspection stops above 20,000 nodes or 100,000 wire visits. `meta` reports the source, scan count, returned node count and truncation.
 
 Protected endpoints return `401` with `WWW-Authenticate` pointing to OAuth protected-resource metadata. Access decisions combine endpoint groups, endpoint scopes, and tool scopes.
 

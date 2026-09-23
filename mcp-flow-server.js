@@ -317,7 +317,12 @@ module.exports = function (RED)
         node.adminToolsEnabled = hasAdminTools(runtime, node.serverPath);
         node.adminPort = runtime ? runtime.adminPort : 0;
         node.adminToken = runtimeAdminToken(runtime);
-        node.adminTools = createAdminTools({ adminPort: node.adminPort, getAdminToken: () => node.adminToken });
+        node.adminTools = createAdminTools({
+            adminPort: node.adminPort,
+            getAdminToken: () => node.adminToken,
+            eachNode: RED.nodes.eachNode && RED.nodes.eachNode.bind(RED.nodes),
+            events: RED.events
+        });
 
         node.httpServer = null;
         node.app = null;
@@ -645,6 +650,7 @@ module.exports = function (RED)
 
         node.on('close', function (done)
         {
+            node.adminTools.dispose();
             for (const [executionId, pending] of pendingExecutions.entries())
             {
                 if (pending.endpointId !== node.endpointId) continue;

@@ -2,9 +2,10 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const EventEmitter = require('node:events');
 const { createAdminTools } = require('../lib/admin-tools');
 
-function build(handlers) {
+function build(handlers, runtime = {}) {
     const calls = [];
     const httpRequest = async (method, hostname, port, path, headers) => {
         calls.push({ method, hostname, port, path, headers });
@@ -12,7 +13,7 @@ function build(handlers) {
         if (!handler) throw new Error('unmocked request: ' + method + ' ' + path);
         return handler({ path });
     };
-    const tools = createAdminTools({ adminPort: 1880, getAdminToken: () => 'configured-value', httpRequest });
+    const tools = createAdminTools({ adminPort: 1880, getAdminToken: () => 'configured-value', httpRequest, ...runtime });
     return { tools, calls };
 }
 
@@ -35,17 +36,77 @@ describe('lib/admin-tools', () => {
         const { tools } = build({});
         assert.deepEqual(tools.TOOLS.map(tool => tool.name), ['get_flow']);
         assert.deepEqual(tools.TOOLS[0].inputSchema.properties.mode.enum,
-            ['tab_summary', 'group', 'chain', 'node', 'subflows', 'subflow']);
+            ['tabs', 'tab_summary', 'group', 'chain', 'node', 'subflows', 'subflow']);
         assert.deepEqual(tools.TOOLS[0].outputSchema.required, ['mode', 'source', 'meta']);
         assert.ok(!tools.TOOL_NAMES.has('deploy_flow'));
     });
 
-    it('rejects tab discovery before making an Admin API request', async () => {
+    it('lists tabs from runtime with pagination and deploy-scoped caching, without HTTP', async () => {
+        const events = new EventEmitter();
+        const configs = Array.from({ length: 45 }, (_, i) => ({
+            id: 'tab' + i, type: 'tab', label: 'Tab ' + i, disabled: i === 1
+        }));
+        configs.push(
+            { id: 'n1', type: 'function', z: 'tab0', func: 'private code' },
+            { id: 'cfg', type: 'redis-config', z: 'tab0', password: 'private' },
+            { id: 'g1', type: 'group', z: 'tab44' }
+        );
+        let scans = 0;
+        const { tools, calls } = build({}, {
+            eachNode(callback) {
+                scans++;
+                for (const node of configs) callback(node);
+            },
+            events
+        });
+        const first = await tools.callTool('get_flow', {});
+        const data = first.structuredContent;
+        assert.equal(data.mode, 'tabs');
+        assert.equal(data.source, 'runtime:nodes');
+        assert.equal(data.tabs.length, 40);
+        assert.equal(data.tabs[0].nodeCount, 2);
+        assert.equal(data.tabs[1].disabled, true);
+        assert.equal(data.totalTabs, 45);
+        assert.equal(data.meta.scannedNodes, 48);
+        assert.equal(data.meta.returnedNodes, 40);
+        assert.equal(data.meta.nextOffset, 40);
+        assert.equal(data.meta.cached, false);
+        assert.ok(!JSON.stringify(first).includes('private'));
+        assert.deepEqual(JSON.parse(first.content[0].text), data);
+
+        const second = (await tools.callTool('get_flow', { mode: 'tabs', offset: 40 })).structuredContent;
+        assert.equal(second.tabs.length, 5);
+        assert.equal(second.tabs[4].nodeCount, 1);
+        assert.equal(second.meta.cached, true);
+        assert.equal(scans, 1);
+        assert.deepEqual(calls, []);
+
+        events.emit('runtime-event', { id: 'runtime-state' });
+        assert.equal((await tools.callTool('get_flow', {})).structuredContent.meta.cached, true);
+        configs.push({ id: 'n2', type: 'debug', z: 'tab0' });
+        events.emit('runtime-event', { id: 'runtime-deploy' });
+        const refreshed = (await tools.callTool('get_flow', {})).structuredContent;
+        assert.equal(refreshed.tabs[0].nodeCount, 3);
+        assert.equal(refreshed.meta.cached, false);
+        assert.equal(scans, 2);
+        tools.dispose();
+        assert.equal(events.listenerCount('runtime-event'), 0);
+    });
+
+    it('fails closed if the runtime does not support tab indexing', async () => {
         const { tools, calls } = build({});
-        for (const args of [{}, { mode: 'tabs' }]) {
-            await assert.rejects(() => tools.callTool('get_flow', args),
-                error => error.rpcCode === -32602);
-        }
+        await assert.rejects(() => tools.callTool('get_flow', {}), /tab listing is unavailable/);
+        assert.deepEqual(calls, []);
+    });
+
+    it('stops runtime tab indexing above its node cap', async () => {
+        const { tools, calls } = build({}, {
+            eachNode(callback) {
+                const node = { id: 'n1', type: 'debug', z: 'tab1' };
+                for (let i = 0; i <= 100000; i++) callback(node);
+            }
+        });
+        await assert.rejects(() => tools.callTool('get_flow', {}), /tab index node limit/);
         assert.deepEqual(calls, []);
     });
 

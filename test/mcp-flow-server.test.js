@@ -8,6 +8,7 @@ function createRuntime(config = {}) {
     const types = {};
     const events = new EventEmitter();
     const nodeMap = config.__nodes || {};
+    const flowNodes = config.__flowNodes || [];
     const RED = {
         events,
         log: { debug() {} },
@@ -27,7 +28,8 @@ function createRuntime(config = {}) {
                 node.error = e => node.errors.push(e);
             },
             registerType(name, ctor) { types[name] = ctor; },
-            getNode(id) { return nodeMap[id]; }
+            getNode(id) { return nodeMap[id]; },
+            eachNode(callback) { for (const node of flowNodes) callback(node); }
         },
         httpAdmin: { get() {} }
     };
@@ -249,6 +251,30 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.strictEqual(getFlow.outputSchema.type, 'object');
         assert.deepStrictEqual(getFlow.outputSchema.required, ['mode', 'source', 'meta']);
         assert.ok(!otherRes.body.result.tools.some(tool => tool.name === 'get_flow'));
+    });
+
+    it('passes the in-process tab iterator to the admin tool and releases its listener', async () => {
+        const flowNodes = [
+            { id: 'tab1', type: 'tab', label: 'Operations' },
+            { id: 'n1', type: 'function', z: 'tab1', func: 'private code' }
+        ];
+        const { RED, server } = buildServer({
+            id: 'admin-endpoint',
+            serverPath: '/internal/mcp/ops',
+            __flowNodes: flowNodes,
+            __runtime: {
+                adminPort: 1881,
+                adminEndpointPath: '/internal/mcp/ops',
+                credentials: { adminToken: 'configured-value' }
+            }
+        });
+        const tabs = (await server.adminTools.callTool('get_flow', {})).structuredContent;
+        assert.deepStrictEqual(tabs.tabs, [
+            { id: 'tab1', label: 'Operations', disabled: false, nodeCount: 1 }
+        ]);
+        assert.equal(RED.events.listenerCount('runtime-event'), 1);
+        await new Promise(resolve => server.emit('close', resolve));
+        assert.equal(RED.events.listenerCount('runtime-event'), 0);
     });
 
     it('does not expose admin tools without complete runtime admin config', () => {
