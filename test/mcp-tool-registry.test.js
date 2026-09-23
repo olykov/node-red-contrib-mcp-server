@@ -54,6 +54,24 @@ describe('mcp-tool-registry', () => {
         assert.deepStrictEqual(emitted[0].tool.requiredScopes, ['status:read', 'audit:read']);
     });
 
+
+
+    it('registers optional output schemas', () => {
+        const { registry, emitted } = buildRegistry({
+            toolName: 'read_status',
+            toolSchema: '{"type":"object","properties":{}}',
+            outputSchema: '{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}'
+        });
+
+        registry.registerTool();
+
+        assert.deepStrictEqual(emitted[0].tool.outputSchema, {
+            type: 'object',
+            properties: { ok: { type: 'boolean' } },
+            required: ['ok']
+        });
+    });
+
     it('makes a tool shared when runtime update clears endpoint binding', () => {
         const endpoint = { id: 'endpoint-1', serverName: 'ops' };
         const { registry, emitted } = buildRegistry({

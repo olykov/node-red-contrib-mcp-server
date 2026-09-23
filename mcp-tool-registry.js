@@ -26,6 +26,7 @@ module.exports = function (RED)
         node.endpoint = config.endpoint || '';
         node.requiredScopes = parseList(config.requiredScopes || '');
         node.toolSchema = config.toolSchema || '{}';
+        node.outputSchema = config.outputSchema || '';
         node.autoRegister = config.autoRegister !== false;
         node.isRegistered = false;
 
@@ -39,6 +40,19 @@ module.exports = function (RED)
         {
             node.warn(`Invalid tool schema JSON: ${error.message}`);
             parsedSchema = { type: 'object', properties: {}, required: [] };
+        }
+
+        let parsedOutputSchema = null;
+        if (node.outputSchema)
+        {
+            try
+            {
+                parsedOutputSchema = JSON.parse(node.outputSchema);
+            } catch (error)
+            {
+                node.warn(`Invalid output schema JSON: ${error.message}`);
+                parsedOutputSchema = null;
+            }
         }
 
         node.binding = function ()
@@ -69,6 +83,7 @@ module.exports = function (RED)
                 name: node.toolName,
                 description: node.toolDescription || `Tool: ${node.toolName}`,
                 inputSchema: parsedSchema,
+                ...(parsedOutputSchema ? { outputSchema: parsedOutputSchema } : {}),
                 endpointId: binding.endpointId,
                 serverName: binding.serverName,
                 requiredScopes: node.requiredScopes,
@@ -90,7 +105,8 @@ module.exports = function (RED)
                     endpointId: binding.endpointId,
                     serverName: binding.serverName,
                     requiredScopes: node.requiredScopes,
-                    schema: parsedSchema
+                    schema: parsedSchema,
+                    outputSchema: parsedOutputSchema
                 }
             });
         };
@@ -156,6 +172,25 @@ module.exports = function (RED)
                                 node.warn(`Invalid schema in update: ${error.message}`);
                             }
                         }
+                        if (Object.prototype.hasOwnProperty.call(msg.payload, 'outputSchema'))
+                        {
+                            const nextOutputSchema = msg.payload.outputSchema || '';
+                            if (!nextOutputSchema)
+                            {
+                                parsedOutputSchema = null;
+                                node.outputSchema = '';
+                            } else
+                            {
+                                try
+                                {
+                                    parsedOutputSchema = JSON.parse(nextOutputSchema);
+                                    node.outputSchema = nextOutputSchema;
+                                } catch (error)
+                                {
+                                    node.warn(`Invalid output schema in update: ${error.message}`);
+                                }
+                            }
+                        }
                         if (node.isRegistered)
                         {
                             RED.events.emit('mcp-tool-unregister', { name: previousToolName, endpointId: previousBinding.endpointId, serverName: previousBinding.serverName });
@@ -175,7 +210,8 @@ module.exports = function (RED)
                             endpointId: binding.endpointId,
                             serverName: binding.serverName,
                             requiredScopes: node.requiredScopes,
-                            schema: parsedSchema
+                            schema: parsedSchema,
+                            outputSchema: parsedOutputSchema
                         };
                         node.send(msg);
                     }

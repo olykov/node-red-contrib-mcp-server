@@ -89,6 +89,23 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.deepStrictEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['openid', 'profile', 'email'] }]);
     });
 
+
+
+    it('advertises registered tool output schemas', () => {
+        const { RED, server } = buildServer();
+        RED.events.emit('mcp-tool-register', {
+            name: 'sample_summary',
+            description: 'Sample summary',
+            inputSchema: { type: 'object', properties: { date: { type: 'string' } } },
+            outputSchema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }
+        });
+
+        const res = mockRes();
+        server.handleToolsList({ id: 1 }, res);
+        const tool = res.body.result.tools.find(t => t.name === 'sample_summary');
+        assert.deepStrictEqual(tool.outputSchema, { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] });
+    });
+
     it('requires an explicit runtime config node before starting', () => {
         const runtime = createRuntime({ runtime: '' });
 

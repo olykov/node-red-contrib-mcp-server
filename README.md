@@ -52,13 +52,13 @@ From a Git reference:
 
 ```bash
 cd ~/.node-red
-npm install git+ssh://git@example.com/org/node-red-contrib-mcp-server-readonly.git#<commit>
+npm install git+ssh://git@example.com/org/node-red-contrib-mcp-server.git#<commit>
 ```
 
 For local development:
 
 ```bash
-cd /path/to/node-red-contrib-mcp-server-readonly
+cd /path/to/node-red-contrib-mcp-server
 npm install
 npm test
 npm link

@@ -1,7 +1,7 @@
 {
-  "name": "node-red-contrib-mcp-server-readonly",
+  "name": "node-red-contrib-mcp-server",
   "version": "2.0.0-upstream.1",
-  "description": "Upstream-first Node-RED MCP package with read-oriented local extensions.",
+  "description": "Upstream-first Node-RED palette for exposing flows as MCP servers and tools.",
   "main": "mcp-server.js",
   "scripts": {
     "test": "node --test",

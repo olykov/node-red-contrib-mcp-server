@@ -413,7 +413,12 @@ module.exports = function (RED)
 
         node.toolDescriptor = function (tool)
         {
-            return withSecurityMeta({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema }, node.toolScopes(tool), tool._meta);
+            return withSecurityMeta({
+                name: tool.name,
+                description: tool.description,
+                inputSchema: tool.inputSchema,
+                ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {})
+            }, node.toolScopes(tool), tool._meta);
         };
 
         node.handleToolsList = function (request, res, authClaims)

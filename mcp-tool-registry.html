@@ -9,6 +9,7 @@
             endpoint: { value: '', required: false },
             requiredScopes: { value: '' },
             toolSchema: { value: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}' },
+            outputSchema: { value: '' },
             autoRegister: { value: true }
         },
         inputs: 1,
@@ -76,29 +77,54 @@
                 }
             });
 
-            $('#node-input-toolSchema').on('blur', function() {
-                var schema = $(this).val();
+            function validateSchemaField(selector, validationSelector, allowEmpty) {
+                var schema = $(selector).val();
+                if (allowEmpty && !schema.trim()) {
+                    $(selector).removeClass('input-error');
+                    $(validationSelector).hide();
+                    return;
+                }
                 try {
                     var parsed = JSON.parse(schema);
-                    $(this).removeClass('input-error');
-                    $('#schema-validation').hide();
+                    $(selector).removeClass('input-error');
+                    $(validationSelector).hide();
                     if (!parsed.type || !parsed.properties) {
-                        $('#schema-validation').show().css('color', '#f39c12').text("Warning: schema should have 'type' and 'properties' fields");
+                        $(validationSelector).show().css('color', '#f39c12').text("Warning: schema should have 'type' and 'properties' fields");
                     }
                 } catch (error) {
-                    $(this).addClass('input-error');
-                    $('#schema-validation').show().css('color', '#e74c3c').text('Invalid JSON: ' + error.message);
+                    $(selector).addClass('input-error');
+                    $(validationSelector).show().css('color', '#e74c3c').text('Invalid JSON: ' + error.message);
                 }
+            }
+
+            $('#node-input-toolSchema').on('blur', function() {
+                validateSchemaField('#node-input-toolSchema', '#schema-validation', false);
             });
 
-            $('#format-schema-btn').click(function() {
-                var schema = $('#node-input-toolSchema').val();
+            $('#node-input-outputSchema').on('blur', function() {
+                validateSchemaField('#node-input-outputSchema', '#output-schema-validation', true);
+            });
+
+            function formatJsonField(selector, label, allowEmpty) {
+                var schema = $(selector).val();
+                if (allowEmpty && !schema.trim()) {
+                    RED.notify(label + ' is empty', 'success');
+                    return;
+                }
                 try {
-                    $('#node-input-toolSchema').val(JSON.stringify(JSON.parse(schema), null, 2));
-                    RED.notify('Schema formatted', 'success');
+                    $(selector).val(JSON.stringify(JSON.parse(schema), null, 2));
+                    RED.notify(label + ' formatted', 'success');
                 } catch (error) {
                     RED.notify('Invalid JSON: ' + error.message, 'error');
                 }
+            }
+
+            $('#format-schema-btn').click(function() {
+                formatJsonField('#node-input-toolSchema', 'Schema', false);
+            });
+
+            $('#format-output-schema-btn').click(function() {
+                formatJsonField('#node-input-outputSchema', 'Output schema', true);
             });
 
             $('#generate-message-tool-btn').click(function() {
@@ -183,6 +209,19 @@
         </button>
     </div>
 
+    <hr>
+    <h4>Output Schema</h4>
+
+    <div class="form-row">
+        <label for="node-input-outputSchema"><i class="fa fa-code"></i> Output Schema</label>
+        <textarea id="node-input-outputSchema" rows="8" placeholder='{"type": "object", "properties": {}}'></textarea>
+        <div class="mcp-help-text">Optional JSON Schema for structured tool results.</div>
+        <div id="output-schema-validation" class="mcp-validation"></div>
+        <button type="button" id="format-output-schema-btn" class="btn btn-secondary mcp-button-row">
+            <i class="fa fa-magic"></i> Format Output JSON
+        </button>
+    </div>
+
     <div class="form-row">
         <label for="node-input-autoRegister"><i class="fa fa-play"></i> Auto Register</label>
         <input type="checkbox" id="node-input-autoRegister" style="width: auto;">
@@ -230,6 +269,8 @@
         <dd>Scopes added to this tool descriptor in addition to endpoint base scopes.</dd>
         <dt>JSON Schema <span class="property-type">JSON</span></dt>
         <dd>JSON Schema defining the tool input parameters.</dd>
+        <dt>Output Schema <span class="property-type">JSON</span></dt>
+        <dd>Optional JSON Schema defining the structured tool result.</dd>
         <dt>Auto Register <span class="property-type">boolean</span></dt>
         <dd>Register the tool when Node-RED starts.</dd>
     </dl>
