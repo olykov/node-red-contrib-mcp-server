@@ -247,7 +247,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         const getFlow = adminRes.body.result.tools.find(tool => tool.name === 'get_flow');
         assert.ok(getFlow);
         assert.strictEqual(getFlow.outputSchema.type, 'object');
-        assert.deepStrictEqual(getFlow.outputSchema.required, ['mode']);
+        assert.deepStrictEqual(getFlow.outputSchema.required, ['mode', 'source', 'meta']);
         assert.ok(!otherRes.body.result.tools.some(tool => tool.name === 'get_flow'));
     });
 

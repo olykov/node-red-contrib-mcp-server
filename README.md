@@ -105,6 +105,25 @@ msg.payload = { executionId, result };
 
 Admin tools expose read-only `get_flow` only when the selected runtime has Admin Port, Admin Token, and Admin Endpoint Path configured, and the endpoint path exactly matches that Admin Endpoint Path.
 
+### Inspecting Node-RED flows
+
+`get_flow` returns compact `structuredContent` and a matching text result. It never returns a raw tab export.
+
+| Arguments | Result | Admin API read |
+| --- | --- | --- |
+| none, or `mode: "tabs"` | Paginated tab index with node counts | `/flows` |
+| `id`, or `mode: "tab_summary", id` | Groups, wired chains, key nodes, counts | `/flow/:id` |
+| `mode: "group", id, groupId` | Group members and their direct wires | `/flow/:id` |
+| `mode: "chain", id, nodeId` | Wired component containing the node | `/flow/:id` |
+| `mode: "node", id, nodeId` | Selected node and direct incoming/outgoing wires | `/flow/:id` |
+| `mode: "subflows"` | Definition index | `/flow/global` |
+| `mode: "subflow", subflowId` | Definition and contained node index | `/flow/global` |
+| `mode: "subflow", subflowId, id` | Definition and usages on one specified tab | `/flow/global`, `/flow/:id` |
+
+Use `offset` from `meta.nextOffset` to continue a paginated response. A chain follows direct wires within one tab; link nodes expose target IDs but are not traversed into other tabs. Node details include only an allowlist of identifiers and labels. `includeCode: true` works only with `mode: "node"` and returns at most 2,000 Function code characters.
+
+The standard Node-RED Admin API has no tab-index-only endpoint, so `tabs` reads `/flows`. A 60-second per-endpoint cache avoids repeated full reads; `meta.cached` states whether the cache was used. All other modes read only their named tab or `global`. Responses cap lists at 40 items and edges at 80; Admin API reads have a 15-second timeout and a 32 MiB response limit. Graph inspection stops above 20,000 nodes or 100,000 wire visits. `meta` reports the source, scan count, returned node count and truncation.
+
 Protected endpoints return `401` with `WWW-Authenticate` pointing to OAuth protected-resource metadata. Access decisions combine endpoint groups, endpoint scopes, and tool scopes.
 
 The authorization endpoint requires PKCE S256, validates the client metadata host allow-list, checks the exact redirect URI against the client metadata document, delegates login to the configured OIDC issuer, validates the returned ID token through JWKS, and issues short-lived opaque MCP access tokens.
