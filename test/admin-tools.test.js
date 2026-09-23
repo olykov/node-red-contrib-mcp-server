@@ -35,30 +35,18 @@ describe('lib/admin-tools', () => {
         const { tools } = build({});
         assert.deepEqual(tools.TOOLS.map(tool => tool.name), ['get_flow']);
         assert.deepEqual(tools.TOOLS[0].inputSchema.properties.mode.enum,
-            ['tabs', 'tab_summary', 'group', 'chain', 'node', 'subflows', 'subflow']);
+            ['tab_summary', 'group', 'chain', 'node', 'subflows', 'subflow']);
         assert.deepEqual(tools.TOOLS[0].outputSchema.required, ['mode', 'source', 'meta']);
         assert.ok(!tools.TOOL_NAMES.has('deploy_flow'));
     });
 
-    it('lists tabs in one pass, pages results and caches the expensive read', async () => {
-        const all = Array.from({ length: 45 }, (_, i) => ({
-            id: 'tab' + i, type: 'tab', label: 'Tab ' + i
-        }));
-        all.push({ id: 'n1', type: 'function', z: 'tab0', func: 'private code' });
-        const { tools, calls } = build({ 'GET /flows': () => ({ status: 200, body: { rev: '1', flows: all } }) });
-        const first = await tools.callTool('get_flow', {});
-        assert.equal(first.structuredContent.mode, 'tabs');
-        assert.equal(first.structuredContent.tabs.length, 40);
-        assert.equal(first.structuredContent.tabs[0].nodeCount, 1);
-        assert.equal(first.structuredContent.meta.scannedNodes, 46);
-        assert.equal(first.structuredContent.meta.nextOffset, 40);
-        assert.equal(first.structuredContent.meta.cached, false);
-        assert.ok(!JSON.stringify(first).includes('private code'));
-        const second = await tools.callTool('get_flow', { mode: 'tabs', offset: 40 });
-        assert.equal(second.structuredContent.tabs.length, 5);
-        assert.equal(second.structuredContent.meta.cached, true);
-        assert.equal(calls.length, 1);
-        assert.deepEqual(JSON.parse(first.content[0].text), first.structuredContent);
+    it('rejects tab discovery before making an Admin API request', async () => {
+        const { tools, calls } = build({});
+        for (const args of [{}, { mode: 'tabs' }]) {
+            await assert.rejects(() => tools.callTool('get_flow', args),
+                error => error.rpcCode === -32602);
+        }
+        assert.deepEqual(calls, []);
     });
 
     it('summarizes one tab without returning raw configuration', async () => {
@@ -177,10 +165,10 @@ describe('lib/admin-tools', () => {
 
     it('sends only GET requests to loopback admin API with the configured token', async () => {
         delete process.env.NODE_RED_ADMIN_API_TOKEN;
-        const { tools, calls } = build({ 'GET /flows': () => ({ status: 200, body: [] }) });
-        await tools.callTool('get_flow', {});
+        const { tools, calls } = build({ 'GET /flow/tab1': () => ({ status: 200, body: tab }) });
+        await tools.callTool('get_flow', { id: 'tab1' });
         assert.deepEqual(calls[0], {
-            method: 'GET', hostname: '127.0.0.1', port: 1880, path: '/flows',
+            method: 'GET', hostname: '127.0.0.1', port: 1880, path: '/flow/tab1',
             headers: { Authorization: 'Bearer configured-value' }
         });
     });
