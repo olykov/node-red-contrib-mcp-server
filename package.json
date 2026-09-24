@@ -28,6 +28,7 @@
       "mcp-auth": "mcp-auth.js",
       "mcp-tool": "mcp-tool.js",
       "mcp-flow-server": "mcp-flow-server.js",
+      "mcp-server-metrics": "mcp-server-metrics.js",
       "mcp-tool-registry": "mcp-tool-registry.js"
     }
   },

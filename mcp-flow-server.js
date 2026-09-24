@@ -291,6 +291,39 @@ module.exports = function (RED)
         node.adminPort = Number(config.adminPort || 1880);
         node.adminToken = (node.credentials && node.credentials.adminToken) || '';
         node.adminEndpointPath = config.adminEndpointPath ? normalizePath(config.adminEndpointPath) : '';
+        let adminTelemetryListener = null;
+        let telemetryWarningShown = false;
+
+        node.subscribeAdminTelemetry = function (listener)
+        {
+            if (adminTelemetryListener) return null;
+            adminTelemetryListener = listener;
+            return function ()
+            {
+                if (adminTelemetryListener === listener) adminTelemetryListener = null;
+            };
+        };
+
+        node.publishAdminTelemetry = function (event)
+        {
+            if (!adminTelemetryListener) return;
+            try
+            {
+                adminTelemetryListener(event);
+            } catch
+            {
+                if (!telemetryWarningShown)
+                {
+                    telemetryWarningShown = true;
+                    node.warn('MCP admin telemetry subscriber failed');
+                }
+            }
+        };
+
+        node.on('close', function ()
+        {
+            adminTelemetryListener = null;
+        });
     }
 
     function MCPFlowServerNode(config)
@@ -490,6 +523,10 @@ module.exports = function (RED)
                         scannedNodes: meta && Number.isSafeInteger(meta.scannedNodes) ? meta.scannedNodes : null,
                         cached: meta && typeof meta.cached === 'boolean' ? meta.cached : null
                     };
+                    if (node.runtime && node.runtime.publishAdminTelemetry)
+                    {
+                        node.runtime.publishAdminTelemetry({ endpoint: node.serverName, ...telemetry });
+                    }
                     try
                     {
                         node.send([null, { topic: 'mcp-admin-telemetry', payload: telemetry }]);

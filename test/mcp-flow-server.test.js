@@ -37,6 +37,7 @@ function createRuntime(config = {}) {
     };
     delete require.cache[require.resolve('../mcp-flow-server')];
     require('../mcp-flow-server')(RED);
+    require('../mcp-server-metrics')(RED);
     const runtimeConfig = Object.assign({
         id: 'runtime-1',
         runtimeName: 'test-runtime',
@@ -322,6 +323,106 @@ describe('upstream mcp-flow-server local extensions', () => {
             assert.ok(!JSON.stringify(metric).includes('private code'));
             assert.ok(!JSON.stringify(metric).includes('configured-value'));
         }
+    });
+
+    it('publishes admin telemetry through a metrics source without changing the MCP response', async () => {
+        const { server, runtimeNode, types } = buildServer({
+            serverName: 'ops',
+            serverPath: '/internal/mcp/ops',
+            __flowNodes: [{ id: 'tab1', type: 'tab', label: 'Operations' }],
+            __runtime: {
+                adminPort: 1881,
+                adminEndpointPath: '/internal/mcp/ops',
+                credentials: { adminToken: 'configured-value' }
+            }
+        });
+        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const response = mockRes();
+        await server.handleToolCall({ id: 1, params: { name: 'get_flow', arguments: {} } }, response);
+
+        assert.equal(response.body.result.structuredContent.totalTabs, 1);
+        assert.equal(metrics.sent.length, 1);
+        assert.equal(metrics.sent[0].topic, 'mcp-admin-telemetry');
+        assert.deepStrictEqual(Object.keys(metrics.sent[0].payload).sort(), [
+            'cached', 'durationMs', 'endpoint', 'mode', 'responseBytes', 'scannedNodes', 'status', 'tool'
+        ]);
+        assert.equal(metrics.sent[0].payload.endpoint, 'ops');
+        assert.equal(metrics.sent[0].payload.tool, 'get_flow');
+        assert.equal(metrics.sent[0].payload.status, 'success');
+        assert.equal(server.sent[0][0], null);
+        assert.equal(server.sent[0][1].topic, 'mcp-admin-telemetry');
+        assert.ok(!JSON.stringify(metrics.sent[0]).includes('configured-value'));
+    });
+
+    it('forwards failed admin telemetry without request arguments', async () => {
+        const { server, runtimeNode, types } = buildServer({
+            serverPath: '/internal/mcp/ops',
+            __runtime: {
+                adminPort: 1881,
+                adminEndpointPath: '/internal/mcp/ops',
+                credentials: { adminToken: 'configured-value' }
+            }
+        });
+        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const response = mockRes();
+        await server.handleToolCall({
+            id: 1,
+            params: { name: 'get_flow', arguments: { mode: 'private-request-value' } }
+        }, response);
+
+        assert.equal(response.body.error.code, -32602);
+        assert.equal(metrics.sent.length, 1);
+        assert.equal(metrics.sent[0].payload.status, 'failed');
+        assert.equal(metrics.sent[0].payload.mode, 'unknown');
+        assert.ok(!JSON.stringify(metrics.sent[0]).includes('private-request-value'));
+    });
+
+    it('allows only one metrics source per runtime and releases its subscription on close', () => {
+        const { runtimeNode, types } = buildServer();
+        const first = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const duplicate = new types['mcp-server-metrics']({ id: 'metrics-2', runtime: runtimeNode.id });
+        assert.deepStrictEqual(duplicate.errors, ['Only one MCP Server Metrics node is allowed per runtime']);
+
+        runtimeNode.publishAdminTelemetry({ tool: 'get_flow' });
+        assert.equal(first.sent.length, 1);
+        assert.equal(duplicate.sent.length, 0);
+
+        first.emit('close');
+        const replacement = new types['mcp-server-metrics']({ id: 'metrics-3', runtime: runtimeNode.id });
+        runtimeNode.publishAdminTelemetry({ tool: 'get_flow' });
+        assert.equal(first.sent.length, 1);
+        assert.equal(replacement.sent.length, 1);
+
+        runtimeNode.emit('close');
+        runtimeNode.publishAdminTelemetry({ tool: 'get_flow' });
+        assert.equal(replacement.sent.length, 1);
+    });
+
+    it('reports a missing metrics runtime without subscribing', () => {
+        const { types } = buildServer();
+        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: 'missing' });
+        assert.deepStrictEqual(metrics.errors, ['MCP runtime is required for metrics']);
+        assert.equal(metrics.sent.length, 0);
+    });
+
+    it('keeps MCP responses available if the metrics source fails', async () => {
+        const { server, runtimeNode, types } = buildServer({
+            serverPath: '/internal/mcp/ops',
+            __flowNodes: [{ id: 'tab1', type: 'tab', label: 'Operations' }],
+            __runtime: {
+                adminPort: 1881,
+                adminEndpointPath: '/internal/mcp/ops',
+                credentials: { adminToken: 'configured-value' }
+            }
+        });
+        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        metrics.send = () => { throw new Error('metrics unavailable'); };
+        const response = mockRes();
+        await server.handleToolCall({ id: 1, params: { name: 'get_flow', arguments: {} } }, response);
+        await server.handleToolCall({ id: 2, params: { name: 'get_flow', arguments: {} } }, mockRes());
+
+        assert.equal(response.body.result.structuredContent.totalTabs, 1);
+        assert.deepStrictEqual(runtimeNode.warnings, ['MCP admin telemetry subscriber failed']);
     });
 
     it('emits failed admin telemetry without changing the error response', async () => {
