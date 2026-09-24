@@ -450,11 +450,16 @@ module.exports = function (RED)
             const params = request.params || {};
             const name = params.name;
             const args = params.arguments || {};
+            const adminTool = node.adminToolsEnabled && node.adminTools.TOOL_NAMES.has(name);
+            const started = adminTool ? process.hrtime.bigint() : null;
+            let adminResult;
+            let adminStatus = 'failed';
             try
             {
-                if (node.adminToolsEnabled && node.adminTools.TOOL_NAMES.has(name))
+                if (adminTool)
                 {
-                    const adminResult = await node.adminTools.callTool(name, args);
+                    adminResult = await node.adminTools.callTool(name, args);
+                    adminStatus = adminResult.isError ? 'failed' : 'success';
                     return res.json({ jsonrpc: '2.0', id: request.id, result: normalizeToolResult(adminResult) });
                 }
                 const tool = node.registeredTools().find(candidate => candidate.name === name);
@@ -467,7 +472,36 @@ module.exports = function (RED)
                 res.json({ jsonrpc: '2.0', id: request.id, result: normalizeToolResult(result) });
             } catch (error)
             {
+                if (adminTool) adminStatus = 'failed';
                 node.rpcError(res, request.id, error.rpcCode || -32603, error.message);
+            }
+            finally
+            {
+                if (adminTool)
+                {
+                    const meta = adminResult && adminResult.structuredContent && adminResult.structuredContent.meta;
+                    const length = typeof res.getHeader === 'function' ? Number(res.getHeader('content-length')) : NaN;
+                    const telemetry = {
+                        tool: name,
+                        mode: adminResult && adminResult.structuredContent ? adminResult.structuredContent.mode : 'unknown',
+                        status: adminStatus,
+                        durationMs: Number(process.hrtime.bigint() - started) / 1e6,
+                        responseBytes: Number.isSafeInteger(length) && length >= 0 ? length : null,
+                        scannedNodes: meta && Number.isSafeInteger(meta.scannedNodes) ? meta.scannedNodes : null,
+                        cached: meta && typeof meta.cached === 'boolean' ? meta.cached : null
+                    };
+                    try
+                    {
+                        node.send([null, { topic: 'mcp-admin-telemetry', payload: telemetry }]);
+                    } catch
+                    {
+                        if (!node.telemetryWarningShown)
+                        {
+                            node.telemetryWarningShown = true;
+                            node.warn('MCP admin telemetry output failed');
+                        }
+                    }
+                }
             }
         };
 

@@ -96,6 +96,8 @@ msg.payload = { executionId, result };
 
 `result` can be a standard MCP result object. Plain strings and plain objects are normalized into text responses.
 
+The first `mcp-flow-server` output keeps tool execution and status messages. The second output emits one `mcp-admin-telemetry` message per admin tool call for optional flow-based metrics. Its payload contains `tool`, `mode`, `status` (`success` or `failed`), `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. Duration covers server-side tool execution and response serialization, not client network time. Response bytes cover the MCP JSON response body when a Content-Length header is available; unavailable values are `null`. No tool arguments, node IDs, flow content, or credentials are emitted. An unwired second output does not change MCP responses.
+
 ## Configuration Notes
 
 `mcp-flow-server` endpoint scopes and `mcp-tool-registry` required scopes are both enforced when an endpoint requires OAuth. Tool descriptors also advertise the combined scopes in `_meta.securitySchemes`.
