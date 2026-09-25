@@ -255,15 +255,21 @@ module.exports = function (RED)
                                 requestFormat: {
                                     topic: "request",
                                     payload: {
-                                        method: "tool_name_here",
-                                        params: "tool_parameters_object"
+                                        method: "tools/call",
+                                        params: {
+                                            name: "tool_name_here",
+                                            arguments: {}
+                                        }
                                     }
                                 },
                                 exampleCall: tools.length > 0 ? {
                                     topic: "request",
                                     payload: {
-                                        method: tools[0].name,
-                                        params: node.generateExampleParams(tools[0].inputSchema)
+                                        method: "tools/call",
+                                        params: {
+                                            name: tools[0].name,
+                                            arguments: node.generateExampleParams(tools[0].inputSchema)
+                                        }
                                     }
                                 } : null
                             }

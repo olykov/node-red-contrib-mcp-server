@@ -8,7 +8,7 @@
         },
         inputs: 0,
         outputs: 1,
-        outputLabels: 'Admin tool telemetry',
+        outputLabels: 'Tool telemetry',
         icon: 'font-awesome/fa-line-chart',
         label: function() {
             return this.name || 'MCP Server Metrics';
@@ -31,7 +31,7 @@
 </script>
 
 <script type="text/html" data-help-name="mcp-server-metrics">
-    <p>Emits one message after each admin tool call on the selected MCP runtime. Use one metrics node per runtime.</p>
-    <p>The output message has topic <code>mcp-admin-telemetry</code>. Its payload contains the configured endpoint name, bounded admin tool name and mode, status, duration in milliseconds, response bytes, scanned node count, and cache state. It does not contain tool arguments, responses, credentials, or flow content.</p>
+    <p>Emits one message after each tool call on the selected MCP runtime, including failed calls. Use one metrics node per runtime.</p>
+    <p>The output message has topic <code>mcp-tool-telemetry</code>. Its payload contains the endpoint name, known tool name (or <code>unknown</code>), mode, status, duration in milliseconds, response bytes, and optional admin-tool scan and cache data. It does not contain tool arguments, responses, credentials, or flow content.</p>
     <p>Connect this output to metric writer nodes. This node does not poll the server or expose a metrics endpoint.</p>
 </script>

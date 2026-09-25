@@ -325,7 +325,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         }
     });
 
-    it('publishes admin telemetry through a metrics source without changing the MCP response', async () => {
+    it('publishes admin calls through the runtime metrics source without changing the MCP response', async () => {
         const { server, runtimeNode, types } = buildServer({
             serverName: 'ops',
             serverPath: '/internal/mcp/ops',
@@ -342,7 +342,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
         assert.equal(response.body.result.structuredContent.totalTabs, 1);
         assert.equal(metrics.sent.length, 1);
-        assert.equal(metrics.sent[0].topic, 'mcp-admin-telemetry');
+        assert.equal(metrics.sent[0].topic, 'mcp-tool-telemetry');
         assert.deepStrictEqual(Object.keys(metrics.sent[0].payload).sort(), [
             'cached', 'durationMs', 'endpoint', 'mode', 'responseBytes', 'scannedNodes', 'status', 'tool'
         ]);
@@ -377,24 +377,205 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.ok(!JSON.stringify(metrics.sent[0]).includes('private-request-value'));
     });
 
+    it('emits one bounded runtime event for a flow tool call', async () => {
+        const { RED, server, runtimeNode, types } = buildServer();
+        RED.events.emit('mcp-tool-register', {
+            name: 'sample_ping',
+            description: 'Sample',
+            inputSchema: { type: 'object', properties: {} }
+        });
+        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const response = mockRes();
+        const pending = server.handleMcpHttpRequest(mockReq({
+            jsonrpc: '2.0', id: 1, method: 'tools/call',
+            params: { name: 'sample_ping', arguments: { secret: 'private-argument' } }
+        }), response);
+        await new Promise(resolve => setImmediate(resolve));
+        const execution = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
+        server.emit('input', {
+            topic: 'mcp-tool-response',
+            payload: { executionId: execution.payload.executionId, result: { secret: 'private-result' } }
+        });
+        await pending;
+
+        assert.equal(response.body.result.content[0].text, JSON.stringify({ secret: 'private-result' }));
+        assert.equal(metrics.sent.length, 1);
+        assert.equal(metrics.sent[0].topic, 'mcp-tool-telemetry');
+        assert.deepStrictEqual(Object.keys(metrics.sent[0].payload).sort(), [
+            'cached', 'durationMs', 'endpoint', 'mode', 'responseBytes', 'scannedNodes', 'status', 'tool'
+        ]);
+        assert.deepStrictEqual({
+            endpoint: metrics.sent[0].payload.endpoint,
+            tool: metrics.sent[0].payload.tool,
+            mode: metrics.sent[0].payload.mode,
+            status: metrics.sent[0].payload.status,
+            responseBytes: metrics.sent[0].payload.responseBytes,
+            scannedNodes: metrics.sent[0].payload.scannedNodes,
+            cached: metrics.sent[0].payload.cached
+        }, {
+            endpoint: 'test', tool: 'sample_ping', mode: 'flow', status: 'success',
+            responseBytes: Buffer.byteLength(JSON.stringify(response.body)),
+            scannedNodes: null, cached: null
+        });
+        assert.ok(metrics.sent[0].payload.durationMs >= 0);
+        assert.ok(!JSON.stringify(metrics.sent[0]).includes('private-argument'));
+        assert.ok(!JSON.stringify(metrics.sent[0]).includes('private-result'));
+        assert.equal(server.sent.filter(Array.isArray).length, 0);
+    });
+
+    it('tracks flow errors and rejects legacy direct calls', async () => {
+        const { RED, server, runtimeNode, types } = buildServer();
+        RED.events.emit('mcp-tool-register', {
+            name: 'sample_tool',
+            description: 'Sample',
+            inputSchema: { type: 'object', properties: {} }
+        });
+        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        server.executeToolFlow = async () => ({
+            isError: true, content: [{ type: 'text', text: 'private-failure' }]
+        });
+        const failed = mockRes();
+        await server.handleMcpHttpRequest(mockReq({
+            jsonrpc: '2.0', id: 1, method: 'tools/call',
+            params: { name: 'sample_tool', arguments: {} }
+        }), failed);
+        assert.equal(failed.body.result.isError, true);
+        assert.deepStrictEqual(metrics.sent[0].payload.tool, 'sample_tool');
+        assert.equal(metrics.sent[0].payload.status, 'failed');
+
+        const unknown = mockRes();
+        await server.handleMcpHttpRequest(mockReq({
+            jsonrpc: '2.0', id: 2, method: 'tools/call',
+            params: { name: 'unbounded-private-tool-name', arguments: {} }
+        }), unknown);
+        assert.equal(unknown.body.error.code, -32602);
+        assert.equal(metrics.sent[1].payload.tool, 'unknown');
+        assert.equal(metrics.sent[1].payload.status, 'failed');
+
+        let executed = false;
+        server.executeToolFlow = async () => {
+            executed = true;
+            return { ok: true };
+        };
+        const direct = mockRes();
+        await server.handleMcpHttpRequest(mockReq({
+            jsonrpc: '2.0', id: 3, method: 'sample_tool', params: {}
+        }), direct);
+        assert.equal(direct.body.error.code, -32601);
+        assert.equal(executed, false);
+        assert.equal(metrics.sent.length, 2);
+        assert.ok(!JSON.stringify(metrics.sent).includes('unbounded-private-tool-name'));
+        assert.ok(!JSON.stringify(metrics.sent).includes('private-failure'));
+    });
+
+    it('tracks authentication and tool-scope denials without executing the tool', async () => {
+        const authNode = {
+            id: 'auth-1',
+            enabled: true,
+            baseScopes: 'openid profile email',
+            readAccessToken: async () => ({
+                resource: 'https://mcp.example.test/mcp/test',
+                scopes: ['resource:read'],
+                groups: ['team-a']
+            })
+        };
+        const { RED, server, runtimeNode, types } = buildServer({
+            auth: 'auth-1',
+            authMode: 'oauth',
+            requiredScopes: 'resource:read',
+            allowedGroups: 'team-a',
+            __nodes: { 'auth-1': authNode },
+            __runtime: { publicBaseUrl: 'https://mcp.example.test' }
+        });
+        RED.events.emit('mcp-tool-register', {
+            name: 'write_tool',
+            description: 'Write',
+            requiredScopes: ['tool:write'],
+            inputSchema: { type: 'object', properties: {} }
+        });
+        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'write_tool', arguments: {} } };
+
+        const unauthenticated = mockRes();
+        await server.handleMcpHttpRequest(mockReq(request), unauthenticated);
+        assert.equal(unauthenticated.statusCode, 401);
+        assert.equal(metrics.sent[0].payload.tool, 'unknown');
+        assert.equal(metrics.sent[0].payload.status, 'failed');
+
+        const forbidden = mockRes();
+        await server.handleMcpHttpRequest(mockReq(request, { authorization: 'Bearer scoped-token' }), forbidden);
+        assert.equal(forbidden.statusCode, 403);
+        assert.equal(metrics.sent[1].payload.tool, 'write_tool');
+        assert.equal(metrics.sent[1].payload.status, 'failed');
+        assert.equal(metrics.sent.length, 2);
+        assert.equal(server.sent.length, 0);
+    });
+
+    it('tracks a flow tool execution rejection without changing the RPC error', async () => {
+        const { RED, server, runtimeNode, types } = buildServer();
+        RED.events.emit('mcp-tool-register', {
+            name: 'sample_ping',
+            description: 'Sample',
+            inputSchema: { type: 'object', properties: {} }
+        });
+        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        server.executeToolFlow = async () => { throw new Error('Tool execution timeout'); };
+        const response = mockRes();
+        await server.handleMcpHttpRequest(mockReq({
+            jsonrpc: '2.0', id: 1, method: 'tools/call',
+            params: { name: 'sample_ping', arguments: {} }
+        }), response);
+        assert.equal(response.body.error.message, 'Tool execution timeout');
+        assert.equal(metrics.sent.length, 1);
+        assert.equal(metrics.sent[0].payload.tool, 'sample_ping');
+        assert.equal(metrics.sent[0].payload.status, 'failed');
+    });
+
+    it('collects tool calls from every endpoint on the selected runtime', async () => {
+        const runtime = createRuntime({ id: 'endpoint-a', serverName: 'alpha' });
+        const serverB = new runtime.types['mcp-flow-server']({
+            id: 'endpoint-b',
+            runtime: runtime.runtimeNode.id,
+            serverName: 'beta',
+            serverPath: '/mcp/b'
+        });
+        runtime.RED.events.emit('mcp-tool-register', {
+            name: 'shared_ping',
+            description: 'Shared',
+            inputSchema: { type: 'object', properties: {} }
+        });
+        const metrics = new runtime.types['mcp-server-metrics']({
+            id: 'metrics-1', runtime: runtime.runtimeNode.id
+        });
+        runtime.server.executeToolFlow = async () => ({ ok: true });
+        serverB.executeToolFlow = async () => ({ ok: true });
+        const request = { id: 1, params: { name: 'shared_ping', arguments: {} } };
+
+        await runtime.server.handleToolCall(request, mockRes());
+        await serverB.handleToolCall(request, mockRes());
+
+        assert.deepStrictEqual(metrics.sent.map(msg => msg.payload.endpoint), ['alpha', 'beta']);
+        assert.deepStrictEqual(metrics.sent.map(msg => msg.payload.tool), ['shared_ping', 'shared_ping']);
+    });
+
     it('allows only one metrics source per runtime and releases its subscription on close', () => {
         const { runtimeNode, types } = buildServer();
         const first = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         const duplicate = new types['mcp-server-metrics']({ id: 'metrics-2', runtime: runtimeNode.id });
         assert.deepStrictEqual(duplicate.errors, ['Only one MCP Server Metrics node is allowed per runtime']);
 
-        runtimeNode.publishAdminTelemetry({ tool: 'get_flow' });
+        runtimeNode.publishToolTelemetry({ tool: 'get_flow' });
         assert.equal(first.sent.length, 1);
         assert.equal(duplicate.sent.length, 0);
 
         first.emit('close');
         const replacement = new types['mcp-server-metrics']({ id: 'metrics-3', runtime: runtimeNode.id });
-        runtimeNode.publishAdminTelemetry({ tool: 'get_flow' });
+        runtimeNode.publishToolTelemetry({ tool: 'get_flow' });
         assert.equal(first.sent.length, 1);
         assert.equal(replacement.sent.length, 1);
 
         runtimeNode.emit('close');
-        runtimeNode.publishAdminTelemetry({ tool: 'get_flow' });
+        runtimeNode.publishToolTelemetry({ tool: 'get_flow' });
         assert.equal(replacement.sent.length, 1);
     });
 
@@ -406,7 +587,7 @@ describe('upstream mcp-flow-server local extensions', () => {
     });
 
     it('keeps MCP responses available if the metrics source fails', async () => {
-        const { server, runtimeNode, types } = buildServer({
+        const { RED, server, runtimeNode, types } = buildServer({
             serverPath: '/internal/mcp/ops',
             __flowNodes: [{ id: 'tab1', type: 'tab', label: 'Operations' }],
             __runtime: {
@@ -420,9 +601,20 @@ describe('upstream mcp-flow-server local extensions', () => {
         const response = mockRes();
         await server.handleToolCall({ id: 1, params: { name: 'get_flow', arguments: {} } }, response);
         await server.handleToolCall({ id: 2, params: { name: 'get_flow', arguments: {} } }, mockRes());
+        RED.events.emit('mcp-tool-register', {
+            name: 'sample_ping',
+            description: 'Sample',
+            inputSchema: { type: 'object', properties: {} }
+        });
+        server.executeToolFlow = async () => ({ ok: true });
+        const flowResponse = mockRes();
+        await server.handleToolCall({
+            id: 3, params: { name: 'sample_ping', arguments: {} }
+        }, flowResponse);
 
         assert.equal(response.body.result.structuredContent.totalTabs, 1);
-        assert.deepStrictEqual(runtimeNode.warnings, ['MCP admin telemetry subscriber failed']);
+        assert.equal(flowResponse.body.result.content[0].text, JSON.stringify({ ok: true }));
+        assert.deepStrictEqual(runtimeNode.warnings, ['MCP tool telemetry subscriber failed']);
     });
 
     it('emits failed admin telemetry without changing the error response', async () => {

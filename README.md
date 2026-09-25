@@ -10,7 +10,6 @@ Included nodes:
 
 - `mcp-server`
 - `mcp-client`
-- `mcp-tool`
 - `mcp-flow-server`
 - `mcp-tool-registry`
 - `mcp-runtime` config node
@@ -98,7 +97,7 @@ msg.payload = { executionId, result };
 
 The first `mcp-flow-server` output keeps tool execution and status messages. The second output emits one `mcp-admin-telemetry` message per admin tool call for optional flow-based metrics. Its payload contains `tool`, `mode`, `status` (`success` or `failed`), `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. Duration covers server-side tool execution and response serialization, not client network time. Response bytes cover the MCP JSON response body when a Content-Length header is available; unavailable values are `null`. No tool arguments, node IDs, flow content, or credentials are emitted. An unwired second output does not change MCP responses.
 
-`mcp-server-metrics` is a source node with no input and one output. Select the same `mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits the same admin telemetry with the configured endpoint name in `payload.endpoint`; it does not poll Node-RED or expose a metrics route. The flow server's second output remains available during migration. Do not connect both outputs to the same metric writer, or calls will be counted twice.
+`mcp-server-metrics` is a source node with no input and one output. Select the same `mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits one `mcp-tool-telemetry` message for each `tools/call` request across those endpoints, including failed calls and authentication failures. Its payload contains `endpoint`, `tool`, `mode`, `status`, `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. Unknown and unauthenticated tool names are reported as `unknown` to bound metric cardinality. It does not poll Node-RED or expose a metrics route. The flow server's second output remains admin-only; do not connect both outputs to the same metric writer, or admin calls will be counted twice.
 
 ## Configuration Notes
 

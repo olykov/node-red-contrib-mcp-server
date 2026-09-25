@@ -278,6 +278,12 @@ module.exports = function (RED)
         return textResult(JSON.stringify(result));
     }
 
+    function responseBytes(res)
+    {
+        const length = res && typeof res.getHeader === 'function' ? Number(res.getHeader('content-length')) : NaN;
+        return Number.isSafeInteger(length) && length >= 0 ? length : null;
+    }
+
     function MCPRuntimeNode(config)
     {
         RED.nodes.createNode(this, config);
@@ -291,38 +297,38 @@ module.exports = function (RED)
         node.adminPort = Number(config.adminPort || 1880);
         node.adminToken = (node.credentials && node.credentials.adminToken) || '';
         node.adminEndpointPath = config.adminEndpointPath ? normalizePath(config.adminEndpointPath) : '';
-        let adminTelemetryListener = null;
+        let toolTelemetryListener = null;
         let telemetryWarningShown = false;
 
-        node.subscribeAdminTelemetry = function (listener)
+        node.subscribeToolTelemetry = function (listener)
         {
-            if (adminTelemetryListener) return null;
-            adminTelemetryListener = listener;
+            if (toolTelemetryListener) return null;
+            toolTelemetryListener = listener;
             return function ()
             {
-                if (adminTelemetryListener === listener) adminTelemetryListener = null;
+                if (toolTelemetryListener === listener) toolTelemetryListener = null;
             };
         };
 
-        node.publishAdminTelemetry = function (event)
+        node.publishToolTelemetry = function (event)
         {
-            if (!adminTelemetryListener) return;
+            if (!toolTelemetryListener) return;
             try
             {
-                adminTelemetryListener(event);
+                toolTelemetryListener(event);
             } catch
             {
                 if (!telemetryWarningShown)
                 {
                     telemetryWarningShown = true;
-                    node.warn('MCP admin telemetry subscriber failed');
+                    node.warn('MCP tool telemetry subscriber failed');
                 }
             }
         };
 
         node.on('close', function ()
         {
-            adminTelemetryListener = null;
+            toolTelemetryListener = null;
         });
     }
 
@@ -364,6 +370,26 @@ module.exports = function (RED)
 
         node.status({ fill: "grey", shape: "ring", text: "stopped" });
 
+        node.publishToolTelemetry = function (event, admin = false)
+        {
+            if (node.runtime && node.runtime.publishToolTelemetry)
+            {
+                node.runtime.publishToolTelemetry({ endpoint: node.serverName, ...event });
+            }
+            if (!admin) return;
+            try
+            {
+                node.send([null, { topic: 'mcp-admin-telemetry', payload: event }]);
+            } catch
+            {
+                if (!node.telemetryWarningShown)
+                {
+                    node.telemetryWarningShown = true;
+                    node.warn('MCP admin telemetry output failed');
+                }
+            }
+        };
+
         node.initializeServer = function ()
         {
             if (!node.runtime)
@@ -389,6 +415,9 @@ module.exports = function (RED)
         node.handleMcpHttpRequest = async function (req, res)
         {
             const request = req.body || {};
+            const toolRequest = request.method === 'tools/call';
+            const started = toolRequest ? process.hrtime.bigint() : null;
+            let handledToolCall = false;
             try
             {
                 const authResult = await validateRequest(node, req);
@@ -397,16 +426,25 @@ module.exports = function (RED)
                 switch (request.method)
                 {
                     case 'tools/list': node.handleToolsList(request, res, req.mcpAuth); break;
-                    case 'tools/call': await node.handleToolCall(request, req, res); break;
+                    case 'tools/call': handledToolCall = true; await node.handleToolCall(request, req, res); break;
                     case 'initialize': node.handleInitialize(request, res); break;
                     default:
-                        if (request.method && request.method.endsWith('_tool')) await node.handleDirectToolCall(request, res);
-                        else node.rpcError(res, request.id, -32601, 'Method not found: ' + request.method);
+                        node.rpcError(res, request.id, -32601, 'Method not found: ' + request.method);
                 }
             } catch (error)
             {
                 node.error('MCP request error: ' + error.message);
                 node.rpcError(res, request.id, -32603, 'Internal error', error.message, 500);
+            } finally
+            {
+                if (toolRequest && !handledToolCall)
+                {
+                    node.publishToolTelemetry({
+                        tool: 'unknown', mode: 'unknown', status: 'failed',
+                        durationMs: Number(process.hrtime.bigint() - started) / 1e6,
+                        responseBytes: responseBytes(res), scannedNodes: null, cached: null
+                    });
+                }
             }
         };
 
@@ -484,76 +522,47 @@ module.exports = function (RED)
             const name = params.name;
             const args = params.arguments || {};
             const adminTool = node.adminToolsEnabled && node.adminTools.TOOL_NAMES.has(name);
-            const started = adminTool ? process.hrtime.bigint() : null;
+            const started = process.hrtime.bigint();
             let adminResult;
-            let adminStatus = 'failed';
+            let status = 'failed';
+            let toolName = adminTool ? name : 'unknown';
             try
             {
                 if (adminTool)
                 {
                     adminResult = await node.adminTools.callTool(name, args);
-                    adminStatus = adminResult.isError ? 'failed' : 'success';
-                    return res.json({ jsonrpc: '2.0', id: request.id, result: normalizeToolResult(adminResult) });
+                    const result = normalizeToolResult(adminResult);
+                    res.json({ jsonrpc: '2.0', id: request.id, result });
+                    status = result.isError ? 'failed' : 'success';
+                    return;
                 }
                 const tool = node.registeredTools().find(candidate => candidate.name === name);
                 if (!tool) return node.rpcError(res, request.id, -32602, 'Tool not found: ' + name);
+                toolName = tool.name;
                 if (req && req.mcpAuth && !policyAllowsTool(node, tool, req.mcpAuth))
                 {
                     return node.rpcError(res, request.id, -32001, 'Forbidden', 'Insufficient tool scope', 403);
                 }
                 const result = await node.executeToolFlow(tool, args);
-                res.json({ jsonrpc: '2.0', id: request.id, result: normalizeToolResult(result) });
+                const normalized = normalizeToolResult(result);
+                res.json({ jsonrpc: '2.0', id: request.id, result: normalized });
+                status = normalized.isError ? 'failed' : 'success';
             } catch (error)
             {
-                if (adminTool) adminStatus = 'failed';
                 node.rpcError(res, request.id, error.rpcCode || -32603, error.message);
             }
             finally
             {
-                if (adminTool)
-                {
-                    const meta = adminResult && adminResult.structuredContent && adminResult.structuredContent.meta;
-                    const length = typeof res.getHeader === 'function' ? Number(res.getHeader('content-length')) : NaN;
-                    const telemetry = {
-                        tool: name,
-                        mode: adminResult && adminResult.structuredContent ? adminResult.structuredContent.mode : 'unknown',
-                        status: adminStatus,
-                        durationMs: Number(process.hrtime.bigint() - started) / 1e6,
-                        responseBytes: Number.isSafeInteger(length) && length >= 0 ? length : null,
-                        scannedNodes: meta && Number.isSafeInteger(meta.scannedNodes) ? meta.scannedNodes : null,
-                        cached: meta && typeof meta.cached === 'boolean' ? meta.cached : null
-                    };
-                    if (node.runtime && node.runtime.publishAdminTelemetry)
-                    {
-                        node.runtime.publishAdminTelemetry({ endpoint: node.serverName, ...telemetry });
-                    }
-                    try
-                    {
-                        node.send([null, { topic: 'mcp-admin-telemetry', payload: telemetry }]);
-                    } catch
-                    {
-                        if (!node.telemetryWarningShown)
-                        {
-                            node.telemetryWarningShown = true;
-                            node.warn('MCP admin telemetry output failed');
-                        }
-                    }
-                }
-            }
-        };
-
-        node.handleDirectToolCall = async function (request, res)
-        {
-            const toolName = request.method;
-            const tool = node.registeredTools().find(candidate => candidate.name === toolName);
-            if (!tool) return node.rpcError(res, request.id, -32602, 'Tool not found: ' + toolName);
-            try
-            {
-                const result = await node.executeToolFlow(tool, request.params || {});
-                res.json({ jsonrpc: '2.0', id: request.id, result: normalizeToolResult(result) });
-            } catch (error)
-            {
-                node.rpcError(res, request.id, -32603, error.message);
+                const meta = adminResult && adminResult.structuredContent && adminResult.structuredContent.meta;
+                node.publishToolTelemetry({
+                    tool: toolName,
+                    mode: adminTool && adminResult && adminResult.structuredContent ? adminResult.structuredContent.mode : (adminTool ? 'unknown' : 'flow'),
+                    status,
+                    durationMs: Number(process.hrtime.bigint() - started) / 1e6,
+                    responseBytes: responseBytes(res),
+                    scannedNodes: meta && Number.isSafeInteger(meta.scannedNodes) ? meta.scannedNodes : null,
+                    cached: meta && typeof meta.cached === 'boolean' ? meta.cached : null
+                }, adminTool);
             }
         };
 

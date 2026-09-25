@@ -8,17 +8,18 @@ This is an upstream-first product fork of `node-red-contrib-mcp-server`.
 - Do not deploy from this repository; deployment is handled from the infra repository.
 - Do not commit secrets, `.env`, tokens, sensitive credentials, or screenshots containing secrets.
 - Keep application configuration in environment variables.
-- Keep upstream node types as the base whenever pulling upstream changes.
+- Keep supported upstream node types as the base whenever pulling upstream changes.
 
 ## Upstream-First Direction
 
-The package is based on upstream `node-red-contrib-mcp-server` and keeps upstream nodes:
+The package is based on upstream `node-red-contrib-mcp-server` and keeps supported upstream nodes:
 
 - `mcp-server`
 - `mcp-client`
-- `mcp-tool`
 - `mcp-flow-server`
 - `mcp-tool-registry`
+
+Do not restore the removed `mcp-tool` client node or direct JSON-RPC tool methods. Tools are called through `tools/call`.
 
 Do not reintroduce removed local compatibility nodes unless explicitly requested. Existing flows should migrate to upstream `mcp-flow-server` and `mcp-tool-registry`.
 

@@ -285,7 +285,7 @@
         <dd>Disconnect from the MCP server</dd>
         
         <dt>request <span class="property-type">object</span></dt>
-        <dd>Send MCP request: <code>{method: "tool_name", params: {...}}</code></dd>
+        <dd>Send MCP request: <code>{method: "tools/call", params: {name: "tool_name", arguments: {...}}}</code></dd>
         
         <dt>status <span class="property-type">string</span></dt>
         <dd>Get current connection status</dd>
@@ -339,16 +339,20 @@
             "requestFormat": {
                 "topic": "request",
                 "payload": {
-                    "method": "tool_name_here",
-                    "params": {...}
+                    "method": "tools/call",
+                    "params": {
+                        "name": "tool_name_here",
+                        "arguments": {...}
+                    }
                 }
             },
             "exampleCall": {
                 "topic": "request", 
                 "payload": {
-                    "method": "example_tool",
+                    "method": "tools/call",
                     "params": {
-                        "input": "example_string"
+                        "name": "example_tool",
+                        "arguments": {"input": "example_string"}
                     }
                 }
             }
@@ -361,9 +365,10 @@
     <pre><code>{
     "topic": "request",
     "payload": {
-        "method": "example_tool",
+        "method": "tools/call",
         "params": {
-            "input": "Example input"
+            "name": "example_tool",
+            "arguments": {"input": "Example input"}
         }
     }
 }</code></pre>
@@ -379,8 +384,11 @@
     <p><strong>Call MCP Tool:</strong></p>
     <pre><code>msg.topic = "request";
 msg.payload = {
-    method: "example_tool",
-    params: { input: "example" }
+    method: "tools/call",
+    params: {
+        name: "example_tool",
+        arguments: { input: "example" }
+    }
 };
 return msg;</code></pre>
 

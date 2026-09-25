@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Removed the unused `mcp-tool` node and direct JSON-RPC tool method compatibility.
+- Expanded runtime metrics to cover all MCP tool calls across endpoints, including failed calls.
 - Added generic OIDC auth and auth-storage config nodes for MCP endpoints.
 - Added OAuth protected-resource and authorization-server metadata responses.
 - Added bearer-token enforcement for protected MCP endpoints.

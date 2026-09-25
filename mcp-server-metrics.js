@@ -8,16 +8,16 @@ module.exports = function (RED)
         const node = this;
         const runtime = RED.nodes.getNode(config.runtime);
 
-        if (!runtime || typeof runtime.subscribeAdminTelemetry !== 'function')
+        if (!runtime || typeof runtime.subscribeToolTelemetry !== 'function')
         {
             node.status({ fill: 'red', shape: 'ring', text: 'runtime unavailable' });
             node.error('MCP runtime is required for metrics');
             return;
         }
 
-        const unsubscribe = runtime.subscribeAdminTelemetry(function (event)
+        const unsubscribe = runtime.subscribeToolTelemetry(function (event)
         {
-            node.send({ topic: 'mcp-admin-telemetry', payload: event });
+            node.send({ topic: 'mcp-tool-telemetry', payload: event });
         });
 
         if (!unsubscribe)
