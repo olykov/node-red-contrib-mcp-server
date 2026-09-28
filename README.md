@@ -122,8 +122,15 @@ Admin tools expose read-only `get_flow` only when the selected runtime has Admin
 | `mode: "subflows"` | Definition index | `/flow/global` |
 | `mode: "subflow", subflowId` | Definition and contained node index | `/flow/global` |
 | `mode: "subflow", subflowId, id` | Definition and usages on one specified tab | `/flow/global`, `/flow/:id` |
+| `mode: "configs", id` | Paginated config-node IDs, types and names for one tab | `/flow/:id` |
+| `mode: "configs", subflowId` | Paginated config-node index for one subflow definition | `/flow/global` |
+| `mode: "configs"` | Paginated global config-node index | `/flow/global` |
+| `mode: "config", configId` with optional `id` or `subflowId` | Ordinary properties of one config node in the selected scope | `/flow/global` or `/flow/:id` |
+| `mode: "node_configs", nodeId` with `id` or `subflowId` | Config references of one node, including the property name and scope | `/flow/:id`, `/flow/global` for tabs; `/flow/global` for subflows |
 
 Use `offset` from `meta.nextOffset` to continue a paginated response. A chain follows direct wires within one tab; link nodes expose target IDs but are not traversed into other tabs. Node details include only an allowlist of identifiers and labels. `includeCode: true` works only with `mode: "node"` and returns at most 2,000 Function code characters.
+
+Config-node details retain ordinary property types and values. Node-RED's flow API excludes declared credential values; an unexpected `credentials` container is replaced with `[REDACTED]` defensively. No credential API is called. A property over 32 KiB is listed in `omittedProperties` instead of being returned; config properties are paginated by 40 fields and 64 KiB of values. Properties that a node author stored outside Node-RED's credential mechanism remain ordinary properties and are not automatically redacted.
 
 `get_flow` never requests the full `/flows` export. The tab index walks Node-RED's in-memory configuration once and caches only compact tab metadata until the next runtime deploy; it does not serialize or transfer full flows. `meta.cached` indicates whether the index was reused. The index excludes undeployed editor changes. Tab detail modes read `/flow/:id`; subflow modes read `/flow/global` and optionally the specified tab. These endpoints still make Node-RED prepare the selected flow before the palette applies its response limits. Responses cap lists at 40 items and edges at 80; Admin API reads have a 15-second timeout and a 32 MiB response limit. Tab indexing stops above 100,000 configuration nodes; graph inspection stops above 20,000 nodes or 100,000 wire visits. `meta` reports the source, scan count, returned node count and truncation.
 

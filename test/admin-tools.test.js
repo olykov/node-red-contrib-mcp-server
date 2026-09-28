@@ -36,7 +36,7 @@ describe('lib/admin-tools', () => {
         const { tools } = build({});
         assert.deepEqual(tools.TOOLS.map(tool => tool.name), ['get_flow']);
         assert.deepEqual(tools.TOOLS[0].inputSchema.properties.mode.enum,
-            ['tabs', 'tab_summary', 'group', 'chain', 'node', 'subflows', 'subflow']);
+            ['tabs', 'tab_summary', 'group', 'chain', 'node', 'subflows', 'subflow', 'configs', 'config', 'node_configs']);
         assert.deepEqual(tools.TOOLS[0].outputSchema.required, ['mode', 'source', 'meta']);
         assert.ok(!tools.TOOL_NAMES.has('deploy_flow'));
     });
@@ -232,5 +232,139 @@ describe('lib/admin-tools', () => {
             method: 'GET', hostname: '127.0.0.1', port: 1880, path: '/flow/tab1',
             headers: { Authorization: 'Bearer configured-value' }
         });
+    });
+
+    it('lists and inspects tab configs while redacting only the credential container', async () => {
+        const flow = {
+            id: 'tab1', nodes: [], configs: [{
+                id: 'cfg1', type: 'service-config', name: 'Primary', host: 'example.test', port: 1234,
+                enabled: false, options: { retry: [1, 2] }, password: 'ordinary-property',
+                credentials: { username: 'credential-text', password: 'credential-password' }
+            }]
+        };
+        const { tools, calls } = build({ 'GET /flow/tab1': () => ({ status: 200, body: flow }) });
+        const listed = (await tools.callTool('get_flow', { mode: 'configs', id: 'tab1' })).structuredContent;
+        assert.deepEqual(listed.configs, [{ id: 'cfg1', type: 'service-config', name: 'Primary' }]);
+        assert.equal(listed.totalConfigs, 1);
+        const response = await tools.callTool('get_flow', { mode: 'config', id: 'tab1', configId: 'cfg1' });
+        assert.deepEqual({ ...response.structuredContent.config.properties }, {
+            name: 'Primary', host: 'example.test', port: 1234, enabled: false,
+            options: { retry: [1, 2] }, password: 'ordinary-property'
+        });
+        assert.equal(response.structuredContent.config.credentials, '[REDACTED]');
+        assert.equal(response.structuredContent.totalProperties, 6);
+        assert.ok(!JSON.stringify(response).includes('credential-text'));
+        assert.ok(!JSON.stringify(response).includes('credential-password'));
+        assert.equal(response.content[0].text, JSON.stringify(response.structuredContent));
+        assert.deepEqual(calls.map(call => call.path), ['/flow/tab1', '/flow/tab1']);
+    });
+
+    it('resolves tab and global config references without building a graph', async () => {
+        const flow = { id: 'tab1', nodes: [{
+            id: 'n1', type: 'processor', local: 'cfg1', shared: 'cfg2', name: 'Processor', wires: []
+        }], configs: [{ id: 'cfg1', type: 'local-config', name: 'Local' }] };
+        const global = { id: 'global', nodes: [], configs: [{
+            id: 'cfg2', type: 'shared-config', name: 'Shared', credentials: { token: 'hidden' }
+        }], subflows: [] };
+        const { tools, calls } = build({
+            'GET /flow/tab1': () => ({ status: 200, body: flow }),
+            'GET /flow/global': () => ({ status: 200, body: global })
+        });
+        const refs = (await tools.callTool('get_flow', {
+            mode: 'node_configs', id: 'tab1', nodeId: 'n1'
+        })).structuredContent;
+        assert.deepEqual(refs.configRefs, [
+            { property: 'local', scope: 'tab', id: 'cfg1', type: 'local-config', name: 'Local' },
+            { property: 'shared', scope: 'global', id: 'cfg2', type: 'shared-config', name: 'Shared' }
+        ]);
+        const detail = await tools.callTool('get_flow', { mode: 'config', configId: 'cfg2' });
+        assert.equal(detail.structuredContent.config.credentials, '[REDACTED]');
+        assert.ok(!JSON.stringify(detail).includes('hidden'));
+        assert.deepEqual(calls.map(call => call.path), ['/flow/tab1', '/flow/global', '/flow/global']);
+    });
+
+    it('supports subflow-local configs and resolves their global references', async () => {
+        const global = { id: 'global', nodes: [], configs: [
+            { id: 'cfg2', type: 'shared-config', host: 'example.test' }
+        ], subflows: [{ id: 'sf1', name: 'Reusable', nodes: [
+            { id: 'n1', type: 'processor', local: 'cfg1', shared: 'cfg2' }
+        ], configs: [{ id: 'cfg1', type: 'local-config', enabled: true }] }] };
+        const { tools, calls } = build({ 'GET /flow/global': () => ({ status: 200, body: global }) });
+        const listed = (await tools.callTool('get_flow', { mode: 'configs', subflowId: 'sf1' })).structuredContent;
+        assert.equal(listed.totalConfigs, 1);
+        const detail = (await tools.callTool('get_flow', {
+            mode: 'config', subflowId: 'sf1', configId: 'cfg1'
+        })).structuredContent;
+        assert.equal(detail.config.properties.enabled, true);
+        const refs = (await tools.callTool('get_flow', {
+            mode: 'node_configs', subflowId: 'sf1', nodeId: 'n1'
+        })).structuredContent;
+        assert.deepEqual(refs.configRefs.map(ref => [ref.property, ref.scope]), [
+            ['local', 'subflow'], ['shared', 'global']
+        ]);
+        assert.deepEqual(calls.map(call => call.path), ['/flow/global', '/flow/global', '/flow/global']);
+    });
+
+    it('pages config collections and properties and omits oversized values', async () => {
+        const configs = Array.from({ length: 45 }, (_, i) => ({ id: 'cfg' + i, type: 'service-config' }));
+        configs[0].large = 'x'.repeat(33000);
+        for (let i = 0; i < 45; i++) configs[0]['field' + i] = i;
+        const { tools } = build({ 'GET /flow/global': () => ({
+            status: 200, body: { id: 'global', nodes: [], configs, subflows: [] }
+        }) });
+        const first = (await tools.callTool('get_flow', { mode: 'configs' })).structuredContent;
+        const second = (await tools.callTool('get_flow', { mode: 'configs', offset: 40 })).structuredContent;
+        assert.equal(first.configs.length, 40);
+        assert.equal(first.meta.nextOffset, 40);
+        assert.equal(second.configs.length, 5);
+        const detail = (await tools.callTool('get_flow', { mode: 'config', configId: 'cfg0' })).structuredContent;
+        assert.deepEqual(detail.config.omittedProperties, ['large']);
+        assert.equal(detail.meta.truncated, true);
+        assert.equal(detail.meta.nextOffset, 40);
+        const tail = (await tools.callTool('get_flow', {
+            mode: 'config', configId: 'cfg0', offset: 40
+        })).structuredContent;
+        assert.equal(tail.meta.nextOffset, null);
+        assert.equal(tail.config.properties.field44, 44);
+    });
+
+    it('rejects invalid config requests and reports missing config nodes', async () => {
+        const { tools, calls } = build({ 'GET /flow/global': () => ({
+            status: 200, body: { id: 'global', nodes: [], configs: [], subflows: [] }
+        }) });
+        await assert.rejects(() => tools.callTool('get_flow', { mode: 'config' }), /configId is required/);
+        await assert.rejects(() => tools.callTool('get_flow', {
+            mode: 'configs', id: 'tab1', subflowId: 'sf1'
+        }), /Select a tab or subflow/);
+        await assert.rejects(() => tools.callTool('get_flow', { mode: 'config', configId: '../bad' }),
+            error => error.rpcCode === -32602);
+        const missing = await tools.callTool('get_flow', { mode: 'config', configId: 'cfg1' });
+        assert.equal(missing.structuredContent.error.code, 'CONFIG_NOT_FOUND');
+        assert.deepEqual(calls.map(call => call.path), ['/flow/global']);
+    });
+
+    it('treats an omitted configs array as an empty scope', async () => {
+        const { tools } = build({ 'GET /flow/global': () => ({
+            status: 200, body: { id: 'global', subflows: [] }
+        }) });
+        const listed = (await tools.callTool('get_flow', { mode: 'configs' })).structuredContent;
+        assert.deepEqual(listed.configs, []);
+        assert.equal(listed.totalConfigs, 0);
+    });
+
+    it('limits the aggregate size of a config property page', async () => {
+        const config = { id: 'cfg1', type: 'service-config', first: 'a'.repeat(30000),
+            second: 'b'.repeat(30000), third: 'c'.repeat(30000) };
+        const { tools } = build({ 'GET /flow/global': () => ({
+            status: 200, body: { id: 'global', configs: [config] }
+        }) });
+        const first = (await tools.callTool('get_flow', { mode: 'config', configId: 'cfg1' })).structuredContent;
+        assert.equal(first.meta.nextOffset, 2);
+        assert.equal(first.config.properties.third, undefined);
+        const second = (await tools.callTool('get_flow', {
+            mode: 'config', configId: 'cfg1', offset: 2
+        })).structuredContent;
+        assert.equal(second.config.properties.third.length, 30000);
+        assert.equal(second.meta.nextOffset, null);
     });
 });
