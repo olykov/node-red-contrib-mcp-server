@@ -116,6 +116,24 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.deepStrictEqual(tool.outputSchema, { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] });
     });
 
+    it('preserves registered tool annotations and security metadata', () => {
+        const { RED, server } = buildServer({ advertisedScopes: 'openid' });
+        RED.events.emit('mcp-tool-register', {
+            name: 'read_status',
+            description: 'Read status',
+            inputSchema: { type: 'object', properties: {} },
+            annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+        });
+
+        const res = mockRes();
+        server.handleToolsList({ id: 1 }, res);
+        const tool = res.body.result.tools.find(item => item.name === 'read_status');
+        assert.deepStrictEqual(tool.annotations, {
+            readOnlyHint: true, destructiveHint: false, openWorldHint: false
+        });
+        assert.deepStrictEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['openid'] }]);
+    });
+
     it('requires an explicit runtime config node before starting', () => {
         const runtime = createRuntime({ runtime: '' });
 
@@ -262,6 +280,9 @@ describe('upstream mcp-flow-server local extensions', () => {
         });
         assert.strictEqual(getFlow.outputSchema.type, 'object');
         assert.deepStrictEqual(getFlow.outputSchema.required, ['mode', 'source', 'meta']);
+        assert.deepStrictEqual(getFlow.annotations, {
+            readOnlyHint: true, destructiveHint: false, openWorldHint: false
+        });
         assert.ok(!otherRes.body.result.tools.some(tool => tool.name === 'get_flow'));
     });
 
@@ -908,6 +929,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
         assert.strictEqual(res.statusCode, 200);
         assert.strictEqual(res.body.result.serverInfo.name, 'test');
+        assert.strictEqual(res.body.result.serverInfo.version, require('../package.json').version);
     });
 
     it('allows initialize with a valid endpoint-scoped access token', async () => {

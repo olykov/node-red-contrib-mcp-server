@@ -14,6 +14,8 @@
                 }
             },
             requiredScopes: { value: '' },
+            toolBehavior: { value: '' },
+            worldAccess: { value: '' },
             toolSchema: { value: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}' },
             outputSchema: { value: '' },
         },
@@ -142,6 +144,27 @@
         <div class="mcp-help-text">Optional extra OAuth scopes for this tool. Leave empty unless this tool needs stricter access than its endpoint.</div>
     </div>
 
+    <div class="form-row">
+        <label for="node-input-toolBehavior"><i class="fa fa-shield"></i> Tool Behavior</label>
+        <select id="node-input-toolBehavior">
+            <option value="">Unspecified</option>
+            <option value="read">Read only</option>
+            <option value="write">Non-destructive write</option>
+            <option value="destructive">Destructive write</option>
+        </select>
+        <div class="mcp-help-text">Choose based on every execution path. Unspecified keeps conservative client defaults.</div>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-worldAccess"><i class="fa fa-globe"></i> World Access</label>
+        <select id="node-input-worldAccess">
+            <option value="">Unspecified</option>
+            <option value="closed">Bounded private workspace</option>
+            <option value="open">Open internet or external recipients</option>
+        </select>
+        <div class="mcp-help-text">Use Open for public internet access, even when the tool only reads.</div>
+    </div>
+
     <hr>
     <h4>Parameter Schema</h4>
 
@@ -204,6 +227,10 @@
         <dd>Required endpoint binding. Choose <code>Shared (All MCPs)</code> only for tools intentionally exposed on every endpoint.</dd>
         <dt>Required Scopes <span class="property-type">string</span></dt>
         <dd>Optional extra OAuth scopes added to this tool descriptor and enforced for tool listing and calls.</dd>
+        <dt>Tool Behavior <span class="property-type">select</span></dt>
+        <dd>MCP safety annotations for read-only, non-destructive write, or destructive write behavior.</dd>
+        <dt>World Access <span class="property-type">select</span></dt>
+        <dd>MCP open-world annotation. Public internet and external recipients are open-world access.</dd>
         <dt>JSON Schema <span class="property-type">JSON</span></dt>
         <dd>JSON Schema defining the tool input parameters.</dd>
         <dt>Output Schema <span class="property-type">JSON</span></dt>

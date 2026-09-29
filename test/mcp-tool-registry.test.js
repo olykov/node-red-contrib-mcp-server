@@ -52,6 +52,33 @@ describe('mcp-tool-registry', () => {
         assert.strictEqual(emitted[0].tool.endpointId, 'endpoint-1');
         assert.strictEqual(emitted[0].tool.serverName, 'ops');
         assert.deepStrictEqual(emitted[0].tool.requiredScopes, ['status:read', 'audit:read']);
+        assert.strictEqual(emitted[0].tool.annotations, undefined);
+    });
+
+    it('advertises explicitly configured safety annotations', () => {
+        const { registry, emitted } = buildRegistry({
+            toolName: 'read_status',
+            toolSchema: '{"type":"object","properties":{}}',
+            toolBehavior: 'read',
+            worldAccess: 'closed'
+        });
+
+        registry.registerTool();
+        assert.deepStrictEqual(emitted[0].tool.annotations, {
+            readOnlyHint: true,
+            destructiveHint: false,
+            openWorldHint: false
+        });
+
+        registry.emit('input', {
+            topic: 'update',
+            payload: { toolBehavior: 'destructive', worldAccess: 'open' }
+        });
+        assert.deepStrictEqual(emitted[2].tool.annotations, {
+            readOnlyHint: false,
+            destructiveHint: true,
+            openWorldHint: true
+        });
     });
 
 

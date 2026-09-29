@@ -21,6 +21,26 @@ module.exports = function (RED)
         return endpoint ? endpoint.serverName : '';
     }
 
+    function toolAnnotations(behavior, worldAccess)
+    {
+        const annotations = {};
+        if (behavior === 'read')
+        {
+            annotations.readOnlyHint = true;
+            annotations.destructiveHint = false;
+        }
+        else if (behavior === 'write' || behavior === 'destructive')
+        {
+            annotations.readOnlyHint = false;
+            annotations.destructiveHint = behavior === 'destructive';
+        }
+        if (worldAccess === 'closed' || worldAccess === 'open')
+        {
+            annotations.openWorldHint = worldAccess === 'open';
+        }
+        return Object.keys(annotations).length ? annotations : null;
+    }
+
     function MCPToolRegistryNode(config)
     {
         RED.nodes.createNode(this, config);
@@ -30,6 +50,8 @@ module.exports = function (RED)
         node.toolDescription = config.toolDescription || '';
         node.endpoint = normalizeEndpoint(config.endpoint);
         node.requiredScopes = parseList(config.requiredScopes || '');
+        node.toolBehavior = config.toolBehavior || '';
+        node.worldAccess = config.worldAccess || '';
         node.toolSchema = config.toolSchema || '{}';
         node.outputSchema = config.outputSchema || '';
         node.isRegistered = false;
@@ -83,11 +105,13 @@ module.exports = function (RED)
             }
 
             const binding = node.binding();
+            const annotations = toolAnnotations(node.toolBehavior, node.worldAccess);
             const toolDefinition = {
                 name: node.toolName,
                 description: node.toolDescription || `Tool: ${node.toolName}`,
                 inputSchema: parsedSchema,
                 ...(parsedOutputSchema ? { outputSchema: parsedOutputSchema } : {}),
+                ...(annotations ? { annotations } : {}),
                 endpointId: binding.endpointId,
                 serverName: binding.serverName,
                 requiredScopes: node.requiredScopes,
@@ -110,7 +134,8 @@ module.exports = function (RED)
                     serverName: binding.serverName,
                     requiredScopes: node.requiredScopes,
                     schema: parsedSchema,
-                    outputSchema: parsedOutputSchema
+                    outputSchema: parsedOutputSchema,
+                    annotations
                 }
             });
         };
@@ -165,6 +190,8 @@ module.exports = function (RED)
                         if (msg.payload.toolDescription) node.toolDescription = msg.payload.toolDescription;
                         if (Object.prototype.hasOwnProperty.call(msg.payload, 'endpoint')) node.endpoint = normalizeEndpoint(msg.payload.endpoint);
                         if (Object.prototype.hasOwnProperty.call(msg.payload, 'requiredScopes')) node.requiredScopes = parseList(msg.payload.requiredScopes || '');
+                        if (Object.prototype.hasOwnProperty.call(msg.payload, 'toolBehavior')) node.toolBehavior = msg.payload.toolBehavior || '';
+                        if (Object.prototype.hasOwnProperty.call(msg.payload, 'worldAccess')) node.worldAccess = msg.payload.worldAccess || '';
                         if (msg.payload.toolSchema)
                         {
                             try
@@ -215,7 +242,8 @@ module.exports = function (RED)
                             serverName: binding.serverName,
                             requiredScopes: node.requiredScopes,
                             schema: parsedSchema,
-                            outputSchema: parsedOutputSchema
+                            outputSchema: parsedOutputSchema,
+                            annotations: toolAnnotations(node.toolBehavior, node.worldAccess)
                         };
                         node.send(msg);
                     }
