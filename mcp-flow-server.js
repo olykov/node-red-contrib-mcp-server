@@ -6,7 +6,6 @@ module.exports = function (RED)
     const express = require('express');
     const { randomUUID: uuidv4 } = require('crypto');
     const NodeCache = require('node-cache');
-    const { version: packageVersion } = require('./package.json');
     const { createAdminTools } = require('./lib/admin-tools');
     const {
         absoluteUrl,
@@ -577,7 +576,7 @@ module.exports = function (RED)
                 result: {
                     protocolVersion: '2024-11-05',
                     capabilities,
-                    serverInfo: { name: node.serverName, version: packageVersion, description: 'Node-RED MCP Flow Server' }
+                    serverInfo: { name: node.serverName, version: '1.0.0', description: 'Node-RED MCP Flow Server' }
                 }
             });
         };

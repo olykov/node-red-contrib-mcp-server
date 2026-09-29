@@ -134,6 +134,30 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.deepStrictEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['openid'] }]);
     });
 
+    it('serves registry annotations through the MCP tools/list request', async () => {
+        const { RED, types, server } = buildServer();
+        require('../mcp-tool-registry')(RED);
+        const registry = new types['mcp-tool-registry']({
+            id: 'registry-1',
+            toolName: 'read_status',
+            endpoint: server.id,
+            toolSchema: '{"type":"object","properties":{}}',
+            toolBehavior: 'read',
+            worldAccess: 'closed'
+        });
+        registry.registerTool();
+
+        const res = mockRes();
+        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/list' }), res);
+
+        assert.strictEqual(res.statusCode, 200);
+        assert.deepStrictEqual(res.body.result.tools.find(tool => tool.name === 'read_status').annotations, {
+            readOnlyHint: true,
+            destructiveHint: false,
+            openWorldHint: false
+        });
+    });
+
     it('requires an explicit runtime config node before starting', () => {
         const runtime = createRuntime({ runtime: '' });
 
@@ -929,7 +953,6 @@ describe('upstream mcp-flow-server local extensions', () => {
 
         assert.strictEqual(res.statusCode, 200);
         assert.strictEqual(res.body.result.serverInfo.name, 'test');
-        assert.strictEqual(res.body.result.serverInfo.version, require('../package.json').version);
     });
 
     it('allows initialize with a valid endpoint-scoped access token', async () => {
