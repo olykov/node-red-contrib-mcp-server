@@ -99,15 +99,56 @@ describe('lib/admin-tools', () => {
         assert.deepEqual(calls, []);
     });
 
-    it('stops runtime tab indexing above its node cap', async () => {
+    it('indexes more than 100,000 runtime nodes without fetching flows', async () => {
         const { tools, calls } = build({}, {
+            now: () => 0,
             eachNode(callback) {
+                callback({ id: 'tab1', type: 'tab', label: 'Large' });
                 const node = { id: 'n1', type: 'debug', z: 'tab1' };
-                for (let i = 0; i <= 100000; i++) callback(node);
+                for (let i = 0; i < 300000; i++) callback(node);
             }
         });
-        await assert.rejects(() => tools.callTool('get_flow', {}), /tab index node limit/);
+        const data = (await tools.callTool('get_flow', {})).structuredContent;
+        assert.equal(data.meta.scannedNodes, 300001);
+        assert.equal(data.tabs[0].nodeCount, 300000);
+        assert.equal(data.meta.limits.tabIndexMilliseconds, 250);
+        assert.equal(data.meta.limits.tabIndexScopes, 10000);
         assert.deepEqual(calls, []);
+    });
+
+    it('stops a slow runtime tab index without caching a partial result', async () => {
+        const events = new EventEmitter();
+        let scans = 0;
+        let clock = 0;
+        const { tools } = build({}, {
+            events,
+            now: () => clock,
+            eachNode(callback) {
+                scans++;
+                for (let i = 0; i < 1024; i++) {
+                    if (i === 1023) clock += 251;
+                    callback({ id: 'n1', type: 'debug', z: 'tab1' });
+                }
+            }
+        });
+        await assert.rejects(() => tools.callTool('get_flow', {}), /tab index time limit/);
+        await assert.rejects(() => tools.callTool('get_flow', {}), /temporarily unavailable/);
+        assert.equal(scans, 1);
+        events.emit('runtime-event', { id: 'runtime-deploy' });
+        await assert.rejects(() => tools.callTool('get_flow', {}), /tab index time limit/);
+        assert.equal(scans, 2);
+        tools.dispose();
+        assert.equal(events.listenerCount('runtime-event'), 0);
+    });
+
+    it('bounds memory used for distinct runtime scopes', async () => {
+        const { tools } = build({}, {
+            now: () => 0,
+            eachNode(callback) {
+                for (let i = 0; i <= 10000; i++) callback({ id: 'n' + i, type: 'debug', z: 'scope' + i });
+            }
+        });
+        await assert.rejects(() => tools.callTool('get_flow', {}), /tab index scope limit/);
     });
 
     it('summarizes one tab without returning raw configuration', async () => {
@@ -181,6 +222,112 @@ describe('lib/admin-tools', () => {
         assert.equal(definition.meta.scannedNodes, 6);
         assert.ok(!JSON.stringify(definition).includes('internal code'));
         assert.deepEqual(calls.map(call => call.path), ['/flow/global', '/flow/global', '/flow/tab1']);
+    });
+
+    it('exposes internal and port connections without returning subflow code', async () => {
+        const definition = {
+            id: 'sf1', name: 'Reusable',
+            in: [{ wires: [{ id: 'switch1' }] }],
+            out: [{ wires: [{ id: 'metric1', port: 0 }] }],
+            nodes: [
+                { id: 'switch1', type: 'switch', wires: [['metric1'], ['debug1']] },
+                { id: 'metric1', type: 'metric', wires: [[]] },
+                { id: 'debug1', type: 'debug', wires: [] },
+                { id: 'fn1', type: 'function', func: 'private code', wires: [] }
+            ]
+        };
+        const { tools, calls } = build({
+            'GET /flow/global': () => ({ status: 200, body: { nodes: [], subflows: [definition] } })
+        });
+        const data = (await tools.callTool('get_flow', { mode: 'subflow', subflowId: 'sf1' })).structuredContent;
+        assert.deepEqual(data.edges, [
+            { from: 'switch1', to: 'metric1', port: 0 },
+            { from: 'switch1', to: 'debug1', port: 1 }
+        ]);
+        assert.deepEqual(data.inputConnections, [{ input: 0, to: 'switch1' }]);
+        assert.deepEqual(data.outputConnections, [{ from: 'metric1', port: 0, output: 0 }]);
+        assert.equal(data.totalEdges, 2);
+        assert.equal(data.totalInputConnections, 1);
+        assert.equal(data.totalOutputConnections, 1);
+        assert.equal(data.meta.truncated, false);
+        assert.ok(!JSON.stringify(data).includes('private code'));
+        assert.deepEqual(calls.map(call => call.path), ['/flow/global']);
+    });
+
+    it('pages subflow nodes and edges independently', async () => {
+        const nodes = Array.from({ length: 55 }, (_, index) => ({
+            id: 'n' + index, type: 'change', wires: [index < 54 ? ['n' + (index + 1)] : []]
+        }));
+        const definition = {
+            id: 'sf1', nodes,
+            in: [{ wires: [{ id: 'n0' }] }],
+            out: [{ wires: [{ id: 'n54', port: 0 }] }]
+        };
+        const { tools } = build({
+            'GET /flow/global': () => ({ status: 200, body: { nodes: [], subflows: [definition] } })
+        });
+        const first = (await tools.callTool('get_flow', { mode: 'subflow', subflowId: 'sf1' })).structuredContent;
+        assert.equal(first.nodes.length, 40);
+        assert.equal(first.edges.length, 40);
+        assert.equal(first.totalEdges, 54);
+        assert.equal(first.meta.nextOffset, 40);
+        assert.equal(first.meta.truncated, true);
+        const second = (await tools.callTool('get_flow', {
+            mode: 'subflow', subflowId: 'sf1', offset: 40
+        })).structuredContent;
+        assert.equal(second.nodes.length, 15);
+        assert.equal(second.edges.length, 14);
+        assert.deepEqual(second.edges.at(-1), { from: 'n53', to: 'n54', port: 0 });
+        assert.deepEqual(second.inputConnections, []);
+        assert.deepEqual(second.outputConnections, []);
+        assert.equal(second.meta.nextOffset, null);
+        assert.equal(second.meta.truncated, false);
+    });
+
+    it('continues paging when only subflow output connections remain', async () => {
+        const definition = {
+            id: 'sf1', nodes: [{ id: 'n0', type: 'change', wires: [] }], in: [],
+            out: [{ wires: Array.from({ length: 45 }, () => ({ id: 'n0', port: 0 })) }]
+        };
+        const { tools } = build({
+            'GET /flow/global': () => ({ status: 200, body: { nodes: [], subflows: [definition] } })
+        });
+        const first = (await tools.callTool('get_flow', { mode: 'subflow', subflowId: 'sf1' })).structuredContent;
+        assert.equal(first.nodes.length, 1);
+        assert.equal(first.outputConnections.length, 40);
+        assert.equal(first.meta.nextOffset, 40);
+        const second = (await tools.callTool('get_flow', {
+            mode: 'subflow', subflowId: 'sf1', offset: 40
+        })).structuredContent;
+        assert.equal(second.nodes.length, 0);
+        assert.equal(second.outputConnections.length, 5);
+        assert.equal(second.totalOutputConnections, 45);
+        assert.equal(second.meta.nextOffset, null);
+    });
+
+    it('requires subflow mode instead of interpreting a definition id as a tab id', async () => {
+        const { tools, calls } = build({
+            'GET /flow/sf1': () => ({ status: 404, body: '' }),
+            'GET /flow/global': () => ({ status: 200, body: {
+                nodes: [], subflows: [{ id: 'sf1', nodes: [], in: [], out: [] }]
+            } })
+        });
+        const wrongMode = await tools.callTool('get_flow', { id: 'sf1' });
+        assert.equal(wrongMode.structuredContent.error.code, 'FLOW_NOT_FOUND');
+        const correctMode = await tools.callTool('get_flow', { mode: 'subflow', subflowId: 'sf1' });
+        assert.equal(correctMode.structuredContent.subflow.id, 'sf1');
+        assert.deepEqual(calls.map(call => call.path), ['/flow/sf1', '/flow/global']);
+    });
+
+    it('stops subflow connection inspection at its wire visit cap', async () => {
+        const definition = { id: 'sf1', nodes: [
+            { id: 'n0', type: 'change', wires: [Array(100001).fill('n0')] }
+        ], in: [], out: [] };
+        const { tools } = build({
+            'GET /flow/global': () => ({ status: 200, body: { nodes: [], subflows: [definition] } })
+        });
+        await assert.rejects(() => tools.callTool('get_flow', { mode: 'subflow', subflowId: 'sf1' }),
+            /subflow exceeds inspection wire limit/);
     });
 
     it('validates IDs and modes before reading and returns bounded not-found errors', async () => {

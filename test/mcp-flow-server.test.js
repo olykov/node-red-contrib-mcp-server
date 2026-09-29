@@ -256,6 +256,10 @@ describe('upstream mcp-flow-server local extensions', () => {
 
         const getFlow = adminRes.body.result.tools.find(tool => tool.name === 'get_flow');
         assert.ok(getFlow);
+        assert.ok(getFlow.inputSchema.properties.mode.enum.includes('subflow'));
+        assert.deepStrictEqual(getFlow.inputSchema.properties.subflowId, {
+            type: 'string', description: 'Definition ID in subflow mode'
+        });
         assert.strictEqual(getFlow.outputSchema.type, 'object');
         assert.deepStrictEqual(getFlow.outputSchema.required, ['mode', 'source', 'meta']);
         assert.ok(!otherRes.body.result.tools.some(tool => tool.name === 'get_flow'));
