@@ -302,6 +302,10 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.deepStrictEqual(getFlow.inputSchema.properties.subflowId, {
             type: 'string', description: 'Definition ID in subflow mode'
         });
+        assert.deepStrictEqual(getFlow.inputSchema.properties.includeConfig, {
+            type: 'boolean',
+            description: 'Return bounded supported node parameters in node mode; inject nodes include raw payload and scheduling fields'
+        });
         assert.strictEqual(getFlow.outputSchema.type, 'object');
         assert.deepStrictEqual(getFlow.outputSchema.required, ['mode', 'source', 'meta']);
         assert.deepStrictEqual(getFlow.annotations, {

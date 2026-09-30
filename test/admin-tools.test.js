@@ -202,6 +202,39 @@ describe('lib/admin-tools', () => {
         assert.deepEqual(httpResult.node.config, { method: 'post', route: '/api/items' });
     });
 
+    it('returns bounded inject parameters only when explicitly requested', async () => {
+        const inject = {
+            id: 'inject1', type: 'inject', name: 'Seed advertiser',
+            payload: 'advertiser-123', payloadType: 'str',
+            topic: 'meta.ads', topicType: 'str',
+            once: true, onceDelay: 0.5, repeat: '', crontab: '',
+            props: [{ p: 'payload', pt: 'msg', v: 'advertiser-123', vt: 'str' }], wires: [[]]
+        };
+        const { tools } = build({ 'GET /flow/tab1': () => ({ status: 200, body: { id: 'tab1', nodes: [inject] } }) });
+        const normal = (await tools.callTool('get_flow', { mode: 'node', id: 'tab1', nodeId: 'inject1' })).structuredContent;
+        assert.equal(normal.node.config, undefined);
+
+        const explicit = (await tools.callTool('get_flow', {
+            mode: 'node', id: 'tab1', nodeId: 'inject1', includeConfig: true
+        })).structuredContent;
+        assert.deepEqual(explicit.node.config, {
+            props: [{ p: 'payload', pt: 'msg', v: 'advertiser-123', vt: 'str' }],
+            payload: 'advertiser-123', payloadType: 'str', topic: 'meta.ads', topicType: 'str',
+            once: true, onceDelay: 0.5, repeat: '', crontab: ''
+        });
+    });
+
+    it('bounds requested inject parameters', async () => {
+        const inject = { id: 'inject1', type: 'inject', payload: 'x'.repeat(32769), payloadType: 'str', wires: [] };
+        const { tools } = build({ 'GET /flow/tab1': () => ({ status: 200, body: { id: 'tab1', nodes: [inject] } }) });
+        const data = (await tools.callTool('get_flow', {
+            mode: 'node', id: 'tab1', nodeId: 'inject1', includeConfig: true
+        })).structuredContent;
+        assert.deepEqual(data.node.config, { payloadType: 'str' });
+        assert.deepEqual(data.node.configOmittedProperties, ['payload']);
+        assert.equal(data.meta.truncated, true);
+    });
+
     it('lists definitions from global and finds usages only in an explicit tab', async () => {
         const { tools, calls } = build({
             'GET /flow/global': () => ({
