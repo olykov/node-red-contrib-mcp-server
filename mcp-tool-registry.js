@@ -124,20 +124,6 @@ module.exports = function (RED)
             node.isRegistered = true;
             node.status({ fill: 'green', shape: 'dot', text: binding.serverName ? `registered: ${binding.serverName}` : 'registered: all' });
             node.log(`Tool "${node.toolName}" registered successfully`);
-
-            node.send({
-                topic: 'tool-registered',
-                payload: {
-                    toolName: node.toolName,
-                    description: node.toolDescription,
-                    endpointId: binding.endpointId,
-                    serverName: binding.serverName,
-                    requiredScopes: node.requiredScopes,
-                    schema: parsedSchema,
-                    outputSchema: parsedOutputSchema,
-                    annotations
-                }
-            });
         };
 
         node.unregisterTool = function ()
@@ -154,105 +140,7 @@ module.exports = function (RED)
             node.isRegistered = false;
             node.status({ fill: 'grey', shape: 'ring', text: 'unregistered' });
             node.log(`Tool "${node.toolName}" unregistered`);
-
-            node.send({ topic: 'tool-unregistered', payload: { toolName: node.toolName } });
         };
-
-        node.updateRegistration = function ()
-        {
-            if (node.isRegistered)
-            {
-                node.unregisterTool();
-                setTimeout(() => node.registerTool(), 100);
-            }
-        };
-
-        node.on('input', function (msg)
-        {
-            const command = msg.topic || (msg.payload && msg.payload.command);
-
-            switch (command)
-            {
-                case 'register':
-                    node.registerTool();
-                    break;
-
-                case 'unregister':
-                    node.unregisterTool();
-                    break;
-
-                case 'update':
-                    {
-                        const previousBinding = node.binding();
-                        const previousToolName = node.toolName;
-
-                        if (msg.payload.toolName) node.toolName = msg.payload.toolName;
-                        if (msg.payload.toolDescription) node.toolDescription = msg.payload.toolDescription;
-                        if (Object.prototype.hasOwnProperty.call(msg.payload, 'endpoint')) node.endpoint = normalizeEndpoint(msg.payload.endpoint);
-                        if (Object.prototype.hasOwnProperty.call(msg.payload, 'requiredScopes')) node.requiredScopes = parseList(msg.payload.requiredScopes || '');
-                        if (Object.prototype.hasOwnProperty.call(msg.payload, 'toolBehavior')) node.toolBehavior = msg.payload.toolBehavior || '';
-                        if (Object.prototype.hasOwnProperty.call(msg.payload, 'worldAccess')) node.worldAccess = msg.payload.worldAccess || '';
-                        if (msg.payload.toolSchema)
-                        {
-                            try
-                            {
-                                parsedSchema = JSON.parse(msg.payload.toolSchema);
-                                node.toolSchema = msg.payload.toolSchema;
-                            } catch (error)
-                            {
-                                node.warn(`Invalid schema in update: ${error.message}`);
-                            }
-                        }
-                        if (Object.prototype.hasOwnProperty.call(msg.payload, 'outputSchema'))
-                        {
-                            const nextOutputSchema = msg.payload.outputSchema || '';
-                            if (!nextOutputSchema)
-                            {
-                                parsedOutputSchema = null;
-                                node.outputSchema = '';
-                            } else
-                            {
-                                try
-                                {
-                                    parsedOutputSchema = JSON.parse(nextOutputSchema);
-                                    node.outputSchema = nextOutputSchema;
-                                } catch (error)
-                                {
-                                    node.warn(`Invalid output schema in update: ${error.message}`);
-                                }
-                            }
-                        }
-                        if (node.isRegistered)
-                        {
-                            RED.events.emit('mcp-tool-unregister', { name: previousToolName, endpointId: previousBinding.endpointId, serverName: previousBinding.serverName });
-                            node.isRegistered = false;
-                            node.registerTool();
-                        }
-                    }
-                    break;
-
-                case 'status':
-                    {
-                        const binding = node.binding();
-                        msg.payload = {
-                            toolName: node.toolName,
-                            isRegistered: node.isRegistered,
-                            description: node.toolDescription,
-                            endpointId: binding.endpointId,
-                            serverName: binding.serverName,
-                            requiredScopes: node.requiredScopes,
-                            schema: parsedSchema,
-                            outputSchema: parsedOutputSchema,
-                            annotations: toolAnnotations(node.toolBehavior, node.worldAccess)
-                        };
-                        node.send(msg);
-                    }
-                    break;
-
-                default:
-                    node.warn(`Unknown command: ${command}`);
-            }
-        });
 
         if (node.toolName) setTimeout(() => node.registerTool(), 500);
 
