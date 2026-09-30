@@ -180,7 +180,7 @@ describe('lib/admin-tools', () => {
 
     it('omits code and arbitrary config; explicit code is capped', async () => {
         const large = { ...tab, nodes: tab.nodes.map(node =>
-            node.id === 'n1' ? { ...node, func: 'x'.repeat(5000), password: 'hidden' } : node
+            node.id === 'n1' ? { ...node, func: 'x'.repeat(15000), password: 'hidden' } : node
         ) };
         const { tools } = build({ 'GET /flow/tab1': () => ({ status: 200, body: large }) });
         const normal = (await tools.callTool('get_flow', { mode: 'node', id: 'tab1', nodeId: 'n1' })).structuredContent;
@@ -190,7 +190,7 @@ describe('lib/admin-tools', () => {
         const explicit = (await tools.callTool('get_flow', {
             mode: 'node', id: 'tab1', nodeId: 'n1', includeCode: true
         })).structuredContent;
-        assert.equal(explicit.node.code.length, 2000);
+        assert.equal(explicit.node.code.length, 10000);
         assert.equal(explicit.node.codeTruncated, true);
         assert.equal(explicit.meta.truncated, true);
         assert.equal(explicit.meta.codeOmitted, false);
