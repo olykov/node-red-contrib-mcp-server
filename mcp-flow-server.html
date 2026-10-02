@@ -34,10 +34,8 @@
             advertisedScopes: { value: '' }
         },
         inputs: 1,
-        outputs: 2,
-        outputLabels: function(index) {
-            return index === 0 ? 'Tool execution and status' : 'Admin tool telemetry';
-        },
+        outputs: 1,
+        outputLabels: 'Tool execution and status',
         icon: 'font-awesome/fa-cogs',
         label: function() {
             return this.name || 'MCP Flow Server';
@@ -256,5 +254,4 @@
     </dl>
     <h3>Runtime</h3>
     <p>Output 1 sends <code>mcp-tool-execute</code> and status messages. The node waits for matching <code>mcp-tool-response</code> messages on its input.</p>
-    <p>Output 2 sends one <code>mcp-admin-telemetry</code> message per admin tool call. Its payload contains a bounded tool name and mode, status, duration in milliseconds, response bytes, scanned node count, and cache state. It contains no request arguments or flow content.</p>
 </script>

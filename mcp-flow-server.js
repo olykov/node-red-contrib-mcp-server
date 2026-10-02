@@ -370,23 +370,11 @@ module.exports = function (RED)
 
         node.status({ fill: "grey", shape: "ring", text: "stopped" });
 
-        node.publishToolTelemetry = function (event, admin = false)
+        node.publishToolTelemetry = function (event)
         {
             if (node.runtime && node.runtime.publishToolTelemetry)
             {
                 node.runtime.publishToolTelemetry({ endpoint: node.serverName, ...event });
-            }
-            if (!admin) return;
-            try
-            {
-                node.send([null, { topic: 'mcp-admin-telemetry', payload: event }]);
-            } catch
-            {
-                if (!node.telemetryWarningShown)
-                {
-                    node.telemetryWarningShown = true;
-                    node.warn('MCP admin telemetry output failed');
-                }
             }
         };
 
@@ -563,7 +551,7 @@ module.exports = function (RED)
                     responseBytes: responseBytes(res),
                     scannedNodes: meta && Number.isSafeInteger(meta.scannedNodes) ? meta.scannedNodes : null,
                     cached: meta && typeof meta.cached === 'boolean' ? meta.cached : null
-                }, adminTool);
+                });
             }
         };
 

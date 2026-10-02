@@ -338,46 +338,6 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(RED.events.listenerCount('runtime-event'), 0);
     });
 
-    it('emits bounded get_flow telemetry only on the second output', async () => {
-        const { server } = buildServer({
-            serverPath: '/internal/mcp/ops',
-            __flowNodes: [
-                { id: 'tab1', type: 'tab', label: 'Operations' },
-                { id: 'n1', type: 'function', z: 'tab1', func: 'private code' }
-            ],
-            __runtime: {
-                adminPort: 1881,
-                adminEndpointPath: '/internal/mcp/ops',
-                credentials: { adminToken: 'configured-value' }
-            }
-        });
-        const request = { id: 1, params: { name: 'get_flow', arguments: {} } };
-        const first = mockRes();
-        await server.handleToolCall(request, first);
-        const second = mockRes();
-        await server.handleToolCall(request, second);
-
-        assert.equal(first.body.result.structuredContent.totalTabs, 1);
-        assert.equal(server.sent.length, 2);
-        for (const [index, response] of [first, second].entries()) {
-            const [regular, metric] = server.sent[index];
-            assert.equal(regular, null);
-            assert.equal(metric.topic, 'mcp-admin-telemetry');
-            assert.deepStrictEqual(Object.keys(metric.payload).sort(), [
-                'cached', 'durationMs', 'mode', 'responseBytes', 'scannedNodes', 'status', 'tool'
-            ]);
-            assert.equal(metric.payload.tool, 'get_flow');
-            assert.equal(metric.payload.mode, 'tabs');
-            assert.equal(metric.payload.status, 'success');
-            assert.equal(metric.payload.scannedNodes, 2);
-            assert.equal(metric.payload.cached, index === 1);
-            assert.equal(metric.payload.responseBytes, Buffer.byteLength(JSON.stringify(response.body)));
-            assert.ok(metric.payload.durationMs >= 0);
-            assert.ok(!JSON.stringify(metric).includes('private code'));
-            assert.ok(!JSON.stringify(metric).includes('configured-value'));
-        }
-    });
-
     it('publishes admin calls through the runtime metrics source without changing the MCP response', async () => {
         const { server, runtimeNode, types } = buildServer({
             serverName: 'ops',
@@ -402,8 +362,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(metrics.sent[0].payload.endpoint, 'ops');
         assert.equal(metrics.sent[0].payload.tool, 'get_flow');
         assert.equal(metrics.sent[0].payload.status, 'success');
-        assert.equal(server.sent[0][0], null);
-        assert.equal(server.sent[0][1].topic, 'mcp-admin-telemetry');
+        assert.equal(server.sent.length, 0);
         assert.ok(!JSON.stringify(metrics.sent[0]).includes('configured-value'));
     });
 
@@ -668,84 +627,6 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(response.body.result.structuredContent.totalTabs, 1);
         assert.equal(flowResponse.body.result.content[0].text, JSON.stringify({ ok: true }));
         assert.deepStrictEqual(runtimeNode.warnings, ['MCP tool telemetry subscriber failed']);
-    });
-
-    it('emits failed admin telemetry without changing the error response', async () => {
-        const { server } = buildServer({
-            serverPath: '/internal/mcp/ops',
-            __runtime: {
-                adminPort: 1881,
-                adminEndpointPath: '/internal/mcp/ops',
-                credentials: { adminToken: 'configured-value' }
-            }
-        });
-        const response = mockRes();
-        await server.handleToolCall({
-            id: 2,
-            params: { name: 'get_flow', arguments: { mode: 'invalid-secret-input' } }
-        }, response);
-
-        assert.equal(response.body.error.code, -32602);
-        const metric = server.sent[0][1];
-        assert.equal(metric.payload.mode, 'unknown');
-        assert.equal(metric.payload.status, 'failed');
-        assert.equal(metric.payload.scannedNodes, null);
-        assert.equal(metric.payload.cached, null);
-        assert.equal(metric.payload.responseBytes, Buffer.byteLength(JSON.stringify(response.body)));
-        assert.ok(!JSON.stringify(metric).includes('invalid-secret-input'));
-    });
-
-    it('marks a structured admin tool error as failed telemetry', async () => {
-        const { server } = buildServer({
-            serverPath: '/internal/mcp/ops',
-            __runtime: {
-                adminPort: 1881,
-                adminEndpointPath: '/internal/mcp/ops',
-                credentials: { adminToken: 'configured-value' }
-            }
-        });
-        const result = {
-            isError: true,
-            content: [{ type: 'text', text: 'Tab not found' }],
-            structuredContent: {
-                mode: 'tab_summary',
-                source: '/flow/missing',
-                meta: { scannedNodes: 0, cached: false },
-                error: { code: 'FLOW_NOT_FOUND', message: 'Tab not found' }
-            }
-        };
-        server.adminTools.callTool = async () => result;
-        const response = mockRes();
-        await server.handleToolCall({
-            id: 5,
-            params: { name: 'get_flow', arguments: { id: 'missing' } }
-        }, response);
-
-        assert.deepStrictEqual(response.body.result, result);
-        assert.deepStrictEqual({
-            mode: server.sent[0][1].payload.mode,
-            status: server.sent[0][1].payload.status,
-            scannedNodes: server.sent[0][1].payload.scannedNodes,
-            cached: server.sent[0][1].payload.cached
-        }, { mode: 'tab_summary', status: 'failed', scannedNodes: 0, cached: false });
-    });
-
-    it('keeps admin responses available if telemetry delivery fails', async () => {
-        const { server } = buildServer({
-            serverPath: '/internal/mcp/ops',
-            __flowNodes: [{ id: 'tab1', type: 'tab', label: 'Operations' }],
-            __runtime: {
-                adminPort: 1881,
-                adminEndpointPath: '/internal/mcp/ops',
-                credentials: { adminToken: 'configured-value' }
-            }
-        });
-        server.send = () => { throw new Error('telemetry unavailable'); };
-        const response = mockRes();
-        await server.handleToolCall({ id: 3, params: { name: 'get_flow', arguments: {} } }, response);
-        await server.handleToolCall({ id: 4, params: { name: 'get_flow', arguments: {} } }, mockRes());
-        assert.equal(response.body.result.structuredContent.totalTabs, 1);
-        assert.deepStrictEqual(server.warnings, ['MCP admin telemetry output failed']);
     });
 
     it('does not expose admin tools without complete runtime admin config', () => {
