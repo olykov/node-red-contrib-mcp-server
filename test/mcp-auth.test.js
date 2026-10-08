@@ -92,6 +92,7 @@ describe('mcp auth token exchange', () => {
         const store = { state: null, code: null };
         const auth = {
             id: 'auth-1',
+            provider: 'authentik',
             issuerUrl: 'https://issuer.example.test/oidc',
             clientId: 'upstream-client',
             baseScopes: 'openid profile email',
@@ -173,6 +174,17 @@ describe('mcp auth token exchange', () => {
             assert.strictEqual(store.state.deleted, true);
             assert.deepStrictEqual(store.code.value.groups, ['team-a']);
             assert.deepStrictEqual(store.code.value.scopes, ['openid', 'profile', 'resource:read']);
+            const matchingUserInfo = axios.get;
+            axios.get = async url => url === 'https://issuer.example.test/userinfo'
+                ? { data: { sub: 'different-subject', groups: ['team-a'] } }
+                : matchingUserInfo(url);
+            store.code = null;
+            store.state.deleted = false;
+            await assert.rejects(() => completeAuthorization({
+                headers: { host: 'mcp.example.test', 'x-forwarded-proto': 'https' },
+                query: { code: 'upstream-code', state: store.state.state }
+            }, mockRes(), node), /UserInfo subject mismatch/);
+            assert.strictEqual(store.code, null);
         } finally {
             axios.get = originalGet;
             axios.post = originalPost;

@@ -71,7 +71,21 @@ npm link <package-name>
 
 `mcp-redis` defines storage for short-lived authorization state and opaque access tokens. Memory mode is for local development only. Redis-backed modes are intended for shared or restarted runtimes.
 
-`mcp-auth` defines OIDC settings, storage selection, and token TTLs. Secrets are stored as Node-RED credentials or read from environment variables.
+`mcp-auth` selects its active identity provider using the Authentik or Microsoft Entra ID tab.
+Each provider keeps separate client settings and secrets. Shared settings select storage, client metadata hosts and token TTLs.
+Secrets are stored as Node-RED credentials or read from environment variables.
+
+Authentik uses an HTTPS issuer URL, client ID, scopes and UserInfo claim names.
+Microsoft uses a tenant GUID and application client GUID; its tenant-specific v2 issuer,
+`openid profile email` scopes and `roles` claim are fixed. Microsoft permissions come only
+from the verified ID token; at least one assigned app role is required. Endpoint Allowed Groups
+must match the role values used for that endpoint. No Graph directory permissions are needed.
+
+Authorization state, codes and access tokens are isolated by auth node, provider, issuer,
+client ID and claim settings, even when storage is shared. Switching provider/configuration
+requires a new login. Existing configurations must explicitly select a provider and be saved;
+there is no legacy-provider inference. Switching back to an identical configuration can reuse
+its unexpired tokens; switching is not a token-revocation mechanism.
 
 Client metadata hosts must be allow-listed. This prevents the authorization endpoint from fetching arbitrary user-provided URLs during client metadata validation.
 

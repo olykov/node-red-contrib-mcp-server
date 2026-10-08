@@ -36,11 +36,19 @@
         defaults: {
             name: { value: '' },
             enabled: { value: true },
-            issuerUrl: { value: '', required: true },
-            clientId: { value: '', required: true },
+            provider: { value: 'authentik', required: true, validate: function(v) { return v === 'authentik' || v === 'microsoft'; } },
+            issuerUrl: { value: '', validate: function(v) {
+                if (this.provider !== 'authentik') return true;
+                try { var u = new URL(v); return u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash; }
+                catch (_) { return false; }
+            } },
+            clientId: { value: '', validate: function(v) { return this.provider !== 'authentik' || (typeof v === 'string' && v.trim().length > 0); } },
             clientSecretEnv: { value: '' },
+            microsoftTenantId: { value: '', validate: function(v) { return this.provider !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
+            microsoftClientId: { value: '', validate: function(v) { return this.provider !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
+            microsoftClientSecretEnv: { value: '' },
             allowedClientHosts: { value: '', required: true },
-            baseScopes: { value: 'openid profile email' },
+            baseScopes: { value: 'openid profile email groups' },
             groupClaim: { value: 'groups' },
             userClaim: { value: 'email' },
             redis: { value: '', type: 'mcp-redis', required: true },
@@ -49,10 +57,24 @@
             stateTtl: { value: 300 }
         },
         credentials: {
-            clientSecret: { type: 'password' }
+            clientSecret: { type: 'password' },
+            microsoftClientSecret: { type: 'password' }
         },
         label: function() {
             return this.name || 'MCP OIDC Auth';
+        },
+        oneditprepare: function() {
+            var tabs = RED.tabs.create({
+                id: 'mcp-auth-provider-tabs',
+                onchange: function(tab) {
+                    $('#node-config-input-provider').val(tab.id);
+                    $('.mcp-auth-provider-panel').hide();
+                    $('#mcp-auth-' + tab.id).show();
+                }
+            });
+            tabs.addTab({ id: 'authentik', label: 'Authentik' });
+            tabs.addTab({ id: 'microsoft', label: 'Microsoft Entra ID' });
+            tabs.activateTab(this.provider || 'authentik');
         }
     });
 </script>
@@ -120,6 +142,11 @@
         <label for="node-config-input-enabled"><i class="fa fa-check"></i> Enabled</label>
         <input type="checkbox" id="node-config-input-enabled" style="width: auto;">
     </div>
+    <input type="hidden" id="node-config-input-provider">
+    <div class="form-row">
+        <ul id="mcp-auth-provider-tabs"></ul>
+    </div>
+    <div id="mcp-auth-authentik" class="mcp-auth-provider-panel">
     <div class="form-row">
         <label for="node-config-input-issuerUrl"><i class="fa fa-link"></i> Issuer URL</label>
         <input type="text" id="node-config-input-issuerUrl" placeholder="https://idp.example.com/oidc/app">
@@ -137,10 +164,6 @@
         <input type="text" id="node-config-input-clientSecretEnv" placeholder="Optional environment variable">
     </div>
     <div class="form-row">
-        <label for="node-config-input-allowedClientHosts"><i class="fa fa-globe"></i> Client Hosts</label>
-        <input type="text" id="node-config-input-allowedClientHosts" placeholder="chat.example.com, client.example.com">
-    </div>
-    <div class="form-row">
         <label for="node-config-input-baseScopes"><i class="fa fa-lock"></i> Base Scopes</label>
         <input type="text" id="node-config-input-baseScopes" placeholder="openid profile email">
     </div>
@@ -151,6 +174,29 @@
     <div class="form-row">
         <label for="node-config-input-userClaim"><i class="fa fa-user"></i> User Claim</label>
         <input type="text" id="node-config-input-userClaim" placeholder="email">
+    </div>
+    </div>
+    <div id="mcp-auth-microsoft" class="mcp-auth-provider-panel" style="display: none;">
+        <div class="form-row">
+            <label for="node-config-input-microsoftTenantId"><i class="fa fa-building"></i> Tenant ID</label>
+            <input type="text" id="node-config-input-microsoftTenantId">
+        </div>
+        <div class="form-row">
+            <label for="node-config-input-microsoftClientId"><i class="fa fa-id-card"></i> Client ID</label>
+            <input type="text" id="node-config-input-microsoftClientId">
+        </div>
+        <div class="form-row">
+            <label for="node-config-input-microsoftClientSecret"><i class="fa fa-key"></i> Client Secret</label>
+            <input type="password" id="node-config-input-microsoftClientSecret" autocomplete="off">
+        </div>
+        <div class="form-row">
+            <label for="node-config-input-microsoftClientSecretEnv"><i class="fa fa-terminal"></i> Secret Env</label>
+            <input type="text" id="node-config-input-microsoftClientSecretEnv" placeholder="Optional environment variable">
+        </div>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-allowedClientHosts"><i class="fa fa-globe"></i> Client Hosts</label>
+        <input type="text" id="node-config-input-allowedClientHosts" placeholder="chat.example.com, client.example.com">
     </div>
     <div class="form-row">
         <label for="node-config-input-redis"><i class="fa fa-database"></i> Storage</label>
@@ -168,9 +214,6 @@
         <label for="node-config-input-stateTtl"><i class="fa fa-clock-o"></i> State TTL</label>
         <input type="number" id="node-config-input-stateTtl" min="60" placeholder="300">
     </div>
-    <div class="form-tips">
-        This config provides OIDC settings for MCP authorization. Keep provider-specific names and secrets out of exported flows.
-    </div>
 </script>
 
 <script type="text/html" data-help-name="mcp-redis">
@@ -181,4 +224,9 @@
 <script type="text/html" data-help-name="mcp-auth">
     <p>Defines OIDC settings used by MCP endpoints that require OAuth authorization.</p>
     <p>Secrets are stored as Node-RED credentials or read from environment variables.</p>
+    <p>The selected provider tab is active. Authentik uses its configured issuer and UserInfo groups.
+    Microsoft Entra ID uses a single-tenant v2 issuer and roles from the verified ID token;
+    scopes are fixed to openid profile email. At least one app role is required.</p>
+    <p>Each auth configuration and provider identity has isolated authorization storage.
+    Select the provider and save the configuration before using it with an endpoint.</p>
 </script>
