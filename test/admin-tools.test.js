@@ -235,6 +235,102 @@ describe('lib/admin-tools', () => {
         assert.equal(data.meta.truncated, true);
     });
 
+    it('exposes execution settings for each supported node only on explicit inspection', async () => {
+        const cases = [
+            ['link in', { links: ['entry'] }],
+            ['link out', { mode: 'return', links: [] }],
+            ['link call', { linkType: 'static', links: ['entry'], timeout: '30' }],
+            ['switch', { property: 'payload.operation', propertyType: 'msg',
+                rules: [{ t: 'eq', v: 'findOne', vt: 'str' }, { t: 'else' }], checkall: 'true', repair: false, outputs: 2 }],
+            ['catch', { scope: ['database'], uncaught: false }],
+            ['mongodb4', { mode: 'collection', collection: 'items', operation: 'find', output: 'toArray', maxTimeMS: '5000', handleDocId: false }],
+            ['mcp-flow-server', { serverPath: '/mcp/items', authMode: 'inherit', allowedGroups: 'Readers', requiredScopes: 'items:read', advertisedScopes: 'openid' }],
+            ['mcp-tool-registry', { toolName: 'read_items', endpoint: 'items', toolDescription: 'Read items',
+                toolSchema: JSON.stringify({ type: 'object', properties: { count: { type: 'integer' } } }),
+                outputSchema: JSON.stringify({ type: 'array', items: { type: 'object' } }),
+                toolBehavior: 'read-only', worldAccess: 'closed', requiredScopes: 'items:read' }]
+        ];
+        for (const [type, settings] of cases) {
+            const target = { id: 'target', type, ...settings, wires: [], credentials: { password: 'private-value' },
+                token: 'private-value', secret: 'private-value', arbitrary: 'private-value' };
+            const { tools } = build({ 'GET /flow/tab1': () => ({ status: 200, body: { id: 'tab1', nodes: [target] } }) });
+            const inspect = extra => tools.callTool('get_flow', { mode: 'node', id: 'tab1', nodeId: 'target', ...extra });
+            const normal = (await inspect({})).structuredContent;
+            assert.deepEqual((await inspect({ includeConfig: false })).structuredContent, normal);
+            const expanded = await inspect({ includeConfig: true });
+            assert.equal(expanded.structuredContent.node.configSupported, true, type);
+            assert.deepEqual(expanded.structuredContent.node.config, { ...(normal.node.config || {}), ...settings }, type);
+            assert.equal(JSON.stringify(expanded).includes('private-value'), false, type);
+            assert.equal(expanded.structuredContent.meta.truncated, false, type);
+            assert.deepEqual(JSON.parse(expanded.content[0].text), expanded.structuredContent);
+            const chain = (await tools.callTool('get_flow', { mode: 'chain', id: 'tab1', nodeId: 'target' })).structuredContent;
+            assert.deepEqual(chain.nodes[0], normal.node.type.startsWith('link ') ?
+                Object.fromEntries(Object.entries(normal.node).filter(([key]) => !key.startsWith('linkIds'))) : normal.node);
+        }
+    });
+
+    it('distinguishes return and link output modes even with identical empty links', async () => {
+        for (const mode of ['return', 'link']) {
+            const { tools } = build({ 'GET /flow/tab1': () => ({ status: 200,
+                body: { id: 'tab1', nodes: [{ id: 'target', type: 'link out', mode, links: [], wires: [] }] } }) });
+            const response = (await tools.callTool('get_flow', { mode: 'node', id: 'tab1', nodeId: 'target', includeConfig: true })).structuredContent;
+            assert.deepEqual(response.node.linkIds, []);
+            assert.equal(response.node.config.mode, mode);
+        }
+    });
+
+    it('redacts named secrets inside rules and JSON schema text without mutating the source', async () => {
+        const schema = JSON.stringify({ type: 'object', credentials: { token: 'hidden-value' },
+            'x-options': { api_key: 'hidden-value', safe: true } });
+        const rule = { t: 'eq', v: { safe: 1, secret: 'hidden-value', authorization: 'hidden-value' }, vt: 'json' };
+        for (const target of [
+            { id: 'target', type: 'mcp-tool-registry', toolSchema: schema, outputSchema: '{invalid', wires: [] },
+            { id: 'target', type: 'switch', rules: [rule], wires: [] }
+        ]) {
+            const before = JSON.stringify(target);
+            const { tools } = build({ 'GET /flow/tab1': () => ({ status: 200, body: { id: 'tab1', nodes: [target] } }) });
+            const data = (await tools.callTool('get_flow', { mode: 'node', id: 'tab1', nodeId: 'target', includeConfig: true })).structuredContent;
+            assert.equal(JSON.stringify(data).includes('hidden-value'), false);
+            assert.ok(data.node.configRedactedProperties.length > 0);
+            if (target.type === 'switch') assert.equal(data.node.config.rules[0].v.safe, 1);
+            else {
+                assert.equal(JSON.parse(data.node.config.toolSchema)['x-options'].safe, true);
+                assert.deepEqual(data.node.configOmittedProperties, ['outputSchema']);
+                assert.equal(data.meta.truncated, true);
+            }
+            assert.equal(JSON.stringify(target), before);
+        }
+    });
+
+    it('reports oversized, aggregate-limited and deeply nested settings without partial values', async () => {
+        let deep = { type: 'string' };
+        for (let i = 0; i < 20; i++) deep = { items: deep };
+        const cases = [
+            { type: 'catch', scope: Array(2001).fill('node') },
+            { type: 'switch', rules: [{ t: 'eq', v: '\u00e9'.repeat(17000) }] },
+            { type: 'mcp-tool-registry', toolSchema: JSON.stringify(deep) },
+            { type: 'mcp-flow-server', serverPath: 'a'.repeat(30000), authMode: 'b'.repeat(30000), allowedGroups: 'c'.repeat(30000) }
+        ];
+        for (const settings of cases) {
+            const target = { id: 'target', ...settings, wires: [] };
+            const { tools } = build({ 'GET /flow/tab1': () => ({ status: 200, body: { id: 'tab1', nodes: [target] } }) });
+            const data = (await tools.callTool('get_flow', { mode: 'node', id: 'tab1', nodeId: 'target', includeConfig: true })).structuredContent;
+            assert.ok(data.node.configOmittedProperties.length > 0);
+            assert.equal(data.meta.truncated, true);
+            for (const field of data.node.configOmittedProperties) assert.equal(data.node.config[field], undefined);
+            assert.ok(Buffer.byteLength(JSON.stringify(data.node.config)) <= data.meta.limits.configPageBytes);
+        }
+    });
+
+    it('marks unsupported node configuration explicitly rather than claiming complete settings', async () => {
+        const { tools } = build({ 'GET /flow/tab1': () => ({ status: 200,
+            body: { id: 'tab1', nodes: [{ id: 'target', type: 'custom-node', secret: 'hidden-value', wires: [] }] } }) });
+        const data = (await tools.callTool('get_flow', { mode: 'node', id: 'tab1', nodeId: 'target', includeConfig: true })).structuredContent;
+        assert.equal(data.node.configSupported, false);
+        assert.deepEqual(data.node.config, {});
+        assert.equal(JSON.stringify(data).includes('hidden-value'), false);
+    });
+
     it('lists definitions from global and finds usages only in an explicit tab', async () => {
         const { tools, calls } = build({
             'GET /flow/global': () => ({

@@ -128,7 +128,30 @@ Admin tools expose read-only `get_flow` only when the selected runtime has Admin
 | `mode: "config", configId` with optional `id` or `subflowId` | Ordinary properties of one config node in the selected scope | `/flow/global` or `/flow/:id` |
 | `mode: "node_configs", nodeId` with `id` or `subflowId` | Config references of one node, including the property name and scope | `/flow/:id`, `/flow/global` for tabs; `/flow/global` for subflows |
 
-Use `offset` from `meta.nextOffset` to continue a paginated response. A chain follows direct wires within one tab; link nodes expose target IDs but are not traversed into other tabs. Node details include only an allowlist of identifiers and labels. `includeCode: true` works only with `mode: "node"` and returns at most 2,000 Function code characters.
+Use `offset` from `meta.nextOffset` to continue a paginated response. A chain follows direct wires within one tab; link nodes expose target IDs but are not traversed into other tabs. Node details include only an allowlist of identifiers and labels. `includeCode: true` works only with `mode: "node"` and returns at most 10,000 Function code characters.
+
+Use `includeConfig: true` with `mode: "node"` to inspect supported execution settings:
+
+| Node type | Settings |
+| --- | --- |
+| `inject` | Payload, topic, properties and scheduling |
+| `link in`, `link out`, `link call` | Links, output mode, call type and timeout as applicable |
+| `switch` | Property/type, rules, check-all, repair and outputs |
+| `catch` | Scoped node IDs and uncaught setting |
+| `mongodb4` | Operation mode, collection, operation, output, timeout and ID handling |
+| `mcp-flow-server` | Route, auth mode, groups and required/advertised scopes |
+| `mcp-tool-registry` | Description, input/output schemas, endpoint, behavior, world access and scopes |
+
+Settings retain their configured types; absent fields are not filled with inferred defaults.
+`node.configSupported` identifies supported types. Values over 32 KiB, excessive nested structures
+or settings beyond the 64 KiB config budget are omitted, listed in `configOmittedProperties`, and
+set `meta.truncated`. Nested values are limited to 16 levels and 2,000 visited values per request.
+Credentials and arbitrary top-level properties are excluded. Named secret keys inside supported
+structures, including JSON schema strings, are replaced with `[REDACTED]` and identified in
+`configRedactedProperties`; invalid JSON schema text is omitted. Literal strings may still contain
+secrets stored outside credential fields: this is not a general-purpose secret detector.
+Default node, tab, group and chain inspection remain compact. Config references remain available
+through `node_configs`; no credential API is called.
 
 Config-node details retain ordinary property types and values. Node-RED's flow API excludes declared credential values; an unexpected `credentials` container is replaced with `[REDACTED]` defensively. No credential API is called. A property over 32 KiB is listed in `omittedProperties` instead of being returned; config properties are paginated by 40 fields and 64 KiB of values. Properties that a node author stored outside Node-RED's credential mechanism remain ordinary properties and are not automatically redacted.
 

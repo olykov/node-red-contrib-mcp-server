@@ -304,7 +304,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         });
         assert.deepStrictEqual(getFlow.inputSchema.properties.includeConfig, {
             type: 'boolean',
-            description: 'Return bounded supported node parameters in node mode; inject nodes include raw payload and scheduling fields'
+            description: 'Return bounded execution settings for inject, link, switch, catch, mongodb4 and MCP nodes in node mode; credentials are excluded'
         });
         assert.strictEqual(getFlow.outputSchema.type, 'object');
         assert.deepStrictEqual(getFlow.outputSchema.required, ['mode', 'source', 'meta']);
