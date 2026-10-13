@@ -184,6 +184,13 @@ Protected endpoints return `401` with `WWW-Authenticate` pointing to OAuth prote
 
 The authorization endpoint requires PKCE S256, validates the client metadata host allow-list, checks the exact redirect URI against the client metadata document, delegates login to the configured OIDC issuer, validates the returned ID token through JWKS, and issues short-lived opaque MCP access tokens.
 
+The RFC 8252 loopback exception permits a different port for a registered HTTP
+callback on `127.0.0.1`, `[::1]` or `localhost` when CIMD declares `native` or omits
+`application_type`. The host, path and query must remain identical; credentials,
+fragments and invalid ports are rejected by this exception. Explicitly non-native
+clients retain exact matching. The token endpoint always requires the exact URI,
+including the port, used in the authorization request.
+
 ## Verification
 
 Run before commit:

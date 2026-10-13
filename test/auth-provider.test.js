@@ -298,7 +298,7 @@ describe('native loopback redirects', () => {
             assert.equal(res.body.error_description, 'redirect_uri is not registered for this client');
             assert.equal(res.location, undefined);
         }
-        for (const application_type of ['web', undefined]) {
+        for (const application_type of ['web', null, 'other']) {
             const { res } = await authorize({ ...metadata, application_type }, 'http://127.0.0.1:56429/callback/client');
             assert.equal(res.statusCode, 400);
         }
@@ -308,6 +308,29 @@ describe('native loopback redirects', () => {
             'https://client.example.test/callback')).res.statusCode, 200);
         assert.equal((await authorize(metadata, 'http://127.0.0.1:56429/callback/client',
             { code_challenge_method: 'plain' })).res.statusCode, 400);
+    });
+
+    it('accepts registered loopback ports when CIMD omits application_type', async () => {
+        const metadata = {
+            client_id: 'https://client.example.test/metadata.json', client_name: 'CLI client',
+            redirect_uris: ['http://localhost/callback', 'http://127.0.0.1/callback'],
+            grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'],
+            token_endpoint_auth_method: 'none'
+        };
+        for (const host of ['localhost', '127.0.0.1']) {
+            const uri = 'http://' + host + ':53682/callback';
+            const { res, auth } = await authorize(metadata, uri);
+            assert.equal(res.statusCode, 200);
+            const state = new URL(res.location).searchParams.get('state');
+            assert.equal((await auth.readState(state)).redirect_uri, uri);
+        }
+        for (const uri of ['http://localhost:53682/other', 'https://localhost:53682/callback',
+            'http://localhost:53682/callback?extra=1', 'http://localhost:53682/callback#fragment',
+            'http://user@localhost:53682/callback', 'http://localhost:0/callback', 'http://localhost:65536/callback']) {
+            assert.equal((await authorize(metadata, uri)).res.statusCode, 400);
+        }
+        assert.equal((await authorize({ ...metadata, redirect_uris: ['http://localhost/callback'] },
+            'http://127.0.0.1:53682/callback')).res.statusCode, 400);
     });
 
     it('does not relax the actual port at authorization-code exchange', async () => {

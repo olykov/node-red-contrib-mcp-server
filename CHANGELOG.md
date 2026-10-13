@@ -11,6 +11,11 @@
 - Added authorization-code exchange with PKCE S256, OIDC ID token validation, and opaque MCP access tokens.
 - Added tests for OAuth challenges, token exchange, authorized initialization, tool filtering, and forbidden tool calls.
 
+## 2.0.1-upstream.1
+
+- Allow registered HTTP loopback redirect ports when CIMD omits `application_type`, as well as for explicit native clients.
+- Retain exact host/path/query matching, strict authorization-code exchange and rejection of port changes for explicitly non-native clients.
+
 ## 2.0.0-upstream.1
 
 - Added `mcp-runtime` config nodes for shared local MCP listener settings.
