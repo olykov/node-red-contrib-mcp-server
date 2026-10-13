@@ -1,0 +1,241 @@
+<script type="text/javascript">
+    RED.nodes.registerType('mcp-redis', {
+        category: 'config',
+        defaults: {
+            name: { value: '' },
+            mode: { value: 'memory', required: true },
+            redisUrlEnv: { value: 'REDIS_URL' },
+            host: { value: '127.0.0.1' },
+            port: { value: 6379, validate: function(v) { return v === '' || (v > 0 && v < 65536); } },
+            db: { value: 0 },
+            tls: { value: false },
+            username: { value: '' },
+            passwordEnv: { value: '' },
+            keyPrefix: { value: 'mcp_auth:' }
+        },
+        credentials: {
+            password: { type: 'password' }
+        },
+        label: function() {
+            return this.name || 'MCP Auth Storage';
+        },
+        oneditprepare: function() {
+            function updateMode() {
+                var mode = $('#node-config-input-mode').val();
+                $('.mcp-redis-env-row').toggle(mode === 'env');
+                $('.mcp-redis-manual-row').toggle(mode === 'manual');
+                $('.mcp-redis-memory-note').toggle(mode === 'memory');
+            }
+            $('#node-config-input-mode').on('change', updateMode);
+            updateMode();
+        }
+    });
+
+    RED.nodes.registerType('mcp-auth', {
+        category: 'config',
+        defaults: {
+            name: { value: '' },
+            enabled: { value: true },
+            oauthSlug: { value: '', required: true, validate: function(v) { return typeof v === 'string' && /^[a-z][a-z0-9-]{0,62}$/.test(v); } },
+            provider: { value: 'authentik', required: true, validate: function(v) { return v === 'authentik' || v === 'microsoft'; } },
+            issuerUrl: { value: '', validate: function(v) {
+                if (this.provider !== 'authentik') return true;
+                try { var u = new URL(v); return u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash; }
+                catch (_) { return false; }
+            } },
+            clientId: { value: '', validate: function(v) { return this.provider !== 'authentik' || (typeof v === 'string' && v.trim().length > 0); } },
+            clientSecretEnv: { value: '' },
+            microsoftTenantId: { value: '', validate: function(v) { return this.provider !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
+            microsoftClientId: { value: '', validate: function(v) { return this.provider !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
+            microsoftClientSecretEnv: { value: '' },
+            allowedClientHosts: { value: '', required: true },
+            baseScopes: { value: 'openid profile email groups' },
+            groupClaim: { value: 'groups' },
+            userClaim: { value: 'email' },
+            redis: { value: '', type: 'mcp-redis', required: true },
+            accessTokenTtl: { value: 3600 },
+            authCodeTtl: { value: 300 },
+            stateTtl: { value: 300 }
+        },
+        credentials: {
+            clientSecret: { type: 'password' },
+            microsoftClientSecret: { type: 'password' }
+        },
+        label: function() {
+            return this.name || 'MCP OIDC Auth';
+        },
+        oneditprepare: function() {
+            var tabs = RED.tabs.create({
+                id: 'mcp-auth-provider-tabs',
+                onchange: function(tab) {
+                    $('#node-config-input-provider').val(tab.id);
+                    $('.mcp-auth-provider-panel').hide();
+                    $('#mcp-auth-' + tab.id).show();
+                }
+            });
+            tabs.addTab({ id: 'authentik', label: 'Authentik' });
+            tabs.addTab({ id: 'microsoft', label: 'Microsoft Entra ID' });
+            tabs.activateTab(this.provider || 'authentik');
+        }
+    });
+</script>
+
+<script type="text/html" data-template-name="mcp-redis">
+    <div class="form-row">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-config-input-name" placeholder="Optional display name">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-mode"><i class="fa fa-database"></i> Mode</label>
+        <select id="node-config-input-mode">
+            <option value="memory">Memory</option>
+            <option value="env">Redis URL from environment</option>
+            <option value="manual">Manual Redis settings</option>
+        </select>
+    </div>
+    <div class="form-tips mcp-redis-memory-note">
+        Memory storage is for local development only. Restarting Node-RED clears pending authorization state and issued access tokens.
+    </div>
+    <div class="form-row mcp-redis-env-row">
+        <label for="node-config-input-redisUrlEnv"><i class="fa fa-terminal"></i> URL Env</label>
+        <input type="text" id="node-config-input-redisUrlEnv" placeholder="REDIS_URL">
+    </div>
+    <div class="form-row mcp-redis-manual-row">
+        <label for="node-config-input-host"><i class="fa fa-server"></i> Host</label>
+        <input type="text" id="node-config-input-host" placeholder="127.0.0.1">
+    </div>
+    <div class="form-row mcp-redis-manual-row">
+        <label for="node-config-input-port"><i class="fa fa-plug"></i> Port</label>
+        <input type="number" id="node-config-input-port" min="1" max="65535" placeholder="6379">
+    </div>
+    <div class="form-row mcp-redis-manual-row">
+        <label for="node-config-input-db"><i class="fa fa-list-ol"></i> DB</label>
+        <input type="number" id="node-config-input-db" min="0" placeholder="0">
+    </div>
+    <div class="form-row mcp-redis-manual-row">
+        <label for="node-config-input-tls"><i class="fa fa-lock"></i> TLS</label>
+        <input type="checkbox" id="node-config-input-tls" style="width: auto;">
+    </div>
+    <div class="form-row mcp-redis-manual-row">
+        <label for="node-config-input-username"><i class="fa fa-user"></i> Username</label>
+        <input type="text" id="node-config-input-username">
+    </div>
+    <div class="form-row mcp-redis-manual-row">
+        <label for="node-config-input-password"><i class="fa fa-key"></i> Password</label>
+        <input type="password" id="node-config-input-password" autocomplete="off">
+    </div>
+    <div class="form-row mcp-redis-manual-row">
+        <label for="node-config-input-passwordEnv"><i class="fa fa-terminal"></i> Password Env</label>
+        <input type="text" id="node-config-input-passwordEnv" placeholder="Optional environment variable">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-keyPrefix"><i class="fa fa-key"></i> Key Prefix</label>
+        <input type="text" id="node-config-input-keyPrefix" placeholder="mcp_auth:">
+    </div>
+</script>
+
+<script type="text/html" data-template-name="mcp-auth">
+    <div class="form-row">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-config-input-name" placeholder="Optional display name">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-enabled"><i class="fa fa-check"></i> Enabled</label>
+        <input type="checkbox" id="node-config-input-enabled" style="width: auto;">
+    </div>
+    <input type="hidden" id="node-config-input-provider">
+    <div class="form-row">
+        <label for="node-config-input-oauthSlug"><i class="fa fa-link"></i> OAuth slug</label>
+        <input type="text" id="node-config-input-oauthSlug" maxlength="63" autocomplete="off">
+    </div>
+    <div class="form-row">
+        <ul id="mcp-auth-provider-tabs"></ul>
+    </div>
+    <div id="mcp-auth-authentik" class="mcp-auth-provider-panel">
+    <div class="form-row">
+        <label for="node-config-input-issuerUrl"><i class="fa fa-link"></i> Issuer URL</label>
+        <input type="text" id="node-config-input-issuerUrl" placeholder="https://idp.example.com/oidc/app">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-clientId"><i class="fa fa-id-card"></i> Client ID</label>
+        <input type="text" id="node-config-input-clientId">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-clientSecret"><i class="fa fa-key"></i> Client Secret</label>
+        <input type="password" id="node-config-input-clientSecret" autocomplete="off">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-clientSecretEnv"><i class="fa fa-terminal"></i> Secret Env</label>
+        <input type="text" id="node-config-input-clientSecretEnv" placeholder="Optional environment variable">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-baseScopes"><i class="fa fa-lock"></i> Base Scopes</label>
+        <input type="text" id="node-config-input-baseScopes" placeholder="openid profile email">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-groupClaim"><i class="fa fa-users"></i> Group Claim</label>
+        <input type="text" id="node-config-input-groupClaim" placeholder="groups">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-userClaim"><i class="fa fa-user"></i> User Claim</label>
+        <input type="text" id="node-config-input-userClaim" placeholder="email">
+    </div>
+    </div>
+    <div id="mcp-auth-microsoft" class="mcp-auth-provider-panel" style="display: none;">
+        <div class="form-row">
+            <label for="node-config-input-microsoftTenantId"><i class="fa fa-building"></i> Tenant ID</label>
+            <input type="text" id="node-config-input-microsoftTenantId">
+        </div>
+        <div class="form-row">
+            <label for="node-config-input-microsoftClientId"><i class="fa fa-id-card"></i> Client ID</label>
+            <input type="text" id="node-config-input-microsoftClientId">
+        </div>
+        <div class="form-row">
+            <label for="node-config-input-microsoftClientSecret"><i class="fa fa-key"></i> Client Secret</label>
+            <input type="password" id="node-config-input-microsoftClientSecret" autocomplete="off">
+        </div>
+        <div class="form-row">
+            <label for="node-config-input-microsoftClientSecretEnv"><i class="fa fa-terminal"></i> Secret Env</label>
+            <input type="text" id="node-config-input-microsoftClientSecretEnv" placeholder="Optional environment variable">
+        </div>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-allowedClientHosts"><i class="fa fa-globe"></i> Client Hosts</label>
+        <input type="text" id="node-config-input-allowedClientHosts" placeholder="chat.example.com, client.example.com">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-redis"><i class="fa fa-database"></i> Storage</label>
+        <input type="text" id="node-config-input-redis">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-accessTokenTtl"><i class="fa fa-clock-o"></i> Access TTL</label>
+        <input type="number" id="node-config-input-accessTokenTtl" min="60" placeholder="3600">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-authCodeTtl"><i class="fa fa-clock-o"></i> Code TTL</label>
+        <input type="number" id="node-config-input-authCodeTtl" min="60" placeholder="300">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-stateTtl"><i class="fa fa-clock-o"></i> State TTL</label>
+        <input type="number" id="node-config-input-stateTtl" min="60" placeholder="300">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="mcp-redis">
+    <p>Stores short-lived MCP authorization state, authorization codes, and opaque access tokens.</p>
+    <p>Use memory mode for local development only. Use Redis-backed storage for shared or restarted runtimes.</p>
+</script>
+
+<script type="text/html" data-help-name="mcp-auth">
+    <p>Defines OIDC settings used by MCP endpoints that require OAuth authorization.</p>
+    <p>Secrets are stored as Node-RED credentials or read from environment variables.</p>
+    <p>OAuth slug is the stable public route name, independent of the Node-RED node ID.
+    Register https://your-public-host/oauth/your-slug/callback with the provider.
+    Keep the slug when replacing this node. Slugs must be unique across separate auth
+    configurations on the same listener or public base URL.</p>
+    <p>The selected provider tab is active. Authentik uses its configured issuer and UserInfo groups.
+    Microsoft Entra ID uses a single-tenant v2 issuer and roles from the verified ID token;
+    scopes are fixed to openid profile email. At least one app role is required.</p>
+    <p>Each auth configuration and provider identity has isolated authorization storage.
+    Select the provider and save the configuration before using it with an endpoint.</p>
+</script>

@@ -1,0 +1,58 @@
+{
+  "name": "node-red-contrib-mcp-server",
+  "version": "2.0.0-upstream.1",
+  "description": "Upstream-first Node-RED palette for exposing flows as MCP servers and tools.",
+  "main": "mcp-server.js",
+  "scripts": {
+    "test": "node --test",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "node-red",
+    "mcp",
+    "model-context-protocol",
+    "tools",
+    "server",
+    "sse",
+    "websocket",
+    "automation",
+    "interactive",
+    "visual-programming",
+    "flow-based"
+  ],
+  "license": "MIT",
+  "node-red": {
+    "nodes": {
+      "mcp-server": "mcp-server.js",
+      "mcp-client": "mcp-client.js",
+      "mcp-auth": "mcp-auth.js",
+      "mcp-flow-server": "mcp-flow-server.js",
+      "mcp-server-metrics": "mcp-server-metrics.js",
+      "mcp-tool-registry": "mcp-tool-registry.js"
+    }
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "eventsource": "^2.0.2",
+    "express": "^5.2.1",
+    "ioredis": "^5.4.1",
+    "jose": "^5.10.0",
+    "node-cache": "^5.1.2",
+    "qs": "^6.16.0",
+    "ws": "^8.14.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "peerDependencies": {
+    "node-red": ">=1.0.0"
+  },
+  "files": [
+    "*.js",
+    "*.html",
+    "*.md",
+    "LICENSE",
+    "lib/",
+    "test/"
+  ]
+}

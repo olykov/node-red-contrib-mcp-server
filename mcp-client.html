@@ -1,0 +1,398 @@
+<!-- MCP Client Node -->
+<script type="text/javascript">
+    RED.nodes.registerType('mcp-client', {
+        category: 'mcp',
+        color: '#68C4E8',
+        defaults: {
+            name: {value: ""},
+            serverUrl: {value: "http://localhost:8000", required: true},
+            connectionType: {value: "http", required: true},
+            autoConnect: {value: false},
+            reconnect: {value: true},
+            reconnectInterval: {value: 5000, validate: function(v) { return v >= 1000; }},
+            timeout: {value: 30000, validate: function(v) { return v >= 1000; }}
+        },
+        inputs: 1,
+        outputs: 1,
+        icon: "font-awesome/fa-link",
+        label: function() {
+            return this.name || `MCP Client (${this.connectionType})`;
+        },
+        labelStyle: function() {
+            return this.name ? "node_label_italic" : "";
+        },
+        oneditprepare: function() {
+            var node = this;
+
+            // Update connection type info
+            function updateConnectionTypeInfo() {
+                var connectionType = $("#node-input-connectionType").val();
+                
+                switch (connectionType) {
+                    case "http":
+                        $("#connection-type-info").html(`
+                            <i class="fa fa-info-circle"></i>
+                            <strong>HTTP:</strong> Simple request-response communication. Best for basic operations and polling.
+                        `);
+                        break;
+                    case "sse":
+                        $("#connection-type-info").html(`
+                            <i class="fa fa-info-circle"></i>
+                            <strong>Server-Sent Events:</strong> Real-time server-to-client streaming. Good for notifications and live updates.
+                        `);
+                        break;
+                    case "websocket":
+                        $("#connection-type-info").html(`
+                            <i class="fa fa-info-circle"></i>
+                            <strong>WebSocket:</strong> Full-duplex real-time communication. Best for interactive applications.
+                        `);
+                        break;
+                }
+            }
+
+            // Initialize connection type change handler
+            $("#node-input-connectionType").change(updateConnectionTypeInfo);
+            
+            // Initialize form
+            updateConnectionTypeInfo();
+
+            // Test connection button with type-specific testing
+            $("#test-connection-btn").click(function() {
+                var button = $(this);
+                var originalText = button.text();
+                button.text("Testing...").prop('disabled', true);
+                
+                var serverUrl = $("#node-input-serverUrl").val();
+                var connectionType = $("#node-input-connectionType").val();
+                
+                if (!serverUrl) {
+                    button.text(originalText).prop('disabled', false);
+                    RED.notify("Server URL is required", "error");
+                    return;
+                }
+
+                function resetButton() {
+                    button.text(originalText).prop('disabled', false);
+                }
+
+                // Test based on connection type
+                switch (connectionType) {
+                    case "http":
+                        // Test HTTP with health check
+                        $.ajax({
+                            url: serverUrl + "/health",
+                            method: "GET",
+                            timeout: 5000
+                        })
+                        .done(function(data) {
+                            resetButton();
+                            RED.notify("HTTP connection successful! Server is reachable.", "success");
+                        })
+                        .fail(function(xhr, status, error) {
+                            resetButton();
+                            RED.notify(`HTTP connection failed: ${error || status}`, "error");
+                        });
+                        break;
+
+                    case "sse":
+                        // Test SSE connection
+                        var sseUrl = serverUrl + "/sse";
+                        var eventSource = new EventSource(sseUrl);
+                        var sseTimeout = setTimeout(function() {
+                            eventSource.close();
+                            resetButton();
+                            RED.notify("SSE connection timeout - server may not support SSE", "warning");
+                        }, 5000);
+
+                        eventSource.onopen = function(event) {
+                            clearTimeout(sseTimeout);
+                            eventSource.close();
+                            resetButton();
+                            RED.notify("SSE connection successful! Real-time streaming available.", "success");
+                        };
+
+                        eventSource.onerror = function(event) {
+                            clearTimeout(sseTimeout);
+                            eventSource.close();
+                            resetButton();
+                            RED.notify("SSE connection failed - check server SSE support", "error");
+                        };
+                        break;
+
+                    case "websocket":
+                        // Test WebSocket connection
+                        var wsUrl = serverUrl.replace(/^http/, 'ws') + '/ws';
+                        try {
+                            var ws = new WebSocket(wsUrl);
+                            var wsTimeout = setTimeout(function() {
+                                ws.close();
+                                resetButton();
+                                RED.notify("WebSocket connection timeout - server may not support WebSockets", "warning");
+                            }, 5000);
+
+                            ws.onopen = function(event) {
+                                clearTimeout(wsTimeout);
+                                ws.close();
+                                resetButton();
+                                RED.notify("WebSocket connection successful! Full-duplex communication available.", "success");
+                            };
+
+                            ws.onerror = function(event) {
+                                clearTimeout(wsTimeout);
+                                resetButton();
+                                RED.notify("WebSocket connection failed - check server WebSocket support", "error");
+                            };
+                        } catch (error) {
+                            resetButton();
+                            RED.notify("WebSocket connection failed: " + error.message, "error");
+                        }
+                        break;
+
+                    default:
+                        resetButton();
+                        RED.notify("Unknown connection type", "error");
+                }
+            });
+
+
+            // URL validation
+            $("#node-input-serverUrl").on('input', function() {
+                var url = $(this).val();
+                var isValid = /^https?:\/\/.+/.test(url);
+                
+                if (url && !isValid) {
+                    $(this).addClass("input-error");
+                    $("#url-validation").show().text("URL must start with http:// or https://");
+                } else {
+                    $(this).removeClass("input-error");
+                    $("#url-validation").hide();
+                }
+            });
+        }
+    });
+</script>
+
+<script type="text/html" data-template-name="mcp-client">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Optional display name">
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-serverUrl"><i class="fa fa-globe"></i> Server URL</label>
+        <input type="text" id="node-input-serverUrl" placeholder="http://localhost:8000">
+        <div id="url-validation" style="display: none; margin-top: 5px; font-size: 12px; color: #e74c3c;"></div>
+        <div style="margin-top: 5px; font-size: 12px; color: #666;">
+            Base URL of the MCP server (include http:// or https://)
+        </div>
+        <button type="button" id="test-connection-btn" class="btn btn-secondary" style="margin-top: 5px;">
+            <i class="fa fa-check"></i> Test Connection
+        </button>
+    </div>
+
+    <hr>
+    <h4>Connection Settings</h4>
+
+    <div class="form-row">
+        <label for="node-input-connectionType"><i class="fa fa-exchange"></i> Connection Type</label>
+        <select id="node-input-connectionType">
+            <option value="http">HTTP (Request/Response)</option>
+            <option value="sse">Server-Sent Events</option>
+            <option value="websocket">WebSocket</option>
+        </select>
+        <div id="connection-type-info" style="margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-left: 4px solid #007bff; font-size: 12px;">
+            <!-- Connection type info will be populated by JavaScript -->
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-autoConnect"><i class="fa fa-play"></i> Auto Connect</label>
+        <input type="checkbox" id="node-input-autoConnect" style="width: auto;">
+        <span style="margin-left: 10px; font-size: 12px; color: #666;">Automatically connect when Node-RED starts</span>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-reconnect"><i class="fa fa-refresh"></i> Auto Reconnect</label>
+        <input type="checkbox" id="node-input-reconnect" style="width: auto;">
+        <span style="margin-left: 10px; font-size: 12px; color: #666;">Automatically reconnect on connection loss</span>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-reconnectInterval"><i class="fa fa-clock-o"></i> Reconnect Interval</label>
+        <input type="number" id="node-input-reconnectInterval" min="1000" step="1000" placeholder="5000">
+        <span style="margin-left: 10px; font-size: 12px; color: #666;">milliseconds</span>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-timeout"><i class="fa fa-hourglass"></i> Request Timeout</label>
+        <input type="number" id="node-input-timeout" min="1000" step="1000" placeholder="30000">
+        <span style="margin-left: 10px; font-size: 12px; color: #666;">milliseconds</span>
+    </div>
+
+</script>
+
+<script type="text/html" data-help-name="mcp-client">
+    <p>A Node-RED client for connecting to and communicating with Model Context Protocol (MCP) servers. Supports HTTP, Server-Sent Events, and WebSocket connections.</p>
+    
+    <h3>Configuration</h3>
+    <dl class="message-properties">
+        <dt>Server URL <span class="property-type">string</span></dt>
+        <dd>Base URL of the MCP server (e.g., http://localhost:8000)</dd>
+        
+        <dt>Connection Type <span class="property-type">string</span></dt>
+        <dd>Type of connection: HTTP, Server-Sent Events, or WebSocket</dd>
+        
+        <dt>Auto Connect <span class="property-type">boolean</span></dt>
+        <dd>Whether to automatically connect when Node-RED starts</dd>
+        
+        <dt>Auto Reconnect <span class="property-type">boolean</span></dt>
+        <dd>Whether to automatically reconnect on connection loss</dd>
+        
+        <dt>Reconnect Interval <span class="property-type">number</span></dt>
+        <dd>Delay between reconnection attempts in milliseconds</dd>
+        
+        <dt>Request Timeout <span class="property-type">number</span></dt>
+        <dd>Timeout for requests in milliseconds</dd>
+    </dl>
+
+    <h3>Connection Types</h3>
+    <dl class="message-properties">
+        <dt>HTTP <span class="property-type">request/response</span></dt>
+        <dd>Simple HTTP requests. Good for basic operations and polling scenarios.</dd>
+        
+        <dt>Server-Sent Events <span class="property-type">streaming</span></dt>
+        <dd>Real-time server-to-client streaming. Ideal for notifications and live updates.</dd>
+        
+        <dt>WebSocket <span class="property-type">full-duplex</span></dt>
+        <dd>Bidirectional real-time communication. Best for interactive applications.</dd>
+    </dl>
+
+    <h3>Test Connection</h3>
+    <p>The Test Connection button now performs connection type-specific testing:</p>
+    <ul>
+        <li><strong>HTTP:</strong> Tests /health endpoint with GET request</li>
+        <li><strong>SSE:</strong> Attempts to establish Server-Sent Events connection to /sse</li>
+        <li><strong>WebSocket:</strong> Attempts to establish WebSocket connection to /ws</li>
+    </ul>
+
+    <h3>Input Commands</h3>
+    <p>Send messages with the following topics to control the client:</p>
+    <dl class="message-properties">
+        <dt>connect <span class="property-type">string</span></dt>
+        <dd>Establish connection to the MCP server</dd>
+        
+        <dt>disconnect <span class="property-type">string</span></dt>
+        <dd>Disconnect from the MCP server</dd>
+        
+        <dt>request <span class="property-type">object</span></dt>
+        <dd>Send MCP request: <code>{method: "tools/call", params: {name: "tool_name", arguments: {...}}}</code></dd>
+        
+        <dt>status <span class="property-type">string</span></dt>
+        <dd>Get current connection status</dd>
+    </dl>
+
+    <h3>Output Messages</h3>
+    <p>The node outputs messages with different topics based on events:</p>
+    <dl class="message-properties">
+        <dt>connected <span class="property-type">object</span></dt>
+        <dd>Connection established successfully</dd>
+        
+        <dt>handshake <span class="property-type">object</span></dt>
+        <dd>MCP server capabilities and available tools (SSE and WebSocket)</dd>
+        
+        <dt>response <span class="property-type">object</span></dt>
+        <dd>Response from MCP server to a request</dd>
+        
+        <dt>message <span class="property-type">object</span></dt>
+        <dd>General message from MCP server (SSE/WebSocket)</dd>
+        
+        <dt>error <span class="property-type">object</span></dt>
+        <dd>Error occurred during communication</dd>
+        
+        <dt>raw <span class="property-type">string</span></dt>
+        <dd>Raw message that couldn't be parsed as JSON</dd>
+    </dl>
+
+    <h3>Handshake Information (SSE & WebSocket)</h3>
+    <p>When using Server-Sent Events or WebSocket, the client automatically performs an MCP handshake and outputs discovery information:</p>
+    <pre><code>{
+    "topic": "handshake",
+    "payload": {
+        "type": "tools_discovered",
+        "serverUrl": "http://localhost:8000",
+        "connectionType": "sse",
+        "serverInfo": {
+            "name": "example-mcp",
+            "version": "1.0.0",
+            "capabilities": {...}
+        },
+        "availableTools": [
+            {
+                "name": "example_tool",
+                "description": "Run an example tool",
+                "inputSchema": {...}
+            }
+        ],
+        "toolCount": 12,
+        "toolNames": ["example_tool", "status_tool", ...],
+        "mcpSyntax": {
+            "requestFormat": {
+                "topic": "request",
+                "payload": {
+                    "method": "tools/call",
+                    "params": {
+                        "name": "tool_name_here",
+                        "arguments": {...}
+                    }
+                }
+            },
+            "exampleCall": {
+                "topic": "request", 
+                "payload": {
+                    "method": "tools/call",
+                    "params": {
+                        "name": "example_tool",
+                        "arguments": {"input": "example_string"}
+                    }
+                }
+            }
+        }
+    }
+}</code></pre>
+
+    <h3>MCP Request Format</h3>
+    <p>To send MCP requests, use the following message format:</p>
+    <pre><code>{
+    "topic": "request",
+    "payload": {
+        "method": "tools/call",
+        "params": {
+            "name": "example_tool",
+            "arguments": {"input": "Example input"}
+        }
+    }
+}</code></pre>
+
+    <h3>Examples</h3>
+    <p><strong>Connect to an MCP server:</strong></p>
+    <ul>
+        <li>Server URL: <code>http://localhost:8000</code></li>
+        <li>Connection Type: HTTP, Server-Sent Events, or WebSocket</li>
+        <li>Auto Connect: Enabled</li>
+    </ul>
+
+    <p><strong>Call MCP Tool:</strong></p>
+    <pre><code>msg.topic = "request";
+msg.payload = {
+    method: "tools/call",
+    params: {
+        name: "example_tool",
+        arguments: { input: "example" }
+    }
+};
+return msg;</code></pre>
+
+
+    <h3>Requirements</h3>
+    <p>The target MCP server must be running and accessible at the specified URL.</p>
+</script> 

@@ -1,0 +1,300 @@
+<!-- MCP Server Node -->
+<script type="text/javascript">
+    RED.nodes.registerType('mcp-server', {
+        category: 'mcp',
+        color: '#4A90E2',
+        defaults: {
+            name: {value: ""},
+            serverName: {value: "mcp-server", required: true},
+            serverType: {value: "python", required: true},
+            serverPath: {value: "", required: true},
+            serverArgs: {value: ""},
+            serverPort: {value: 8000, required: true, validate: function(v) { return v > 0 && v < 65536; }},
+            autoStart: {value: false},
+            healthCheck: {value: true},
+            healthCheckInterval: {value: 30000, validate: function(v) { return v >= 5000; }},
+            maxRestarts: {value: 3, validate: function(v) { return v >= 0; }},
+            restartDelay: {value: 5000, validate: function(v) { return v >= 1000; }}
+        },
+        inputs: 1,
+        outputs: 1,
+        icon: "font-awesome/fa-server",
+        label: function() {
+            return this.name || `${this.serverName}:${this.serverPort}`;
+        },
+        labelStyle: function() {
+            return this.name ? "node_label_italic" : "";
+        },
+        oneditprepare: function() {
+            var node = this;
+
+            // Update form fields based on server type
+            function updateServerTypeFields() {
+                var serverType = $("#node-input-serverType").val();
+                
+                if (serverType === "python") {
+                    $("#server-path-hint").text("Path to Python MCP server script (e.g., /path/to/server.py)");
+                    $("#server-args-hint").text("Additional Python arguments (e.g., --host 0.0.0.0 --debug)");
+                } else if (serverType === "node") {
+                    $("#server-path-hint").text("Path to Node.js MCP server script (e.g., /path/to/server.js)");
+                    $("#server-args-hint").text("Additional Node.js arguments (e.g., --port 8000)");
+                } else {
+                    $("#server-path-hint").text("Full command to run MCP server (e.g., /usr/bin/my-mcp-server)");
+                    $("#server-args-hint").text("Additional command arguments");
+                }
+            }
+
+            // Initialize server type change handler
+            $("#node-input-serverType").change(updateServerTypeFields);
+            
+            // Initialize form
+            updateServerTypeFields();
+
+            // Auto-generate server name from path
+            $("#node-input-serverPath").on('input', function() {
+                var path = $(this).val();
+                if (path && !$("#node-input-serverName").val()) {
+                    var fileName = path.split('/').pop().split('\\').pop();
+                    var baseName = fileName.replace(/\.(py|js|exe)$/, '');
+                    $("#node-input-serverName").val(baseName);
+                }
+            });
+
+            // Test server path button
+            $("#test-server-path-btn").click(function() {
+                var button = $(this);
+                var originalText = button.text();
+                button.text("Testing...").prop('disabled', true);
+                
+                var serverType = $("#node-input-serverType").val();
+                var serverPath = $("#node-input-serverPath").val();
+                
+                if (!serverPath) {
+                    button.text(originalText).prop('disabled', false);
+                    RED.notify("Server path is required", "error");
+                    return;
+                }
+                
+                // Simple validation based on server type
+                var command;
+                if (serverType === "python") {
+                    command = `python3 -c "import os; print('OK' if os.path.exists('${serverPath}') else 'NOT_FOUND')"`;
+                } else if (serverType === "node") {
+                    command = `node -e "const fs=require('fs'); console.log(fs.existsSync('${serverPath}') ? 'OK' : 'NOT_FOUND')"`;
+                } else {
+                    command = `test -f "${serverPath}" && echo OK || echo NOT_FOUND`;
+                }
+                
+                setTimeout(function() {
+                    button.text(originalText).prop('disabled', false);
+                    RED.notify("Path validation feature coming soon", "warning");
+                }, 1000);
+            });
+
+
+            // Advanced settings toggle
+            $("#advanced-toggle").click(function() {
+                $("#advanced-settings").slideToggle();
+                var icon = $(this).find("i");
+                icon.toggleClass("fa-chevron-down fa-chevron-up");
+            });
+        }
+    });
+</script>
+
+<script type="text/html" data-template-name="mcp-server">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Optional display name">
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-serverName"><i class="fa fa-server"></i> Server Name</label>
+        <input type="text" id="node-input-serverName" placeholder="mcp-server">
+        <div style="margin-top: 5px; font-size: 12px; color: #666;">
+            Unique identifier for this MCP server instance
+        </div>
+    </div>
+
+    <hr>
+    <h4>Server Configuration</h4>
+
+    <div class="form-row">
+        <label for="node-input-serverType"><i class="fa fa-cogs"></i> Server Type</label>
+        <select id="node-input-serverType">
+            <option value="python">Python</option>
+            <option value="node">Node.js</option>
+            <option value="custom">Custom Command</option>
+        </select>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-serverPath"><i class="fa fa-file-code-o"></i> Server Path</label>
+        <input type="text" id="node-input-serverPath" placeholder="/path/to/mcp/server">
+        <div id="server-path-hint" style="margin-top: 5px; font-size: 12px; color: #666;">
+            Path to MCP server script or executable
+        </div>
+        <button type="button" id="test-server-path-btn" class="btn btn-secondary" style="margin-top: 5px;">
+            <i class="fa fa-check"></i> Test Path
+        </button>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-serverArgs"><i class="fa fa-terminal"></i> Server Arguments</label>
+        <input type="text" id="node-input-serverArgs" placeholder="--host 0.0.0.0 --debug">
+        <div id="server-args-hint" style="margin-top: 5px; font-size: 12px; color: #666;">
+            Additional command line arguments for the server
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-serverPort"><i class="fa fa-plug"></i> Server Port</label>
+        <input type="number" id="node-input-serverPort" min="1" max="65535" placeholder="8000">
+        <div style="margin-top: 5px; font-size: 12px; color: #666;">
+            Port number for the MCP server (1-65535)
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-autoStart"><i class="fa fa-play"></i> Auto Start</label>
+        <input type="checkbox" id="node-input-autoStart" style="width: auto;">
+        <span style="margin-left: 10px; font-size: 12px; color: #666;">Automatically start server when Node-RED starts</span>
+    </div>
+
+
+    <!-- Advanced Settings -->
+    <hr>
+    <div class="form-row">
+        <label></label>
+        <button type="button" id="advanced-toggle" class="btn btn-link" style="padding: 0; text-align: left;">
+            <i class="fa fa-chevron-down"></i> Advanced Settings
+        </button>
+    </div>
+
+    <div id="advanced-settings" style="display: none;">
+        <div class="form-row">
+            <label for="node-input-healthCheck"><i class="fa fa-heartbeat"></i> Health Check</label>
+            <input type="checkbox" id="node-input-healthCheck" style="width: auto;">
+            <span style="margin-left: 10px; font-size: 12px; color: #666;">Enable periodic health checks</span>
+        </div>
+
+        <div class="form-row">
+            <label for="node-input-healthCheckInterval"><i class="fa fa-clock-o"></i> Health Check Interval</label>
+            <input type="number" id="node-input-healthCheckInterval" min="5000" step="1000" placeholder="30000">
+            <span style="margin-left: 10px; font-size: 12px; color: #666;">milliseconds</span>
+        </div>
+
+        <div class="form-row">
+            <label for="node-input-maxRestarts"><i class="fa fa-refresh"></i> Max Restarts</label>
+            <input type="number" id="node-input-maxRestarts" min="0" max="10" placeholder="3">
+            <div style="margin-top: 5px; font-size: 12px; color: #666;">
+                Maximum number of automatic restart attempts (0 = no restarts)
+            </div>
+        </div>
+
+        <div class="form-row">
+            <label for="node-input-restartDelay"><i class="fa fa-pause"></i> Restart Delay</label>
+            <input type="number" id="node-input-restartDelay" min="1000" step="1000" placeholder="5000">
+            <span style="margin-left: 10px; font-size: 12px; color: #666;">milliseconds</span>
+        </div>
+    </div>
+</script>
+
+<script type="text/html" data-help-name="mcp-server">
+    <p>A Node-RED node for running and managing Model Context Protocol (MCP) servers. Provides lifecycle management, health monitoring, and real-time communication with MCP server processes.</p>
+    
+    <h3>Configuration</h3>
+    <dl class="message-properties">
+        <dt>Server Name <span class="property-type">string</span></dt>
+        <dd>Unique identifier for this MCP server instance</dd>
+        
+        <dt>Server Type <span class="property-type">string</span></dt>
+        <dd>Type of MCP server: Python, Node.js, or Custom Command</dd>
+        
+        <dt>Server Path <span class="property-type">string</span></dt>
+        <dd>Path to the MCP server script or executable file</dd>
+        
+        <dt>Server Arguments <span class="property-type">string</span></dt>
+        <dd>Additional command line arguments to pass to the server</dd>
+        
+        <dt>Server Port <span class="property-type">number</span></dt>
+        <dd>Port number for the MCP server (1-65535)</dd>
+        
+        <dt>Auto Start <span class="property-type">boolean</span></dt>
+        <dd>Whether to automatically start the server when Node-RED starts</dd>
+    </dl>
+
+    <h3>Advanced Settings</h3>
+    <dl class="message-properties">
+        <dt>Health Check <span class="property-type">boolean</span></dt>
+        <dd>Enable periodic health checks via HTTP endpoint</dd>
+        
+        <dt>Health Check Interval <span class="property-type">number</span></dt>
+        <dd>Interval between health checks in milliseconds (minimum 5000)</dd>
+        
+        <dt>Max Restarts <span class="property-type">number</span></dt>
+        <dd>Maximum number of automatic restart attempts (0 disables restarts)</dd>
+        
+        <dt>Restart Delay <span class="property-type">number</span></dt>
+        <dd>Delay between restart attempts in milliseconds (minimum 1000)</dd>
+    </dl>
+
+    <h3>Input Commands</h3>
+    <p>Send messages with the following topics to control the server:</p>
+    <dl class="message-properties">
+        <dt>start <span class="property-type">string</span></dt>
+        <dd>Start the MCP server</dd>
+        
+        <dt>stop <span class="property-type">string</span></dt>
+        <dd>Stop the MCP server</dd>
+        
+        <dt>restart <span class="property-type">string</span></dt>
+        <dd>Restart the MCP server</dd>
+        
+        <dt>status <span class="property-type">string</span></dt>
+        <dd>Get current server status</dd>
+    </dl>
+
+    <h3>Output Messages</h3>
+    <p>The node outputs messages with different topics based on server events:</p>
+    <dl class="message-properties">
+        <dt>stdout <span class="property-type">string</span></dt>
+        <dd>Standard output from the MCP server process</dd>
+        
+        <dt>stderr <span class="property-type">string</span></dt>
+        <dd>Standard error output from the MCP server process</dd>
+        
+        <dt>started <span class="property-type">object</span></dt>
+        <dd>Server started successfully with details</dd>
+        
+        <dt>exit <span class="property-type">object</span></dt>
+        <dd>Server process exited with exit code and signal</dd>
+    </dl>
+
+
+    <h3>Examples</h3>
+    <p><strong>Python FastMCP Server:</strong></p>
+    <ul>
+        <li>Server Type: Python</li>
+        <li>Server Path: <code>/path/to/server.py</code></li>
+        <li>Server Args: <code>--host 0.0.0.0 --port 8000</code></li>
+    </ul>
+
+    <p><strong>Node.js MCP Server:</strong></p>
+    <ul>
+        <li>Server Type: Node.js</li>
+        <li>Server Path: <code>/path/to/mcp-server.js</code></li>
+        <li>Server Args: <code>--port 3000</code></li>
+    </ul>
+
+    <h3>Requirements</h3>
+    <p>The appropriate runtime must be installed:</p>
+    <ul>
+        <li><strong>Python servers:</strong> Python 3.8+ with required packages</li>
+        <li><strong>Node.js servers:</strong> Node.js 16+ with required packages</li>
+        <li><strong>Custom commands:</strong> Executable must be in PATH or use full path</li>
+    </ul>
+
+    <h3>Admin Endpoint</h3>
+    <p>View running MCP servers: <code>GET /mcp-servers</code></p>
+</script> 
