@@ -27,11 +27,11 @@ module.exports = function (RED)
     const portServers = new Map();
     const pendingExecutions = new Map();
 
-    function parseCommaList(value)
+    function parseGroupList(value)
     {
         if (Array.isArray(value)) return value.map(String).map(s => s.trim()).filter(Boolean);
         if (typeof value !== 'string') return [];
-        return value.split(',').map(s => s.trim()).filter(Boolean);
+        return value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
     }
 
     function withSecurityMeta(tool, scopes, extraMeta = {})
@@ -154,25 +154,36 @@ module.exports = function (RED)
                 await beginAuthorization(req, res, node);
             } catch (error)
             {
-                res.status(400).json({ error: 'invalid_request', error_description: error.message });
+                node.error('OAuth authorize failed: ' + error.message);
+                res.status(400).json({ error: 'invalid_request', error_description: 'Authorization request failed' });
             }
         });
 
         state.app.get(/^\/oauth\/([^/]+)\/callback$/, async (req, res) =>
         {
             const slug = req.params[0];
-            const auth = Array.from(state.routes.values())
-                .find(candidate => candidate.authConfig && candidate.authConfig.oauthSlug === slug)?.authConfig;
-            const stateRecord = auth && req.query && req.query.state ? await auth.readState(req.query.state) : null;
-            const node = stateRecord ? Array.from(state.routes.values()).find(candidate =>
-                candidate.authConfig && candidate.authConfig === auth && candidate.endpointId === stateRecord.endpointId) : null;
+            const owner = Array.from(state.routes.values())
+                .find(candidate => candidate.authConfig && candidate.authConfig.oauthSlug === slug);
+            const auth = owner && owner.authConfig;
+            let node = null;
+            try
+            {
+                const stateRecord = auth && req.query && req.query.state ? await auth.readState(req.query.state) : null;
+                node = stateRecord ? Array.from(state.routes.values()).find(candidate =>
+                    candidate.authConfig && candidate.authConfig === auth && candidate.endpointId === stateRecord.endpointId) : null;
+            } catch (error)
+            {
+                owner.error('OAuth callback storage error: ' + error.message);
+                return res.status(503).json({ error: 'temporarily_unavailable' });
+            }
             if (!node) return res.status(400).json({ error: 'invalid_state' });
             try
             {
                 await completeAuthorization(req, res, node);
             } catch (error)
             {
-                res.status(400).json({ error: 'invalid_request', error_description: error.message });
+                node.error('OAuth callback failed: ' + error.message);
+                res.status(400).json({ error: 'invalid_request', error_description: 'Authorization callback failed' });
             }
         });
 
@@ -184,11 +195,13 @@ module.exports = function (RED)
             res.set('Pragma', 'no-cache');
             if (!['authorization_code', 'refresh_token'].includes(body.grant_type))
                 return res.status(400).json({ error: 'unsupported_grant_type' });
+            let owner = null;
             try
             {
                 for (const candidate of state.routes.values())
                 {
                     if (!candidate.authConfig || candidate.authConfig.oauthSlug !== slug) continue;
+                    owner = owner || candidate;
                     const auth = candidate.authConfig;
                     const record = body.grant_type === 'refresh_token' ?
                         (auth.refreshStore && typeof body.refresh_token === 'string' && await auth.refreshStore.read(body.refresh_token)) :
@@ -197,10 +210,12 @@ module.exports = function (RED)
                         item.authConfig && item.authConfig === auth && item.endpointId === record.endpointId);
                     if (node) return await exchangeClientCode(req, res, node);
                 }
+                if (owner && body.grant_type === 'refresh_token') owner.log('OAuth refresh: unknown');
                 res.status(400).json({ error: 'invalid_grant' });
-            } catch (_)
+            } catch (error)
             {
-                res.status(400).json({ error: 'invalid_grant' });
+                if (owner) owner.error('OAuth token storage error: ' + error.message);
+                if (!res.headersSent) res.status(503).json({ error: 'temporarily_unavailable' });
             }
         });
 
@@ -214,18 +229,18 @@ module.exports = function (RED)
         state.app.get(/.*/, async (req, res) =>
         {
             const directNode = state.routes.get(req.path);
-            if (directNode)
+            if (!directNode) return res.status(404).json({ error: 'MCP path not found' });
+            let authResult;
+            try
             {
-                const authResult = await validateRequest(directNode, req);
-                if (!authResult.ok) return writeAuthFailure(req, res, directNode, authResult);
-                return res.status(405).json({ error: 'method_not_allowed', error_description: 'Use JSON-RPC POST for MCP requests' });
+                authResult = await validateRequest(directNode, req);
+            } catch (error)
+            {
+                directNode.error('MCP auth storage error: ' + error.message);
+                return res.status(503).json({ error: 'temporarily_unavailable' });
             }
-            const suffix = '/sse';
-            if (!req.path.endsWith(suffix)) return res.status(404).json({ error: 'MCP path not found' });
-            const serverPath = req.path.slice(0, -suffix.length) || '/';
-            const node = state.routes.get(serverPath);
-            if (!node) return res.status(404).json({ error: 'MCP path not found' });
-            node.handleSseRequest(req, res);
+            if (!authResult.ok) return writeAuthFailure(req, res, directNode, authResult);
+            return res.status(405).json({ error: 'method_not_allowed', error_description: 'Use JSON-RPC POST for MCP requests' });
         });
 
         state.httpServer = http.createServer(state.app);
@@ -319,7 +334,7 @@ module.exports = function (RED)
         node.serverPath = normalizePath(config.serverPath);
         node.serverPort = runtime ? runtime.serverPort : 0;
         node.publicBaseUrl = runtime ? runtime.publicBaseUrl : '';
-        node.allowedGroups = parseCommaList(config.allowedGroups || '');
+        node.allowedGroups = parseGroupList(config.allowedGroups || '');
         node.adminToolsEnabled = hasAdminTools(runtime, node.serverPath);
         node.adminPort = runtime ? runtime.adminPort : 0;
         node.adminToken = runtimeAdminToken(runtime);
@@ -353,6 +368,8 @@ module.exports = function (RED)
             }
             if (!node.authConfig)
                 throw new Error('MCP auth configuration is required');
+            if (node.authConfig.configError)
+                throw new Error('MCP auth configuration is invalid: ' + node.authConfig.configError);
             const portState = getPortServer(node.serverPort);
             if (portState.runtimeId && portState.runtimeId !== node.runtimeId)
             {
@@ -411,7 +428,7 @@ module.exports = function (RED)
             } catch (error)
             {
                 node.error('MCP request error: ' + error.message);
-                node.rpcError(res, request.id, -32603, 'Internal error', error.message, 500);
+                node.rpcError(res, request.id, -32603, 'Internal error', undefined, 500);
             } finally
             {
                 if (toolRequest && !handledToolCall)
@@ -423,21 +440,6 @@ module.exports = function (RED)
                     });
                 }
             }
-        };
-
-        node.handleSseRequest = function (req, res)
-        {
-            res.writeHead(200, {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive'
-            });
-            res.write('data: {"type":"connected","server":"' + node.serverName + '"}\n\n');
-            const keepAlive = setInterval(() =>
-            {
-                res.write('data: {"type":"heartbeat","timestamp":"' + new Date().toISOString() + '"}\n\n');
-            }, 30000);
-            req.on('close', () => clearInterval(keepAlive));
         };
 
         node.rpcError = function (res, id, code, message, data, httpStatus)
@@ -567,7 +569,7 @@ module.exports = function (RED)
         let closed = false;
         node.startServer = function (callback = () => { })
         {
-            if (closed) return;
+            if (closed) return callback(null, { success: false, message: 'Server closed' });
             if (node.isRunning)
             {
                 callback(null, { success: false, message: 'Server already running' });
@@ -636,9 +638,10 @@ module.exports = function (RED)
                 callback(null, { success: true, message: 'Server already stopped' });
                 return;
             }
-            node.status({ fill: 'yellow', shape: 'ring', text: 'stopping...' });
+            if (!closed) node.status({ fill: 'yellow', shape: 'ring', text: 'stopping...' });
 
             const portState = node.portState;
+            node.portState = null;
             if (portState)
             {
                 portState.routes.delete(node.serverPath);
@@ -648,53 +651,73 @@ module.exports = function (RED)
             const finish = () =>
             {
                 node.isRunning = false;
-                node.status({ fill: 'grey', shape: 'ring', text: 'stopped' });
                 serverInstances.del(node.serverId);
-                node.send({ topic: 'mcp-server-stopped', payload: { serverId: node.serverId } });
+                if (!closed)
+                {
+                    node.status({ fill: 'grey', shape: 'ring', text: 'stopped' });
+                    node.send({ topic: 'mcp-server-stopped', payload: { serverId: node.serverId } });
+                }
                 callback(null, { success: true, message: 'Server stopped' });
             };
 
             if (portState && portState.nodes.size === 0 && portState.httpServer)
             {
-                portState.httpServer.close(() =>
-                {
-                    portState.isListening = false;
-                    portServers.delete(portState.port);
-                    finish();
-                });
+                // Detach synchronously: a replacement node must get a fresh listener, not this closing one.
+                portState.isListening = false;
+                if (portServers.get(portState.port) === portState) portServers.delete(portState.port);
+                portState.httpServer.close(() => finish());
+                if (typeof portState.httpServer.closeIdleConnections === 'function')
+                    portState.httpServer.closeIdleConnections();
             } else
             {
                 finish();
             }
         };
 
-        node.on('input', function (msg)
+        let restartTimer = null;
+        node.on('input', function (msg, send, done)
         {
+            send = send || function () { node.send.apply(node, arguments); };
+            done = done || function (error) { if (error) node.error(error, msg); };
+            const finished = error => done(error || undefined);
+
             if (msg.topic === 'mcp-tool-response' && msg.payload && msg.payload.executionId)
             {
                 const pending = pendingExecutions.get(msg.payload.executionId);
                 if (!pending)
                 {
                     node.warn('Orphan MCP tool response for executionId: ' + msg.payload.executionId);
-                    return;
+                    return done();
                 }
                 clearTimeout(pending.timeout);
                 pendingExecutions.delete(msg.payload.executionId);
                 if (msg.payload.error) pending.reject(new Error(msg.payload.error));
                 else pending.resolve(msg.payload.result);
-                return;
+                return done();
             }
 
             const command = msg.topic || (msg.payload && msg.payload.command);
             switch (command)
             {
-                case 'start': node.startServer(); break;
-                case 'stop': node.stopServer(); break;
-                case 'restart': node.stopServer(() => setTimeout(() => node.startServer(), 1000)); break;
+                case 'start': return node.startServer(finished);
+                case 'stop': return node.stopServer(finished);
+                case 'restart':
+                    return node.stopServer(error =>
+                    {
+                        if (error) return done(error);
+                        clearTimeout(restartTimer);
+                        restartTimer = setTimeout(() =>
+                        {
+                            restartTimer = null;
+                            node.startServer(finished);
+                        }, 1000);
+                    });
                 case 'status':
                     msg.payload = { serverId: node.serverId, runtimeId: node.runtimeId, endpointId: node.endpointId, serverName: node.serverName, path: node.serverPath, isRunning: node.isRunning, port: node.serverPort, toolCount: node.registeredTools().length, authRequired: true };
-                    node.send(msg);
-                    break;
+                    send(msg);
+                    return done();
+                default:
+                    return done();
             }
         });
 
@@ -704,6 +727,8 @@ module.exports = function (RED)
         node.on('close', function (done)
         {
             closed = true;
+            clearTimeout(restartTimer);
+            restartTimer = null;
             RED.events.removeListener('flows:started', startOnDeploy);
             node.adminTools.dispose();
             for (const [executionId, pending] of pendingExecutions.entries())
@@ -718,7 +743,11 @@ module.exports = function (RED)
         });
     }
 
-    RED.nodes.registerType('mcp-runtime', MCPRuntimeNode);
+    RED.nodes.registerType('mcp-runtime', MCPRuntimeNode, {
+        credentials: {
+            adminToken: { type: 'password' }
+        }
+    });
     RED.nodes.registerType('mcp-flow-server', MCPFlowServerNode);
 
     RED.events.on('mcp-tool-register', (toolDef) =>
@@ -737,7 +766,9 @@ module.exports = function (RED)
         toolRegistry.del(registryKey(toolDef.name, toolDef.endpointId));
     });
 
-    RED.httpAdmin.get('/mcp-flow-servers', function (req, res)
+    const readPermission = RED.auth && typeof RED.auth.needsPermission === 'function' ?
+        [RED.auth.needsPermission('mcp-flow-server.read')] : [];
+    RED.httpAdmin.get('/mcp-flow-servers', ...readPermission, function (req, res)
     {
         const servers = [];
         serverInstances.keys().forEach(key =>

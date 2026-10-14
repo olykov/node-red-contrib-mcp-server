@@ -4,14 +4,19 @@
         defaults: {
             name: { value: '' },
             runtimeName: { value: 'mcp-runtime', required: true },
-            serverPort: { value: 8001, required: true, validate: function(v) { return v > 0 && v < 65536; } },
+            serverPort: { value: 8001, required: true, validate: function(v) {
+                return RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536;
+            } },
             publicBaseUrl: { value: '' },
-            adminPort: { value: 1880, required: false, validate: function(v) { return v === '' || (v > 0 && v < 65536); } },
+            adminPort: { value: 1880, required: false, validate: function(v) {
+                return v === '' || (RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536);
+            } },
             adminEndpointPath: { value: '' }
         },
         credentials: {
             adminToken: { type: 'password' }
         },
+        paletteLabel: 'MCP runtime',
         label: function() {
             return this.name || this.runtimeName || 'MCP Runtime';
         }
@@ -19,7 +24,7 @@
 
     RED.nodes.registerType('mcp-flow-server', {
         category: 'mcp',
-        color: '#9C27B0',
+        color: '#D8BFD8',
         defaults: {
             name: { value: '' },
             runtime: { value: '', type: 'mcp-runtime', required: true },
@@ -30,6 +35,8 @@
         },
         inputs: 1,
         outputs: 1,
+        paletteLabel: 'MCP flow server',
+        inputLabels: 'mcp-tool-response or command',
         outputLabels: 'Tool execution and status',
         icon: 'font-awesome/fa-cogs',
         label: function() {
@@ -42,24 +49,25 @@
             function loadFlowServers() {
                 $.ajax({ url: 'mcp-flow-servers', method: 'GET', timeout: 5000 })
                     .done(function(data) {
-                        var statusDiv = $('#flow-servers-status');
+                        var statusDiv = $('#flow-servers-status').empty();
                         if (data.servers && data.servers.length > 0) {
-                            var html = '<h5>Running Flow Servers:</h5><ul>';
+                            $('<h5>').text('Running Flow Servers:').appendTo(statusDiv);
+                            var list = $('<ul>').appendTo(statusDiv);
                             data.servers.forEach(function(server) {
                                 var status = server.isRunning ? 'running' : 'stopped';
-                                html += '<li>' + status + ' ' + server.serverName + ' ' + (server.path || '/mcp') + ' (port ' + server.port + ') - ' + server.toolCount + ' tools</li>';
+                                $('<li>').text(status + ' ' + server.serverName + ' ' + (server.path || '/mcp') +
+                                    ' (port ' + server.port + ') - ' + server.toolCount + ' tools').appendTo(list);
                             });
-                            statusDiv.html(html + '</ul>');
                         } else {
-                            statusDiv.html('<p>No flow servers currently running</p>');
+                            $('<p>').text('No flow servers currently running').appendTo(statusDiv);
                         }
                     })
                     .fail(function() {
-                        $('#flow-servers-status').html('<p>Failed to load flow server status</p>');
+                        $('#flow-servers-status').empty().append($('<p>').text('Failed to load flow server status'));
                     });
             }
 
-            $('#refresh-status-btn').click(loadFlowServers);
+            $('#refresh-status-btn').on('click', loadFlowServers);
             setTimeout(loadFlowServers, 500);
         }
     });
@@ -92,7 +100,7 @@
     </div>
     <div class="form-row">
         <label for="node-config-input-adminToken"><i class="fa fa-key"></i> Admin Token</label>
-        <input type="password" id="node-config-input-adminToken" autocomplete="off" placeholder="Uses NODE_RED_ADMIN_API_TOKEN when empty">
+        <input type="password" id="node-config-input-adminToken" autocomplete="off" placeholder="NODE_RED_ADMIN_API_TOKEN overrides this when set">
     </div>
     <div class="form-row">
         <label for="node-config-input-adminEndpointPath"><i class="fa fa-link"></i> Admin Path</label>
@@ -138,7 +146,7 @@
     <hr>
     <div class="form-row">
         <label></label>
-        <button type="button" id="refresh-status-btn" class="btn btn-secondary">
+        <button type="button" id="refresh-status-btn" class="red-ui-button">
             <i class="fa fa-refresh"></i> Refresh Status
         </button>
     </div>
@@ -146,20 +154,6 @@
     <div id="flow-servers-status" class="mcp-flow-server-status">Loading flow server status...</div>
 
     <style>
-        .mcp-editor-note {
-            margin-left: 10px;
-            font-size: 12px;
-            color: var(--red-ui-secondary-text-color, #666);
-        }
-        .mcp-validation {
-            display: none;
-            margin-top: 5px;
-            font-size: 12px;
-            color: #e74c3c;
-        }
-        .mcp-button-row {
-            margin-top: 5px;
-        }
         .mcp-flow-server-status {
             margin-top: 10px;
             padding: 10px;
@@ -181,38 +175,76 @@
 </script>
 
 <script type="text/html" data-help-name="mcp-runtime">
-    <p>Defines a local MCP HTTP runtime shared by one or more MCP Flow Server endpoints.</p>
-    <h3>Fields</h3>
-    <dl class="message-properties">
-        <dt>Port <span class="property-type">number</span></dt>
-        <dd>Local HTTP port. Multiple MCP Flow Server nodes may share one runtime port when their MCP paths differ.</dd>
-        <dt>Base URL <span class="property-type">string</span></dt>
-        <dd>Client-facing base URL used for OAuth metadata and challenges, directly or through a proxy. It may be reachable only over VPN. If empty, request headers are used.</dd>
-        <dt>Admin Port <span class="property-type">number</span></dt>
-        <dd>Local Node-RED Admin API port used by read-only admin tools.</dd>
-        <dt>Admin Token <span class="property-type">credential</span></dt>
-        <dd>Bearer token sent to the local Node-RED Admin API. Leave empty to use <code>NODE_RED_ADMIN_API_TOKEN</code>.</dd>
-        <dt>Admin Path <span class="property-type">string</span></dt>
-        <dd>Exact MCP path allowed to expose read-only admin tools.</dd>
+    <p>Local MCP HTTP listener shared by one or more MCP Flow Server endpoints.</p>
+    <h3>Details</h3>
+    <p>Several endpoints may share one runtime port when their MCP paths differ.
+    The runtime also hosts the OAuth routes of the auth configurations used by its endpoints.</p>
+    <dl>
+        <dt>Port</dt>
+        <dd>Local HTTP port of the listener.</dd>
+        <dt>Base URL</dt>
+        <dd>Client-facing base URL used in OAuth metadata and challenges, directly or through a proxy.
+        It may be reachable only over VPN. If empty, request headers are used.</dd>
+        <dt>Admin Port</dt>
+        <dd>Local Node-RED Admin API port used by the read-only admin tools.</dd>
+        <dt>Admin Token</dt>
+        <dd>Bearer token for the local Node-RED Admin API, stored as a credential.
+        <code>NODE_RED_ADMIN_API_TOKEN</code> takes precedence when set.</dd>
+        <dt>Admin Path</dt>
+        <dd>Exact MCP path allowed to expose the read-only admin tools.</dd>
     </dl>
-    <p>Admin tools are exposed only when Admin Port, Admin Token or <code>NODE_RED_ADMIN_API_TOKEN</code>, and Admin Endpoint Path are set, and an MCP Flow Server on this runtime uses exactly that path.</p>
+    <p>Admin tools are exposed only when Admin Port, a token and Admin Path are set and an
+    MCP Flow Server on this runtime uses exactly that path.</p>
+    <h3>References</h3>
+    <ul>
+        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>
+    </ul>
 </script>
 
 <script type="text/html" data-help-name="mcp-flow-server">
-    <p>Defines one logical MCP endpoint on a selected local runtime and passes tool calls into Node-RED flows.</p>
-    <h3>Configuration</h3>
+    <p>One MCP endpoint on a selected runtime. Tool calls are passed into the flow and answered
+    from the flow.</p>
+    <h3>Inputs</h3>
     <dl class="message-properties">
-        <dt>Runtime <span class="property-type">mcp-runtime</span></dt>
-        <dd>Local HTTP runtime that listens on a port and hosts this endpoint path.</dd>
-        <dt>Auth <span class="property-type">mcp-auth</span></dt>
-        <dd>Required OIDC auth configuration. All tool execution requires OAuth.</dd>
-        <dt>MCP Name <span class="property-type">string</span></dt>
-        <dd>Name returned in MCP initialize responses and used for endpoint-scoped tool registration.</dd>
-        <dt>MCP Path <span class="property-type">string</span></dt>
-        <dd>HTTP JSON-RPC path served by this endpoint, for example <code>/mcp/ops</code>.</dd>
-        <dt>Groups <span class="property-type">string</span></dt>
-        <dd>Optional any-of group list checked against the authenticated user claims.</dd>
+        <dt>topic <span class="property-type">string</span></dt>
+        <dd><code>mcp-tool-response</code> to answer a tool call, or a command:
+        <code>start</code>, <code>stop</code>, <code>restart</code> or <code>status</code>.</dd>
+        <dt class="optional">payload.executionId <span class="property-type">string</span></dt>
+        <dd>For <code>mcp-tool-response</code>: the id received in the tool call.</dd>
+        <dt class="optional">payload.result <span class="property-type">any</span></dt>
+        <dd>Tool result: an MCP result object, content array, string or JSON value.</dd>
+        <dt class="optional">payload.error <span class="property-type">string</span></dt>
+        <dd>Error text; the tool call fails with this message.</dd>
     </dl>
-    <h3>Runtime</h3>
-    <p>Output 1 sends <code>mcp-tool-execute</code> and status messages. The node waits for matching <code>mcp-tool-response</code> messages on its input.</p>
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>topic <span class="property-type">string</span></dt>
+        <dd><code>mcp-tool-execute</code> for a tool call, <code>mcp-server-started</code> or
+        <code>mcp-server-stopped</code> for lifecycle events, or the original topic for a
+        <code>status</code> reply.</dd>
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>For <code>mcp-tool-execute</code>: <code>toolName</code>, <code>arguments</code> and
+        <code>executionId</code>. For <code>status</code>: endpoint name, path, port, running
+        state and tool count.</dd>
+    </dl>
+    <h3>Details</h3>
+    <p>Every tool call requires OAuth; discovery (<code>initialize</code>, <code>tools/list</code>)
+    stays visible. A call fails after 30 seconds without a matching
+    <code>mcp-tool-response</code>.</p>
+    <dl>
+        <dt>Runtime</dt>
+        <dd>MCP runtime that listens on a port and hosts this endpoint path.</dd>
+        <dt>Auth</dt>
+        <dd>Required MCP auth configuration.</dd>
+        <dt>MCP Name</dt>
+        <dd>Name returned in MCP initialize responses.</dd>
+        <dt>MCP Path</dt>
+        <dd>HTTP JSON-RPC path, for example <code>/mcp/ops</code>. Only POST is served.</dd>
+        <dt>Groups</dt>
+        <dd>Optional groups separated by commas or spaces. A user needs at least one of them.</dd>
+    </dl>
+    <h3>References</h3>
+    <ul>
+        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>
+    </ul>
 </script>

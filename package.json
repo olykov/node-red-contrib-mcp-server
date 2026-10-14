@@ -1,6 +1,6 @@
 {
   "name": "node-red-contrib-mcp-server",
-  "version": "2.1.1-upstream.1",
+  "version": "2.1.2-upstream.1",
   "description": "Upstream-first Node-RED palette for exposing flows as MCP servers and tools.",
   "main": "mcp-flow-server.js",
   "scripts": {
@@ -8,7 +8,6 @@
     "prepublishOnly": "npm test"
   },
   "keywords": [
-    "node-red",
     "mcp",
     "model-context-protocol",
     "tools",
@@ -20,6 +19,14 @@
     "flow-based"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/olykov/node-red-contrib-mcp-server.git"
+  },
+  "homepage": "https://github.com/olykov/node-red-contrib-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/olykov/node-red-contrib-mcp-server/issues"
+  },
   "node-red": {
     "nodes": {
       "mcp-auth": "mcp-auth.js",
@@ -33,11 +40,10 @@
     "express": "^5.2.1",
     "ioredis": "^5.4.1",
     "jose": "^5.10.0",
-    "node-cache": "^5.1.2",
-    "qs": "^6.16.0"
+    "node-cache": "^5.1.2"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   },
   "peerDependencies": {
     "node-red": ">=1.0.0"
@@ -45,9 +51,10 @@
   "files": [
     "*.js",
     "*.html",
-    "*.md",
+    "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "lib/",
-    "test/"
+    "examples/"
   ]
 }

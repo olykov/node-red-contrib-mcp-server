@@ -1,13 +1,14 @@
 <script type="text/javascript">
     RED.nodes.registerType('mcp-server-metrics', {
         category: 'mcp',
-        color: '#9C27B0',
+        color: '#D8BFD8',
         defaults: {
             name: { value: '' },
             runtime: { value: '', type: 'mcp-runtime', required: true }
         },
         inputs: 0,
         outputs: 1,
+        paletteLabel: 'MCP metrics',
         outputLabels: 'Tool telemetry',
         icon: 'font-awesome/fa-line-chart',
         label: function() {
@@ -31,7 +32,30 @@
 </script>
 
 <script type="text/html" data-help-name="mcp-server-metrics">
-    <p>Emits one message after each tool call on the selected MCP runtime, including failed calls. Use one metrics node per runtime.</p>
-    <p>The output message has topic <code>mcp-tool-telemetry</code>. Its payload contains the endpoint name, known tool name (or <code>unknown</code>), mode, status, duration in milliseconds, response bytes, and optional admin-tool scan and cache data. It does not contain tool arguments, responses, credentials, or flow content.</p>
-    <p>Connect this output to metric writer nodes. This node does not poll the server or expose a metrics endpoint.</p>
+    <p>Emits one message after each tool call on the selected MCP runtime, including failed calls.</p>
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>topic <span class="property-type">string</span></dt>
+        <dd>Always <code>mcp-tool-telemetry</code>.</dd>
+        <dt>payload.endpoint <span class="property-type">string</span></dt>
+        <dd>MCP name of the endpoint.</dd>
+        <dt>payload.tool <span class="property-type">string</span></dt>
+        <dd>Tool name, or <code>unknown</code>.</dd>
+        <dt>payload.mode <span class="property-type">string</span></dt>
+        <dd><code>flow</code>, an admin-tool mode, or <code>unknown</code>.</dd>
+        <dt>payload.status <span class="property-type">string</span></dt>
+        <dd><code>success</code> or <code>failed</code>.</dd>
+        <dt>payload.durationMs <span class="property-type">number</span></dt>
+        <dd>Call duration in milliseconds.</dd>
+        <dt>payload.responseBytes <span class="property-type">number | null</span></dt>
+        <dd>Response size when known.</dd>
+        <dt class="optional">payload.scannedNodes <span class="property-type">number | null</span></dt>
+        <dd>Admin-tool scan size.</dd>
+        <dt class="optional">payload.cached <span class="property-type">boolean | null</span></dt>
+        <dd>Whether an admin-tool result came from cache.</dd>
+    </dl>
+    <h3>Details</h3>
+    <p>Use one metrics node per runtime. The payload never contains tool arguments, results,
+    credentials or flow content. Connect the output to metric writer nodes; this node does not
+    expose a metrics endpoint.</p>
 </script>

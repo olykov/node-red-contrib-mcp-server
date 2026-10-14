@@ -1,10 +1,10 @@
 <script type="text/javascript">
     RED.nodes.registerType('mcp-tool-registry', {
         category: 'mcp',
-        color: '#E91E63',
+        color: '#E6E0F8',
         defaults: {
             name: { value: '' },
-            toolName: { value: '', required: true },
+            toolName: { value: '', required: true, validate: RED.validators.regex(/^[a-z][a-z0-9_]*$/) },
             toolDescription: { value: '' },
             endpoint: {
                 value: '',
@@ -15,12 +15,20 @@
             },
             toolBehavior: { value: '' },
             worldAccess: { value: '' },
-            toolSchema: { value: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}' },
-            outputSchema: { value: '' },
+            toolSchema: { value: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}', validate: function(v) {
+                try { var parsed = JSON.parse(v); return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed); }
+                catch (_) { return false; }
+            } },
+            outputSchema: { value: '', validate: function(v) {
+                if (!v || !String(v).trim()) return true;
+                try { var parsed = JSON.parse(v); return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed); }
+                catch (_) { return false; }
+            } },
         },
         inputs: 0,
         outputs: 0,
-        icon: 'font-awesome/fa-plus',
+        paletteLabel: 'MCP tool',
+        icon: 'font-awesome/fa-wrench',
         label: function() {
             return this.name || this.toolName || 'Tool Registry';
         },
@@ -64,11 +72,11 @@
                     $(selector).removeClass('input-error');
                     $(validationSelector).hide();
                     if (!parsed.type || !parsed.properties) {
-                        $(validationSelector).show().css('color', '#f39c12').text("Warning: schema should have 'type' and 'properties' fields");
+                        $(validationSelector).show().css('color', 'var(--red-ui-text-color-warning, #c38916)').text("Warning: schema should have 'type' and 'properties' fields");
                     }
                 } catch (error) {
                     $(selector).addClass('input-error');
-                    $(validationSelector).show().css('color', '#e74c3c').text('Invalid JSON: ' + error.message);
+                    $(validationSelector).show().css('color', 'var(--red-ui-text-color-error, #d6615f)').text('Invalid JSON: ' + error.message);
                 }
             }
 
@@ -92,7 +100,7 @@
                 }
             }
 
-            $('#format-json-fields-btn').click(function() {
+            $('#format-json-fields-btn').on('click', function() {
                 var inputOk = formatJsonField('#node-input-toolSchema', 'Input schema', false);
                 var outputOk = formatJsonField('#node-input-outputSchema', 'Output schema', true);
                 if (inputOk && outputOk) RED.notify('JSON fields formatted', 'success');
@@ -122,7 +130,7 @@
     <div class="form-row">
         <label for="node-input-toolName"><i class="fa fa-cog"></i> Tool Name</label>
         <input type="text" id="node-input-toolName" placeholder="my_custom_tool">
-        <div id="tool-name-validation" class="mcp-validation"></div>
+        <div id="tool-name-validation" class="mcp-tool-registry-validation"></div>
     </div>
 
     <div class="form-row">
@@ -160,51 +168,53 @@
     <div class="form-row">
         <label for="node-input-toolSchema" style="display: block; width: auto;"><i class="fa fa-code"></i> Input Schema</label>
         <textarea id="node-input-toolSchema" rows="12" style="display: block; width: 100%; resize: vertical; font-family: monospace;" placeholder='{"type": "object", "properties": {}, "required": []}'></textarea>
-        <div id="schema-validation" class="mcp-validation"></div>
+        <div id="schema-validation" class="mcp-tool-registry-validation"></div>
     </div>
 
     <div class="form-row">
         <label for="node-input-outputSchema" style="display: block; width: auto;"><i class="fa fa-code"></i> Output Schema</label>
         <textarea id="node-input-outputSchema" rows="12" style="display: block; width: 100%; resize: vertical; font-family: monospace;" placeholder='{"type": "object", "properties": {}}'></textarea>
-        <div id="output-schema-validation" class="mcp-validation"></div>
+        <div id="output-schema-validation" class="mcp-tool-registry-validation"></div>
     </div>
 
     <div class="form-row">
         <label></label>
-        <button type="button" id="format-json-fields-btn" class="btn btn-secondary">
+        <button type="button" id="format-json-fields-btn" class="red-ui-button">
             <i class="fa fa-magic"></i> Format JSON Fields
         </button>
     </div>
 
     <style>
-        .mcp-validation {
+        .mcp-tool-registry-validation {
             display: none;
             margin-top: 5px;
             font-size: 12px;
-        }
-        .mcp-button-row {
-            margin-top: 5px;
         }
     </style>
 </script>
 
 <script type="text/html" data-help-name="mcp-tool-registry">
-    <p>Defines and registers an MCP tool for one endpoint or every endpoint.</p>
-    <h3>Configuration</h3>
-    <dl class="message-properties">
-        <dt>Tool Name <span class="property-type">string</span></dt>
-        <dd>MCP tool name. Use lowercase letters, numbers, and underscores.</dd>
-        <dt>Endpoint <span class="property-type">mcp-flow-server</span></dt>
-        <dd>Required endpoint binding. Choose <code>Shared (All MCPs)</code> only for tools intentionally exposed on every endpoint.</dd>
-        <dt>Behavior <span class="property-type">select</span></dt>
-        <dd>MCP safety annotations for read-only, non-destructive write, or destructive write behavior.</dd>
-        <dt>Scope <span class="property-type">select</span></dt>
-        <dd>MCP open-world annotation. Public internet and external recipients are open-world access.</dd>
-        <dt>JSON Schema <span class="property-type">JSON</span></dt>
-        <dd>JSON Schema defining the tool input parameters.</dd>
-        <dt>Output Schema <span class="property-type">JSON</span></dt>
-        <dd>Optional JSON Schema defining the structured tool result.</dd>
+    <p>Registers one MCP tool for one endpoint or for every endpoint.</p>
+    <h3>Details</h3>
+    <p>The tool is advertised when the flow starts and removed when the node stops. Calls reach the
+    selected MCP Flow Server output as <code>mcp-tool-execute</code>; the flow must answer with
+    <code>mcp-tool-response</code>.</p>
+    <dl>
+        <dt>Tool Name</dt>
+        <dd>MCP tool name: lowercase letters, digits and underscores, starting with a letter.</dd>
+        <dt>Endpoint</dt>
+        <dd>MCP Flow Server that offers the tool. <code>Shared (All MCPs)</code> exposes it on every endpoint.</dd>
+        <dt>Behavior</dt>
+        <dd>MCP safety annotation: read only, add only, or change, delete or send.</dd>
+        <dt>Scope</dt>
+        <dd>MCP open-world annotation. Public internet and external recipients are open-ended.</dd>
+        <dt>Input Schema</dt>
+        <dd>JSON Schema object for the tool arguments.</dd>
+        <dt>Output Schema</dt>
+        <dd>Optional JSON Schema object for the structured result.</dd>
     </dl>
-    <h3>Runtime</h3>
-    <p>The registry node advertises the tool automatically on start and deploy. The flow still has to return a matching <code>mcp-tool-response</code> for calls to complete.</p>
+    <h3>References</h3>
+    <ul>
+        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>
+    </ul>
 </script>

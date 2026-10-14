@@ -1,5 +1,9 @@
 # Examples
 
-This directory contains upstream example flows kept for developer reference.
+`flow-based-mcp-server-example.json` is shipped with the package and appears in
+Node-RED under Import > Examples. It defines one MCP endpoint with one tool
+(`add_numbers`) answered by a flow.
 
-The examples are not included in the published package. Production flows should be reviewed and adapted before deployment.
+Before deploying it, set the identity provider in the **MCP example auth**
+configuration and register the callback URL with the provider. The example uses
+in-memory auth storage, so every restart signs users out; use Redis for real use.

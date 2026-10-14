@@ -32,7 +32,7 @@ function createRuntime(config = {}) {
                 node.error = e => node.errors.push(e);
                 node.warn = w => node.warnings.push(w);
             },
-            registerType(name, ctor) { types[name] = ctor; },
+            registerType(name, ctor, options) { types[name] = ctor; types['options:' + name] = options; },
             getNode(id) { return nodeMap[id]; },
             eachNode(callback) { for (const node of flowNodes) callback(node); }
         },
@@ -1127,16 +1127,17 @@ describe('automatic runtime startup without CORS', () => {
                 headers: { origin: 'https://browser.example.test', 'access-control-request-method': 'POST' } });
             assert.equal(preflight.headers.get('access-control-allow-origin'), null);
             await preflight.text();
-            const controller = new AbortController();
-            const stream = await fetch('http://127.0.0.1:18116/mcp/test/sse', { signal: controller.signal });
-            try {
-                assert.equal(stream.status, 200);
-                assert.equal(stream.headers.get('content-type'), 'text/event-stream');
-                assert.equal(stream.headers.get('access-control-allow-origin'), null);
-                const chunk = await stream.body.getReader().read();
-                assert.match(new TextDecoder().decode(chunk.value), /connected/);
-            } finally { controller.abort(); }
+            const stream = await fetch('http://127.0.0.1:18116/mcp/test/sse');
+            assert.equal(stream.status, 404);
+            assert.notEqual(stream.headers.get('content-type'), 'text/event-stream');
+            await stream.text();
+            const keepAlive = await fetch('http://127.0.0.1:18116/mcp/test', { method: 'POST',
+                headers: { 'content-type': 'application/json', connection: 'keep-alive' },
+                body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) });
+            await keepAlive.json();
+            const stopped = Date.now();
             await stop();
+            assert.ok(Date.now() - stopped < 2000, 'close must not wait for idle keep-alive sockets');
             await start();
             assert.ok(endpoints.every(node => node.isRunning));
         } finally { await stop(); }
@@ -1262,5 +1263,113 @@ describe('stable OAuth routes', () => {
             assert.strictEqual((await fetch(url + '/.well-known/oauth-authorization-server/first-login')).status, 200);
             assert.strictEqual((await fetch(url + '/.well-known/oauth-authorization-server/second-login')).status, 200);
         } finally { await stop(second); await stop(context.server); }
+    });
+});
+
+describe('Creating Nodes review fixes', () => {
+    it('registers the runtime admin token as a password credential', () => {
+        const { types } = createRuntime();
+        assert.deepStrictEqual(types['options:mcp-runtime'], { credentials: { adminToken: { type: 'password' } } });
+        const runtime = new types['mcp-runtime']({ id: 'runtime-cred', credentials: { adminToken: 'from-editor' } });
+        assert.strictEqual(runtime.adminToken, 'from-editor');
+    });
+
+    it('accepts comma- and whitespace-separated endpoint groups', () => {
+        const { server } = createRuntime({ allowedGroups: 'ops admins,  auditors\nreaders' });
+        assert.deepStrictEqual(server.allowedGroups, ['ops', 'admins', 'auditors', 'readers']);
+    });
+
+    it('protects the editor server listing with a read permission', () => {
+        const handlers = {};
+        const RED = { events: new EventEmitter(), nodes: { registerType() {} },
+            auth: { needsPermission: permission => Object.assign(() => {}, { permission }) },
+            httpAdmin: { get(path, ...chain) { handlers[path] = chain; } } };
+        delete require.cache[require.resolve('../mcp-flow-server')];
+        require('../mcp-flow-server')(RED);
+        const chain = handlers['/mcp-flow-servers'];
+        assert.strictEqual(chain.length, 2);
+        assert.strictEqual(chain[0].permission, 'mcp-flow-server.read');
+    });
+
+    it('uses send/done for commands and reports start failures through done', async () => {
+        const { server } = createRuntime({ runtime: 'missing-runtime' });
+        const sent = [];
+        await new Promise(resolve => server.emit('input', { topic: 'status' }, msg => sent.push(msg), resolve));
+        assert.strictEqual(sent.length, 1);
+        assert.strictEqual(sent[0].payload.authRequired, true);
+        const failure = await new Promise(resolve => server.emit('input', { topic: 'start' }, () => {}, resolve));
+        assert.match(failure.message, /MCP runtime is required/);
+        const ignored = await new Promise(resolve => server.emit('input', { topic: 'unknown' }, () => {}, resolve));
+        assert.strictEqual(ignored, undefined);
+    });
+
+    it('cancels a pending restart and sends nothing after close', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18118 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        server.emit('input', { topic: 'restart' }, () => {}, () => {});
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const sentBefore = server.sent.length;
+        await new Promise(resolve => server.emit('close', resolve));
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        assert.strictEqual(server.isRunning, false);
+        assert.ok(!server.sent.slice(sentBefore).some(msg => msg.topic === 'mcp-server-started'));
+    });
+
+    it('does not send stopped events or status while closing', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18119 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        const sent = server.sent.length;
+        const statuses = server.statuses.length;
+        await new Promise(resolve => server.emit('close', resolve));
+        assert.strictEqual(server.sent.length, sent);
+        assert.strictEqual(server.statuses.length, statuses);
+    });
+
+    it('reports token storage failures as 503 and logs unknown refresh tokens', async () => {
+        const authNode = { id: 'storage-auth', oauthSlug: 'storage-login', baseScopes: 'openid',
+            readAccessToken: async () => null, readCode: async () => { throw new Error('redis down'); },
+            refreshStore: { read: async token => { if (token === 'boom') throw new Error('redis down'); return null; } } };
+        const { server } = createRuntime({ auth: 'storage-auth', __nodes: { 'storage-auth': authNode },
+            __runtime: { serverPort: 18120 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            const post = body => fetch('http://127.0.0.1:18120/oauth/storage-login/token', { method: 'POST',
+                headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
+            const outage = await post('grant_type=refresh_token&refresh_token=boom');
+            assert.strictEqual(outage.status, 503);
+            assert.strictEqual((await outage.json()).error, 'temporarily_unavailable');
+            assert.ok(server.errors.some(error => /OAuth token storage error/.test(error)));
+            const unknown = await post('grant_type=refresh_token&refresh_token=missing');
+            assert.strictEqual(unknown.status, 400);
+            assert.strictEqual((await unknown.json()).error, 'invalid_grant');
+            assert.ok(server.logs.includes('OAuth refresh: unknown'));
+            const code = await post('grant_type=authorization_code&code=x');
+            assert.strictEqual(code.status, 503);
+        } finally { await new Promise(resolve => server.emit('close', resolve)); }
+    });
+
+    it('keeps internal error text out of client responses', async () => {
+        const authNode = { id: 'leak-auth', oauthSlug: 'leak-login', baseScopes: 'openid',
+            readAccessToken: async () => { throw new Error('secret internal detail'); },
+            readState: async () => { throw new Error('secret internal detail'); } };
+        const { server } = createRuntime({ auth: 'leak-auth', __nodes: { 'leak-auth': authNode },
+            __runtime: { serverPort: 18121 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            const url = 'http://127.0.0.1:18121';
+            const callback = await fetch(url + '/oauth/leak-login/callback?code=a&state=b');
+            assert.strictEqual(callback.status, 503);
+            assert.doesNotMatch(await callback.text(), /secret internal detail/);
+            const get = await fetch(url + '/mcp/test', { headers: { authorization: 'Bearer x' } });
+            assert.strictEqual(get.status, 503);
+            assert.doesNotMatch(await get.text(), /secret internal detail/);
+            const rpc = await fetch(url + '/mcp/test', { method: 'POST', headers: { 'content-type': 'application/json',
+                authorization: 'Bearer x' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+                params: { name: 'any' } }) });
+            assert.doesNotMatch(await rpc.text(), /secret internal detail/);
+            const authorize = await fetch(url + '/oauth/leak-login/authorize?response_type=code&code_challenge_method=S256' +
+                '&code_challenge=c&client_id=https%3A%2F%2Fclient.example.test%2Fm.json&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcb&state=s');
+            assert.doesNotMatch(await authorize.text(), /allowedClientHosts|client_id host/);
+        } finally { await new Promise(resolve => server.emit('close', resolve)); }
     });
 });

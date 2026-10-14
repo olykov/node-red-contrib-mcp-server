@@ -288,3 +288,30 @@ describe('mcp auth token exchange', () => {
         assert.strictEqual(auth.state.access, null);
     });
 });
+
+describe('provider denial', () => {
+    it('returns the provider error to the registered client redirect', async () => {
+        let deleted = null;
+        const auth = { readState: async state => state === 'server-state' ?
+            { redirect_uri: 'http://127.0.0.1:53682/callback', client_state: 'client-state' } : null,
+            deleteState: async state => { deleted = state; } };
+        const redirectTo = async query => {
+            const res = { status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; },
+                redirect(location) { this.location = location; return this; } };
+            await completeAuthorization({ query }, res, { authConfig: auth });
+            return res;
+        };
+        const denied = await redirectTo({ error: 'access_denied', state: 'server-state', error_description: 'internal text' });
+        const location = new URL(denied.location);
+        assert.strictEqual(location.origin + location.pathname, 'http://127.0.0.1:53682/callback');
+        assert.strictEqual(location.searchParams.get('error'), 'access_denied');
+        assert.strictEqual(location.searchParams.get('state'), 'client-state');
+        assert.strictEqual(location.searchParams.get('error_description'), null);
+        assert.strictEqual(deleted, 'server-state');
+        const unknown = new URL((await redirectTo({ error: 'weird<script>', state: 'server-state' })).location);
+        assert.strictEqual(unknown.searchParams.get('error'), 'server_error');
+        const forged = await redirectTo({ error: 'access_denied', state: 'missing' });
+        assert.strictEqual(forged.statusCode, 400);
+        assert.strictEqual(forged.location, undefined);
+    });
+});

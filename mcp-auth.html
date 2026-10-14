@@ -1,13 +1,29 @@
 <script type="text/javascript">
+    // properties.md: validators read the edit dialog first and fall back to the saved node.
+    function mcpRedisMode(node) {
+        var input = $('#node-config-input-mode');
+        return input.length ? input.val() : node.mode;
+    }
+    function mcpAuthProvider(node) {
+        var input = $('#node-config-input-provider');
+        return input.length && input.val() ? input.val() : node.provider;
+    }
+
     RED.nodes.registerType('mcp-redis', {
         category: 'config',
         defaults: {
             name: { value: '' },
-            mode: { value: 'memory', required: true },
-            redisUrlEnv: { value: 'REDIS_URL' },
-            host: { value: '127.0.0.1' },
-            port: { value: 6379, validate: function(v) { return v === '' || (v > 0 && v < 65536); } },
-            db: { value: 0 },
+            mode: { value: 'memory', required: true, validate: function(v) { return ['memory', 'env', 'manual'].indexOf(v) !== -1; } },
+            redisUrlEnv: { value: 'REDIS_URL', validate: function(v) {
+                return mcpRedisMode(this) !== 'env' || /^[A-Za-z_][A-Za-z0-9_]*$/.test(v || '');
+            } },
+            host: { value: '127.0.0.1', validate: function(v) { return mcpRedisMode(this) !== 'manual' || !!(v && String(v).trim()); } },
+            port: { value: 6379, validate: function(v) {
+                return v === '' || (RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536);
+            } },
+            db: { value: 0, validate: function(v) {
+                return v === '' || (RED.validators.number()(v) && Number.isInteger(Number(v)) && v >= 0);
+            } },
             tls: { value: false },
             username: { value: '' },
             passwordEnv: { value: '' },
@@ -16,6 +32,7 @@
         credentials: {
             password: { type: 'password' }
         },
+        paletteLabel: 'MCP auth storage',
         label: function() {
             return this.name || 'MCP Auth Storage';
         },
@@ -38,14 +55,14 @@
             oauthSlug: { value: '', required: true, validate: function(v) { return typeof v === 'string' && /^[a-z][a-z0-9-]{0,62}$/.test(v); } },
             provider: { value: 'oidc', required: true, validate: function(v) { return v === 'oidc' || v === 'microsoft'; } },
             issuerUrl: { value: '', validate: function(v) {
-                if (this.provider !== 'oidc') return true;
+                if (mcpAuthProvider(this) !== 'oidc') return true;
                 try { var u = new URL(v); return u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash; }
                 catch (_) { return false; }
             } },
-            clientId: { value: '', validate: function(v) { return this.provider !== 'oidc' || (typeof v === 'string' && v.trim().length > 0); } },
+            clientId: { value: '', validate: function(v) { return mcpAuthProvider(this) !== 'oidc' || (typeof v === 'string' && v.trim().length > 0); } },
             clientSecretEnv: { value: '' },
-            microsoftTenantId: { value: '', validate: function(v) { return this.provider !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
-            microsoftClientId: { value: '', validate: function(v) { return this.provider !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
+            microsoftTenantId: { value: '', validate: function(v) { return mcpAuthProvider(this) !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
+            microsoftClientId: { value: '', validate: function(v) { return mcpAuthProvider(this) !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
             microsoftClientSecretEnv: { value: '' },
             allowedClientHosts: { value: '', required: true },
             groupClaim: { value: 'groups' },
@@ -62,6 +79,7 @@
             oidcRefreshKey: { type: 'password' },
             microsoftRefreshKey: { type: 'password' }
         },
+        paletteLabel: 'MCP auth',
         label: function() {
             return this.name || 'MCP OIDC Auth';
         },
@@ -238,28 +256,62 @@
 </script>
 
 <script type="text/html" data-help-name="mcp-redis">
-    <p>Stores short-lived MCP authorization state, authorization codes, and opaque access tokens.</p>
-    <p>Use memory mode for local development only. Use Redis-backed storage for shared or restarted runtimes.</p>
+    <p>Storage for MCP authorization state, authorization codes, access tokens and refresh sessions.</p>
+    <h3>Details</h3>
+    <dl>
+        <dt>Mode</dt>
+        <dd><code>Memory</code> for local tests only: every restart or deploy clears all sessions, so
+        users sign in again. <code>Redis URL from environment</code> or
+        <code>Manual Redis settings</code> keep sessions across restarts.</dd>
+        <dt>URL Env</dt>
+        <dd>Environment variable holding the Redis URL.</dd>
+        <dt>Host, Port, DB, TLS, Username</dt>
+        <dd>Manual Redis connection settings.</dd>
+        <dt>Password, Password Env</dt>
+        <dd>Redis password as a credential, or the name of an environment variable that holds it.</dd>
+        <dt>Key Prefix</dt>
+        <dd>Prefix for every stored key.</dd>
+    </dl>
+    <p>Connection errors are reported as warnings at most once a minute.</p>
 </script>
 
 <script type="text/html" data-help-name="mcp-auth">
-    <p>Defines OIDC settings used by MCP endpoints that require OAuth authorization.</p>
-    <p>Secrets are stored as Node-RED credentials or read from environment variables.</p>
-    <p>Access tokens last at most 15 minutes. Refresh idle TTL is at most 7 days;
-    absolute session TTL is at most 21 days and never increases on refresh. TTL values are seconds.</p>
-    <p>Reuse Grace allows identical refresh retries for 30 seconds by default (0-120 seconds).
-    Zero disables retries. Provider outages return temporarily_unavailable without revoking the session.</p>
-    <p>Refresh requires the selected provider's Refresh Key (64 hex characters) and
-    provider offline_access consent. Use persistent Redis storage for sessions
-    that must survive runtime restarts; memory mode is for local tests only.</p>
-    <p>Slug is the stable OAuth route name, independent of the Node-RED node ID.
-    Register https://your-nodered-host/oauth/your-slug/callback with the provider.
-    Keep the slug when replacing this node. Slugs must be unique across separate auth
-    configurations on the same listener or base URL.</p>
-    <p>The selected provider tab is active. OIDC uses its configured issuer, UserInfo groups
-    and fixed openid profile email groups scopes.
-    Microsoft Entra ID uses a single-tenant v2 issuer and roles from the verified ID token;
-    scopes are fixed to openid profile email. At least one app role is required.</p>
-    <p>Each auth configuration and provider identity has isolated authorization storage.
-    Select the provider and save the configuration before using it with an endpoint.</p>
+    <p>OAuth authorization for MCP endpoints, backed by Microsoft Entra ID or another OIDC provider.</p>
+    <h3>Details</h3>
+    <p>The selected provider tab is active. Secrets are stored as credentials or read from
+    environment variables. An invalid configuration is reported in the log and every endpoint that
+    uses it refuses to start.</p>
+    <dl>
+        <dt>Slug</dt>
+        <dd>Stable OAuth route name. Register
+        <code>https://your-nodered-host/oauth/your-slug/callback</code> with the provider. Slugs
+        must be unique across separate auth configurations on the same listener or base URL.</dd>
+        <dt>Microsoft Entra ID</dt>
+        <dd>Single-tenant v2 issuer from Tenant ID; roles from the verified ID token; scopes
+        <code>openid profile email</code>. At least one app role is required.</dd>
+        <dt>OIDC</dt>
+        <dd>Configured issuer, UserInfo groups and scopes <code>openid profile email groups</code>.</dd>
+        <dt>Refresh Key</dt>
+        <dd>64 hex characters (<code>openssl rand -hex 32</code>) that encrypt stored provider
+        refresh tokens. Without it no refresh tokens are issued.</dd>
+        <dt>Client Hosts</dt>
+        <dd>Hosts allowed to serve MCP client metadata documents, for example <code>claude.ai</code>.</dd>
+        <dt>Storage</dt>
+        <dd>MCP auth storage; use Redis for sessions that must survive restarts.</dd>
+        <dt>Access TTL, Refresh TTL, Session TTL</dt>
+        <dd>Seconds. Access tokens last at most 15 minutes, refresh sessions expire after at most 7 idle
+        days and at most 21 days in total; refresh never extends the total.</dd>
+        <dt>Reuse Grace</dt>
+        <dd>Seconds (0-120, default 30) during which an identical refresh retry gets the same result.
+        Zero disables it. Provider outages answer <code>temporarily_unavailable</code> without
+        revoking the session.</dd>
+    </dl>
+    <p>Sessions belong to this configuration node and its provider identity. Replacing the node,
+    changing provider, issuer, client ID, group claim or slug, or switching storage ends all
+    existing sessions, and users sign in again.</p>
+    <h3>References</h3>
+    <ul>
+        <li><a href="https://datatracker.ietf.org/doc/html/rfc6749">RFC 6749 OAuth 2.0</a></li>
+        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol authorization</a></li>
+    </ul>
 </script>

@@ -133,10 +133,16 @@ module.exports = function (RED)
             node.log(`Tool "${node.toolName}" unregistered`);
         };
 
-        if (node.toolName) setTimeout(() => node.registerTool(), 500);
+        let closed = false;
+        const registerTimer = node.toolName ? setTimeout(() =>
+        {
+            if (!closed) node.registerTool();
+        }, 500) : null;
 
         node.on('close', function (done)
         {
+            closed = true;
+            clearTimeout(registerTimer);
             if (node.isRegistered) node.unregisterTool();
             done();
         });

@@ -49,7 +49,7 @@ From a Git reference:
 
 ```bash
 cd ~/.node-red
-npm install git+ssh://git@example.com/org/node-red-contrib-mcp-server.git#<commit>
+npm install git+ssh://git@github.com/olykov/node-red-contrib-mcp-server.git#<commit>
 ```
 
 For local development:
@@ -96,8 +96,8 @@ OIDC uses an HTTPS issuer URL, client ID and UserInfo claim names;
 its base scopes are fixed to `openid profile email groups`.
 Microsoft uses a tenant GUID and application client GUID; its tenant-specific v2 issuer,
 `openid profile email` scopes and `roles` claim are fixed. Microsoft permissions come only
-from the verified ID token; at least one assigned app role is required. Endpoint Allowed Groups
-must match the role values used for that endpoint. No Graph directory permissions are needed.
+from the verified ID token; at least one assigned app role is required. Endpoint Groups
+(separated by commas or spaces) must match the role values used for that endpoint. No Graph directory permissions are needed.
 
 Authorization state, codes and access tokens are isolated by auth node, provider, issuer,
 client ID, claim settings and OAuth slug, even when storage is shared. Switching provider/configuration
@@ -199,8 +199,14 @@ All protected tool calls validate credentials before flow or admin execution.
 Missing or invalid tokens return an MCP `result` with `isError: true` and
 `_meta["mcp/www_authenticate"]`.
 Endpoint role and resource failures remain HTTP 403. Unresolved required auth
-configuration fails closed. GET/SSE still requires authentication and returns HTTP
-401 with `WWW-Authenticate`. Client support for an in-chat OAuth linking UI must be
+configuration fails closed, and an invalid `mcp-auth` configuration is reported
+in the log and stops its endpoints from starting. GET on an MCP path requires
+authentication (HTTP 401 with `WWW-Authenticate`) and otherwise answers 405; the
+legacy SSE stream was removed, so only JSON-RPC POST is served. If the provider
+returns an error instead of a code, the callback redirects that error to the
+client `redirect_uri` (RFC 6749 4.1.2.1). Storage failures on OAuth routes return
+503 `temporarily_unavailable` and are logged; responses never include internal
+error text. Client support for an in-chat OAuth linking UI must be
 verified separately; emitting the challenge does not guarantee that UI.
 
 The authorization endpoint requires PKCE S256, validates the client metadata host allow-list, checks the exact redirect URI against the client metadata document, delegates login to the configured OIDC issuer, validates the returned ID token through JWKS, and issues short-lived opaque MCP access tokens.
@@ -265,7 +271,7 @@ sign-in after an ambiguous network failure.
 Grace is a bounded replay-detection tradeoff: possession of the old bearer token
 and its public client bindings can retrieve the cached pair during this window.
 Set grace to zero when strict replay rejection is required. Logs contain only
-`transient`, `provider_config`, `revoked`, `replay` or `grace_reuse`, never
+`transient`, `provider_config`, `unknown`, `revoked`, `replay` or `grace_reuse`, never
 credential payloads.
 
 Every new rotation contacts the selected provider. Microsoft requires a freshly signed

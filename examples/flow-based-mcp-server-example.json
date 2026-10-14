@@ -1,183 +1,143 @@
 [
     {
-        "id": "mcp-flow-example",
+        "id": "mcp-example-tab",
         "type": "tab",
-        "label": "Flow-Based MCP Server Example",
+        "label": "MCP flow server example",
         "disabled": false,
-        "info": "This flow demonstrates creating a complete MCP server within Node-RED.\n\n**Setup:**\n1. Deploy this flow\n2. The MCP Flow Server will start on port 8001\n3. Test with: curl -X POST http://localhost:8001/mcp -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}'\n\n**Features:**\n- Complete MCP server running in Node-RED\n- Custom tools defined visually\n- Calculator and greeting tools\n- Auto-start server\n- Tool execution handled by flows"
+        "info": "One MCP endpoint with one tool implemented as a flow.\n\nBefore deploying, open **MCP example auth** and set your identity provider (issuer, client ID, client secret) and Client Hosts, and register `https://<your-host>/oauth/example-login/callback` with the provider.\n\nStorage is in memory for this example: every restart signs users out. Use Redis for real use."
     },
     {
-        "id": "mcp-flow-server-1",
-        "type": "mcp-flow-server",
-        "z": "mcp-flow-example",
-        "name": "Demo MCP Server",
-        "serverName": "demo-flow-server",
-        "serverPort": 8001,
-        "x": 180,
-        "y": 100,
-        "wires": [["tool-execution-router"]]
-    },
-    {
-        "id": "tool-registry-calc",
-        "type": "mcp-tool-registry",
-        "z": "mcp-flow-example",
-        "name": "Calculator Tool",
-        "toolName": "calculate_tool",
-        "toolDescription": "Perform basic mathematical calculations",
-        "toolSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"operation\": {\n      \"type\": \"string\",\n      \"enum\": [\"add\", \"subtract\", \"multiply\", \"divide\"],\n      \"description\": \"Mathematical operation to perform\"\n    },\n    \"a\": {\n      \"type\": \"number\",\n      \"description\": \"First number\"\n    },\n    \"b\": {\n      \"type\": \"number\",\n      \"description\": \"Second number\"\n    }\n  },\n  \"required\": [\"operation\", \"a\", \"b\"]\n}",
-        "autoRegister": true,
-        "x": 180,
-        "y": 200,
-        "wires": [["debug-registry"]]
-    },
-    {
-        "id": "tool-registry-greeting",
-        "type": "mcp-tool-registry",
-        "z": "mcp-flow-example",
-        "name": "Greeting Tool",
-        "toolName": "greet_user_tool",
-        "toolDescription": "Generate a personalized greeting message",
-        "toolSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"name\": {\n      \"type\": \"string\",\n      \"description\": \"Name of the person to greet\"\n    },\n    \"language\": {\n      \"type\": \"string\",\n      \"enum\": [\"english\", \"spanish\", \"french\"],\n      \"description\": \"Language for the greeting\"\n    },\n    \"formal\": {\n      \"type\": \"boolean\",\n      \"description\": \"Whether to use formal greeting\"\n    }\n  },\n  \"required\": [\"name\"]\n}",
-        "autoRegister": true,
-        "x": 180,
-        "y": 260,
-        "wires": [["debug-registry"]]
-    },
-    {
-        "id": "debug-registry",
-        "type": "debug",
-        "z": "mcp-flow-example",
-        "name": "Registry Events",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 430,
-        "y": 230,
+        "id": "mcp-example-note",
+        "type": "comment",
+        "z": "mcp-example-tab",
+        "name": "Configure MCP example auth before deploying",
+        "info": "The endpoint refuses to start until the auth configuration is valid.\nTool calls arrive as `mcp-tool-execute`; the flow answers with `mcp-tool-response` and the same `executionId`.",
+        "x": 220,
+        "y": 40,
         "wires": []
     },
     {
-        "id": "tool-execution-router",
+        "id": "mcp-example-runtime",
+        "type": "mcp-runtime",
+        "name": "MCP example runtime",
+        "runtimeName": "mcp-example",
+        "serverPort": 8001,
+        "publicBaseUrl": "",
+        "adminPort": "",
+        "adminEndpointPath": ""
+    },
+    {
+        "id": "mcp-example-storage",
+        "type": "mcp-redis",
+        "name": "MCP example storage",
+        "mode": "memory",
+        "redisUrlEnv": "REDIS_URL",
+        "host": "127.0.0.1",
+        "port": 6379,
+        "db": 0,
+        "tls": false,
+        "username": "",
+        "passwordEnv": "",
+        "keyPrefix": "mcp_auth:"
+    },
+    {
+        "id": "mcp-example-auth",
+        "type": "mcp-auth",
+        "name": "MCP example auth",
+        "oauthSlug": "example-login",
+        "provider": "oidc",
+        "issuerUrl": "https://idp.example.com",
+        "clientId": "replace-with-client-id",
+        "clientSecretEnv": "",
+        "microsoftTenantId": "",
+        "microsoftClientId": "",
+        "microsoftClientSecretEnv": "",
+        "allowedClientHosts": "claude.ai",
+        "groupClaim": "groups",
+        "userClaim": "email",
+        "redis": "mcp-example-storage",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800,
+        "sessionTtl": 1814400,
+        "refreshReuseGraceSeconds": 30
+    },
+    {
+        "id": "mcp-example-server",
+        "type": "mcp-flow-server",
+        "z": "mcp-example-tab",
+        "name": "Example endpoint",
+        "runtime": "mcp-example-runtime",
+        "auth": "mcp-example-auth",
+        "serverName": "example",
+        "serverPath": "/mcp/example",
+        "allowedGroups": "",
+        "x": 170,
+        "y": 120,
+        "wires": [
+            [
+                "mcp-example-route"
+            ]
+        ]
+    },
+    {
+        "id": "mcp-example-tool",
+        "type": "mcp-tool-registry",
+        "z": "mcp-example-tab",
+        "name": "Add numbers",
+        "toolName": "add_numbers",
+        "toolDescription": "Adds two numbers.",
+        "endpoint": "mcp-example-server",
+        "toolBehavior": "read",
+        "worldAccess": "closed",
+        "toolSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"a\": { \"type\": \"number\" },\n    \"b\": { \"type\": \"number\" }\n  },\n  \"required\": [\"a\", \"b\"]\n}",
+        "outputSchema": "",
+        "x": 150,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "mcp-example-route",
         "type": "switch",
-        "z": "mcp-flow-example",
-        "name": "Route Tool Execution",
+        "z": "mcp-example-tab",
+        "name": "add_numbers call?",
         "property": "payload.toolName",
         "propertyType": "msg",
         "rules": [
             {
                 "t": "eq",
-                "v": "calculate_tool",
-                "vt": "str"
-            },
-            {
-                "t": "eq",
-                "v": "greet_user_tool",
+                "v": "add_numbers",
                 "vt": "str"
             }
         ],
         "checkall": "true",
         "repair": false,
-        "outputs": 2,
-        "x": 450,
-        "y": 100,
-        "wires": [["calculator-handler"], ["greeting-handler"]]
+        "outputs": 1,
+        "x": 390,
+        "y": 120,
+        "wires": [
+            [
+                "mcp-example-add"
+            ]
+        ]
     },
     {
-        "id": "calculator-handler",
+        "id": "mcp-example-add",
         "type": "function",
-        "z": "mcp-flow-example",
-        "name": "Calculate",
-        "func": "const args = msg.payload.arguments;\nconst { operation, a, b } = args;\n\nlet result;\nswitch (operation) {\n    case 'add':\n        result = a + b;\n        break;\n    case 'subtract':\n        result = a - b;\n        break;\n    case 'multiply':\n        result = a * b;\n        break;\n    case 'divide':\n        if (b === 0) {\n            return {\n                topic: 'mcp-tool-response',\n                payload: {\n                    executionId: msg.payload.executionId,\n                    error: 'Division by zero is not allowed'\n                }\n            };\n        }\n        result = a / b;\n        break;\n    default:\n        return {\n            topic: 'mcp-tool-response',\n            payload: {\n                executionId: msg.payload.executionId,\n                error: 'Unknown operation: ' + operation\n            }\n        };\n}\n\nreturn {\n    topic: 'mcp-tool-response',\n    payload: {\n        executionId: msg.payload.executionId,\n        result: {\n            operation: operation,\n            operands: [a, b],\n            result: result,\n            message: `${a} ${operation} ${b} = ${result}`\n        }\n    }\n};",
+        "z": "mcp-example-tab",
+        "name": "Add",
+        "func": "const args = msg.payload.arguments || {};\nconst result = Number(args.a) + Number(args.b);\nmsg.topic = 'mcp-tool-response';\nmsg.payload = Number.isFinite(result) ?\n    { executionId: msg.payload.executionId, result: String(result) } :\n    { executionId: msg.payload.executionId, error: 'a and b must be numbers' };\nreturn msg;",
         "outputs": 1,
+        "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 650,
-        "y": 60,
-        "wires": [["mcp-flow-server-1", "debug-calc"]]
-    },
-    {
-        "id": "greeting-handler",
-        "type": "function",
-        "z": "mcp-flow-example",
-        "name": "Generate Greeting",
-        "func": "const args = msg.payload.arguments;\nconst { name, language = 'english', formal = false } = args;\n\nconst greetings = {\n    english: {\n        formal: `Good day, ${name}. It is a pleasure to meet you.`,\n        informal: `Hello ${name}! Nice to meet you!`\n    },\n    spanish: {\n        formal: `Buenos días, ${name}. Es un placer conocerle.`,\n        informal: `¡Hola ${name}! ¡Encantado de conocerte!`\n    },\n    french: {\n        formal: `Bonjour ${name}. C'est un plaisir de vous rencontrer.`,\n        informal: `Salut ${name} ! Ravi de te rencontrer !`\n    }\n};\n\nconst greeting = greetings[language] \n    ? greetings[language][formal ? 'formal' : 'informal']\n    : greetings.english[formal ? 'formal' : 'informal'];\n\nreturn {\n    topic: 'mcp-tool-response',\n    payload: {\n        executionId: msg.payload.executionId,\n        result: {\n            greeting: greeting,\n            name: name,\n            language: language,\n            formal: formal,\n            timestamp: new Date().toISOString()\n        }\n    }\n};",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 670,
-        "y": 140,
-        "wires": [["mcp-flow-server-1", "debug-greet"]]
-    },
-    {
-        "id": "debug-calc",
-        "type": "debug",
-        "z": "mcp-flow-example",
-        "name": "Calculator Results",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 890,
-        "y": 60,
-        "wires": []
-    },
-    {
-        "id": "debug-greet",
-        "type": "debug",
-        "z": "mcp-flow-example",
-        "name": "Greeting Results",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 890,
-        "y": 140,
-        "wires": []
-    },
-    {
-        "id": "comment-flow-1",
-        "type": "comment",
-        "z": "mcp-flow-example",
-        "name": "MCP Flow Server",
-        "info": "The MCP Flow Server creates a complete MCP server within Node-RED.\nIt automatically handles MCP protocol, serves tools, and manages execution.",
-        "x": 150,
-        "y": 40,
-        "wires": []
-    },
-    {
-        "id": "comment-flow-2",
-        "type": "comment",
-        "z": "mcp-flow-example",
-        "name": "Tool Definitions",
-        "info": "Tool Registry nodes define the available tools with their schemas.\nThese are automatically registered with the Flow Server.",
-        "x": 150,
-        "y": 160,
-        "wires": []
-    },
-    {
-        "id": "comment-flow-3",
-        "type": "comment",
-        "z": "mcp-flow-example",
-        "name": "Tool Implementation",
-        "info": "Function nodes implement the actual tool logic.\nThey receive tool execution requests and return results to the Flow Server.",
-        "x": 500,
-        "y": 200,
-        "wires": []
+        "x": 570,
+        "y": 120,
+        "wires": [
+            [
+                "mcp-example-server"
+            ]
+        ]
     }
 ]

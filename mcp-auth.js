@@ -28,6 +28,15 @@ module.exports = function (RED)
         node.username = config.username || '';
         node.keyPrefix = config.keyPrefix || 'mcp_auth:';
         node.storage = null;
+        let lastStorageError = 0;
+
+        function reportStorageError(error)
+        {
+            const now = Date.now();
+            if (now - lastStorageError < 60000) return;
+            lastStorageError = now;
+            node.warn('MCP auth storage connection error: ' + (error && error.message ? error.message : String(error)));
+        }
 
         node.createStorage = function ()
         {
@@ -42,7 +51,8 @@ module.exports = function (RED)
                     tls: node.tls,
                     username: node.username,
                     password: envOrCredential(node, config.passwordEnv || '', 'password'),
-                    keyPrefix: node.keyPrefix
+                    keyPrefix: node.keyPrefix,
+                    onError: reportStorageError
                 });
             }
             return node.storage;
@@ -63,16 +73,26 @@ module.exports = function (RED)
         const node = this;
         const getNode = RED.nodes && typeof RED.nodes.getNode === 'function' ? RED.nodes.getNode.bind(RED.nodes) : null;
         node.name = config.name || '';
-        const settings = providerSettings(config);
+        let settings;
+        try
+        {
+            settings = providerSettings(config);
+            node.oauthSlug = authRouteSlug(config);
+            node.accessTokenTtl = boundedTtl(config.accessTokenTtl, ACCESS_TTL);
+            node.refreshTokenTtl = boundedTtl(config.refreshTokenTtl, REFRESH_IDLE_TTL);
+            node.sessionTtl = boundedTtl(config.sessionTtl, SESSION_TTL);
+        } catch (error)
+        {
+            // Endpoints refuse to start with an invalid auth node; report why instead of vanishing.
+            node.configError = error.message;
+            node.error('MCP auth configuration is invalid: ' + error.message);
+            return;
+        }
         Object.assign(node, settings);
-        node.oauthSlug = authRouteSlug(config);
         const storageScope = authStorageScope(node.id, { ...settings, oauthSlug: node.oauthSlug });
         node.allowedClientHosts = config.allowedClientHosts || '';
         node.redisConfigId = config.redis || '';
         node.redisConfig = node.redisConfigId && getNode ? getNode(node.redisConfigId) : null;
-        node.accessTokenTtl = boundedTtl(config.accessTokenTtl, ACCESS_TTL);
-        node.refreshTokenTtl = boundedTtl(config.refreshTokenTtl, REFRESH_IDLE_TTL);
-        node.sessionTtl = boundedTtl(config.sessionTtl, SESSION_TTL);
         node.storage = null;
 
         node.clientSecret = function ()
@@ -95,11 +115,20 @@ module.exports = function (RED)
             return node.storage;
         };
 
-        const encryptionKey = refreshEncryptionKey(node.credentials && node.credentials[
-            node.provider === 'microsoft' ? 'microsoftRefreshKey' : 'oidcRefreshKey']);
-        node.refreshStore = encryptionKey ? new RefreshTokenStore(() => node.getStorage(),
-            storageScope, encryptionKey, node.refreshTokenTtl, node.sessionTtl,
-            config.refreshReuseGraceSeconds) : null;
+        node.refreshStore = null;
+        try
+        {
+            const encryptionKey = refreshEncryptionKey(node.credentials && node.credentials[
+                node.provider === 'microsoft' ? 'microsoftRefreshKey' : 'oidcRefreshKey']);
+            node.refreshStore = encryptionKey ? new RefreshTokenStore(() => node.getStorage(),
+                storageScope, encryptionKey, node.refreshTokenTtl, node.sessionTtl,
+                config.refreshReuseGraceSeconds) : null;
+        } catch (error)
+        {
+            node.configError = error.message;
+            node.error('MCP auth configuration is invalid: ' + error.message);
+            return;
+        }
 
         node.writeAccessToken = async function (token, claims, ttlSeconds)
         {

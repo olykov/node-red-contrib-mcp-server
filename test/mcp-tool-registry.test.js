@@ -100,3 +100,13 @@ describe('mcp-tool-registry', () => {
         assert.deepStrictEqual(emitted, []);
     });
 });
+
+describe('registry lifecycle', () => {
+    it('does not register a tool when closed before the delayed registration', async () => {
+        const { registry, emitted } = buildRegistry({ id: 'quick', toolName: 'quick_tool', endpoint: '__shared__' });
+        await new Promise(resolve => registry.emit('close', resolve));
+        await new Promise(resolve => setTimeout(resolve, 600));
+        assert.deepStrictEqual(emitted, []);
+        assert.strictEqual(registry.isRegistered, false);
+    });
+});

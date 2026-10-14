@@ -24,6 +24,7 @@ function runtime() {
             EventEmitter.call(node);
             node.id = config.id;
             node.credentials = config.credentials || {};
+            node.error = message => (node.errorLog = node.errorLog || []).push(message);
         },
         registerType(name, ctor) { types[name] = ctor; },
         getNode(id) { return nodes[id]; }
@@ -46,7 +47,7 @@ describe('provider configuration', () => {
     it('requires an explicit safe slug without node ID fallback', () => {
         for (const oauthSlug of [undefined, '', 'Uppercase', '../login', 'login/path', 'a%2fb', ' login', 'a'.repeat(64), '1login']) {
             assert.throws(() => authRouteSlug({ id: 'auth-test', oauthSlug }), /OAuth slug/);
-            assert.throws(() => runtime()({ ...oidc, oauthSlug }), /OAuth slug/);
+            assert.match(runtime()({ ...oidc, oauthSlug }).configError, /OAuth slug/);
         }
         assert.equal(authRouteSlug({ oauthSlug: 'mcp-login-2' }), 'mcp-login-2');
     });
@@ -356,6 +357,7 @@ describe('auth provider editor', () => {
     const handlers = {};
     let tabs;
     const $ = selector => ({
+        get length() { return selector in values ? 1 : 0; },
         val(value) { if (value !== undefined) values[selector] = value; return values[selector]; },
         text(value) { values[selector] = value; },
         on(event, handler) { handlers[selector + ':' + event] = handler; },
@@ -367,6 +369,16 @@ describe('auth provider editor', () => {
             create(options) { tabs = { definitions: [], addTab(tab) { this.definitions.push(tab); },
                 activateTab(id) { options.onchange(this.definitions.find(tab => tab.id === id)); } }; return tabs; }
         } }
+    });
+
+    it('validates against the provider tab selected in the open dialog', () => {
+        const definition = definitions['mcp-auth'];
+        values['#node-config-input-provider'] = 'microsoft';
+        assert.equal(definition.defaults.microsoftTenantId.validate.call({ provider: 'oidc' }, ''), false);
+        assert.equal(definition.defaults.issuerUrl.validate.call({ provider: 'oidc' }, ''), true);
+        values['#node-config-input-provider'] = 'oidc';
+        assert.equal(definition.defaults.issuerUrl.validate.call({ provider: 'microsoft' }, ''), false);
+        delete values['#node-config-input-provider'];
     });
 
     it('selects, persists and reopens either provider tab without losing inactive values', () => {
@@ -391,6 +403,7 @@ describe('auth provider editor', () => {
 
     it('validates only active settings and declares both secrets as credentials', () => {
         const definition = definitions['mcp-auth'];
+        delete values['#node-config-input-provider'];
         assert.equal(definition.defaults.issuerUrl.validate.call({ provider: 'microsoft' }, ''), true);
         assert.equal(definition.defaults.issuerUrl.validate.call({ provider: 'oidc' }, 'http://idp.example.test'), false);
         assert.equal(definition.defaults.microsoftTenantId.validate.call({ provider: 'oidc' }, ''), true);
@@ -416,5 +429,35 @@ describe('auth provider editor', () => {
         values['#node-config-input-oauthSlug'] = 'login';
         handlers['#node-config-input-oauthSlug:input']();
         assert.equal(values['#mcp-auth-redirect-url'], 'Redirect URL: https://<nodered>/oauth/login/callback');
+    });
+});
+
+describe('auth configuration reporting', () => {
+    it('reports invalid auth settings and makes endpoints refuse to start', () => {
+        const node = runtime()({ provider: 'oidc', oauthSlug: 'test-login', issuerUrl: 'http://insecure.example.test' });
+        assert.match(node.configError, /HTTPS/);
+        assert.match(node.errorLog[0], /MCP auth configuration is invalid/);
+        const types = {};
+        const RED = { events: new EventEmitter(), httpAdmin: { get() {} }, nodes: {
+            createNode(target, config) { Object.setPrototypeOf(target, EventEmitter.prototype); EventEmitter.call(target);
+                target.id = config.id; target.credentials = {}; target.status = () => {}; target.error = () => {}; },
+            registerType(name, ctor) { types[name] = ctor; },
+            getNode(id) { return id === 'auth' ? node : id === 'runtime' ? runtimeNode : null; } } };
+        delete require.cache[require.resolve('../mcp-flow-server')];
+        require('../mcp-flow-server')(RED);
+        const runtimeNode = new types['mcp-runtime']({ id: 'runtime', serverPort: 18130 });
+        const endpoint = new types['mcp-flow-server']({ id: 'endpoint', runtime: 'runtime', auth: 'auth', serverPath: '/mcp/x' });
+        assert.throws(() => endpoint.initializeServer(), /MCP auth configuration is invalid: .*HTTPS/);
+    });
+
+    it('routes Redis client errors to the storage node instead of unhandled events', () => {
+        const { createStorage } = require('../lib/auth-storage');
+        const seen = [];
+        const storage = createStorage({ mode: 'manual', host: '127.0.0.1', port: 1, onError: error => seen.push(error.message) });
+        try {
+            assert.ok(storage.client.listenerCount('error') >= 1);
+            storage.client.emit('error', new Error('connection refused'));
+            assert.deepStrictEqual(seen, ['connection refused']);
+        } finally { storage.client.disconnect(); }
     });
 });

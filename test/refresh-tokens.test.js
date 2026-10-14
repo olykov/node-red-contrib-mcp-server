@@ -31,6 +31,7 @@ function authNode(options = {}, withRefreshKey = true) {
             EventEmitter.call(node);
             node.id = config.id;
             node.credentials = config.credentials || {};
+            node.error = message => (node.errorLog = node.errorLog || []).push(message);
         }, registerType(name, ctor) { types[name] = ctor; }, getNode(id) { return nodes[id]; }
     } };
     require('../mcp-auth')(RED);
@@ -105,7 +106,7 @@ describe('rotating refresh tokens', () => {
         assert.equal(authNode({ refreshReuseGraceSeconds: 0 }).refreshStore.grace, 0);
         assert.equal(authNode({ refreshReuseGraceSeconds: 120 }).refreshStore.grace, 120);
         for (const grace of [-1, 121, 0.5, 'invalid'])
-            assert.throws(() => authNode({ refreshReuseGraceSeconds: grace }), /0 to 120/);
+            assert.match(authNode({ refreshReuseGraceSeconds: grace }).configError, /0 to 120/);
         for (const maximum of [ACCESS_TTL, REFRESH_IDLE_TTL, SESSION_TTL]) {
             assert.equal(boundedTtl(maximum * 2, maximum), maximum);
             assert.equal(boundedTtl(1, maximum), 1);
@@ -127,7 +128,9 @@ describe('rotating refresh tokens', () => {
         assert.deepEqual(microsoft.refreshStore.key, Buffer.from(credentials.microsoftRefreshKey, 'hex'));
         assert.deepEqual(oidc.refreshStore.key, Buffer.from(credentials.oidcRefreshKey, 'hex'));
         assert.equal(authNode({ credentials: { oidcRefreshKey: key } }).refreshStore, null);
-        assert.throws(() => authNode({ credentials: { microsoftRefreshKey: 'invalid' } }), /64 hex/);
+        const malformed = authNode({ credentials: { microsoftRefreshKey: 'invalid' } });
+        assert.match(malformed.configError, /64 hex/);
+        assert.match(malformed.errorLog[0], /MCP auth configuration is invalid: .*64 hex/);
         assert.throws(() => oidc.refreshStore.open(microsoft.refreshStore.seal('provider-refresh')));
     });
 

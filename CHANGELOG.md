@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.2-upstream.1
+
+Review against the Node-RED Creating Nodes documentation:
+
+- Register the `mcp-runtime` Admin Token as a credential so the editor value is stored.
+- Remove the unauthenticated legacy SSE stream; GET answers 401 or 405 and close no longer waits for idle sockets.
+- Parse endpoint Groups separated by commas or spaces, as the editor describes.
+- Require read permission for the editor server listing and build its status list from text.
+- Use the Node-RED 1.0 input signature with `send`/`done`; cancel restart and delayed tool registration timers on close; send nothing while closing.
+- Return 503 and log storage failures on OAuth routes; log unknown refresh tokens; keep internal error text out of client responses.
+- Redirect provider denials to the client `redirect_uri`; report invalid `mcp-auth` settings instead of throwing, and stop dependent endpoints.
+- Route Redis client errors to a rate-limited warning.
+- Editor: validators for tool names, schemas, ports and storage modes; live provider selection in validators; palette labels, input label, theme colours and buttons; help rewritten to the help style guide.
+- Ship a working example flow; declare Node 18, repository metadata and no longer publish tests or the unused `qs` dependency.
+
 ## 2.1.1-upstream.1
 
 - Allow encrypted, idempotent refresh retries within a configurable 30-second grace window; bound it to 0-120 seconds.
