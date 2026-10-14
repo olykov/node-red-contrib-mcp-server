@@ -510,13 +510,15 @@ describe('upstream mcp-flow-server local extensions', () => {
 
         const unauthenticated = mockRes();
         await server.handleMcpHttpRequest(mockReq(request), unauthenticated);
-        assert.equal(unauthenticated.statusCode, 401);
+        assert.equal(unauthenticated.statusCode, 200);
+        assert.equal(unauthenticated.body.result.isError, true);
         assert.equal(metrics.sent[0].payload.tool, 'unknown');
         assert.equal(metrics.sent[0].payload.status, 'failed');
 
         const forbidden = mockRes();
         await server.handleMcpHttpRequest(mockReq(request, { authorization: 'Bearer scoped-token' }), forbidden);
-        assert.equal(forbidden.statusCode, 403);
+        assert.equal(forbidden.statusCode, 200);
+        assert.match(forbidden.body.result._meta['mcp/www_authenticate'][0], /error="insufficient_scope"/);
         assert.equal(metrics.sent[1].payload.tool, 'write_tool');
         assert.equal(metrics.sent[1].payload.status, 'failed');
         assert.equal(metrics.sent.length, 2);
@@ -737,7 +739,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.deepStrictEqual(res.body.result, { content: [{ type: 'text', text: JSON.stringify({ ok: true, replacement: true }) }] });
     });
 
-    it('returns OAuth challenge when an OAuth endpoint has no bearer token', async () => {
+    it('permits initialize without a bearer token on an OAuth endpoint', async () => {
         const authNode = { id: 'auth-1', oauthSlug: 'test-login', enabled: true, baseScopes: 'openid profile email', readAccessToken: async () => null };
         const { server } = buildServer({
             auth: 'auth-1',
@@ -751,10 +753,9 @@ describe('upstream mcp-flow-server local extensions', () => {
 
         await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'initialize' }), res);
 
-        assert.strictEqual(res.statusCode, 401);
-        assert.match(res.headers['www-authenticate'], /^Bearer /);
-        assert.match(res.headers['www-authenticate'], /oauth-protected-resource\/mcp\/test/);
-        assert.strictEqual(res.body.error, 'invalid_token');
+        assert.strictEqual(res.statusCode, 200);
+        assert.strictEqual(res.body.result.serverInfo.name, 'test');
+        assert.strictEqual(res.headers['www-authenticate'], undefined);
     });
 
     it('returns OAuth challenge for GET discovery probes on an OAuth endpoint', async () => {
@@ -871,7 +872,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.strictEqual(res.body.result.serverInfo.name, 'test');
     });
 
-    it('filters tools/list by tool-level required scopes', async () => {
+    it('keeps scope-protected tools visible in tools/list', async () => {
         const authNode = {
             id: 'auth-1', oauthSlug: 'test-login',
             enabled: true,
@@ -909,7 +910,9 @@ describe('upstream mcp-flow-server local extensions', () => {
             { authorization: 'Bearer scoped-token' }
         ), res);
 
-        assert.deepStrictEqual(res.body.result.tools.map(tool => tool.name), ['read_tool']);
+        assert.deepStrictEqual(res.body.result.tools.map(tool => tool.name), ['read_tool', 'write_tool']);
+        assert.deepStrictEqual(res.body.result.tools[1].securitySchemes,
+            [{ type: 'oauth2', scopes: ['resource:read', 'tool:write'] }]);
     });
 
     it('rejects tools/call when the token lacks the tool scope', async () => {
@@ -944,8 +947,155 @@ describe('upstream mcp-flow-server local extensions', () => {
             { authorization: 'Bearer scoped-token' }
         ), res);
 
-        assert.strictEqual(res.statusCode, 403);
-        assert.strictEqual(res.body.error.message, 'Forbidden');
+        assert.strictEqual(res.statusCode, 200);
+        assert.strictEqual(res.body.result.isError, true);
+        assert.match(res.body.result._meta['mcp/www_authenticate'][0], /error="insufficient_scope"/);
+        assert.strictEqual(server.sent.length, 0);
+    });
+});
+
+describe('tool-level OAuth discovery', () => {
+    function setup(runtime = {}) {
+        let reads = 0;
+        const auth = {
+            id: 'auth-1', oauthSlug: 'test-login', enabled: true,
+            readAccessToken: async token => {
+                reads++;
+                if (token === 'invalid' || token === 'expired') return null;
+                return {
+                    resource: token === 'wrong-resource' ? 'https://mcp.example.test/mcp/other' : 'https://mcp.example.test/mcp/test',
+                    groups: token === 'wrong-role' ? [] : ['operators'], scopes: []
+                };
+            }
+        };
+        const context = buildServer({
+            auth: auth.id, authMode: 'oauth', allowedGroups: 'operators',
+            __nodes: { [auth.id]: auth },
+            __runtime: { publicBaseUrl: 'https://mcp.example.test', adminPort: 1880,
+                credentials: { adminToken: 'test-admin-token' }, adminEndpointPath: '/mcp/test', ...runtime }
+        });
+        context.RED.events.emit('mcp-tool-register', {
+            name: 'protected_tool', description: 'Protected test tool',
+            inputSchema: { type: 'object', properties: {} },
+            outputSchema: { type: 'object' }
+        });
+        let executions = 0;
+        context.server.executeToolFlow = async () => { executions++; return { content: [{ type: 'text', text: 'ok' }] }; };
+        context.server.adminTools.callTool = async () => { executions++; return { content: [{ type: 'text', text: 'ok' }] }; };
+        return { ...context, reads: () => reads, executions: () => executions };
+    }
+
+    it('exposes only descriptors without validating credentials or executing tools', async () => {
+        const context = setup();
+        let first;
+        for (const token of [null, 'invalid', 'expired', 'wrong-role']) {
+            const res = mockRes();
+            await context.server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/list' },
+                token ? { authorization: 'Bearer ' + token } : {}), res);
+            assert.equal(res.statusCode, 200);
+            assert.equal(res.body.result.tools.length, 2);
+            for (const tool of res.body.result.tools) {
+                assert.deepStrictEqual(tool.securitySchemes, [{ type: 'oauth2', scopes: [] }]);
+                assert.deepStrictEqual(tool._meta.securitySchemes, tool.securitySchemes);
+                assert.equal(tool.credentials, undefined);
+                assert.equal(tool.node, undefined);
+            }
+            if (first) assert.deepStrictEqual(res.body.result, first);
+            first = res.body.result;
+        }
+        assert.equal(context.reads(), 0);
+        assert.equal(context.executions(), 0);
+    });
+
+    it('challenges missing, invalid and expired credentials before flow or admin execution, then allows a valid call', async () => {
+        const context = setup();
+        for (const name of ['protected_tool', 'get_flow']) {
+            const request = { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: {} } };
+            for (const token of [null, 'invalid', 'expired']) {
+                const res = mockRes();
+                await context.server.handleMcpHttpRequest(mockReq(request,
+                    token ? { authorization: 'Bearer ' + token } : {}), res);
+                assert.equal(res.statusCode, 200);
+                assert.equal(res.body.id, 7);
+                assert.equal(res.body.error, undefined);
+                assert.equal(res.body.result.isError, true);
+                const challenge = res.body.result._meta['mcp/www_authenticate'];
+                assert.equal(challenge.length, 1);
+                assert.match(challenge[0], /^Bearer resource_metadata="https:\/\/mcp\.example\.test\/\.well-known\/oauth-protected-resource\/mcp\/test"/);
+                assert.match(challenge[0], /error="invalid_token", error_description="Authentication required"/);
+                assert.equal(context.executions(), name === 'protected_tool' ? 0 : 1);
+            }
+            const valid = mockRes();
+            await context.server.handleMcpHttpRequest(mockReq(request, { authorization: 'Bearer valid' }), valid);
+            assert.equal(valid.body.result.content[0].text, 'ok');
+            assert.equal(valid.body.result._meta, undefined);
+        }
+        assert.equal(context.executions(), 2);
+    });
+
+    it('keeps role and resource failures forbidden without execution or reauthorization challenges', async () => {
+        const context = setup();
+        for (const token of ['wrong-role', 'wrong-resource']) {
+            for (const name of ['protected_tool', 'get_flow']) {
+                const res = mockRes();
+                await context.server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1,
+                    method: 'tools/call', params: { name } }, { authorization: 'Bearer ' + token }), res);
+                assert.equal(res.statusCode, 403);
+                assert.equal(res.body.result, undefined);
+            }
+        }
+        assert.equal(context.executions(), 0);
+    });
+
+    it('fails closed when required auth configuration is unresolved', async () => {
+        for (const authMode of ['oauth', 'inherit']) {
+            const { server } = buildServer({ auth: 'missing-auth', authMode });
+            const res = mockRes();
+            await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1,
+                method: 'tools/call', params: { name: 'get_flow' } }), res);
+            assert.equal(res.statusCode, 503);
+            assert.equal(res.body.error, 'auth_not_configured');
+            assert.equal(server.sent.length, 0);
+        }
+    });
+
+    it('serves anonymous HTTP discovery and challenges protected HTTP calls', async () => {
+        const context = setup({ serverPort: 18114 });
+        const server = context.server;
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        const post = async (method, token) => {
+            const res = await fetch('http://127.0.0.1:18114/mcp/test', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', connection: 'close',
+                    ...(token ? { authorization: 'Bearer ' + token } : {}) },
+                body: JSON.stringify({ jsonrpc: '2.0', id: 8, method,
+                    ...(method === 'tools/call' ? { params: { name: 'protected_tool' } } : {}) })
+            });
+            return { status: res.status, body: await res.json() };
+        };
+        try {
+            assert.equal((await post('initialize')).status, 200);
+            const initialized = await fetch('http://127.0.0.1:18114/mcp/test', {
+                method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' },
+                body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })
+            });
+            assert.equal(initialized.status, 202);
+            assert.equal(await initialized.text(), '');
+            const list = await post('tools/list', 'expired');
+            assert.equal(list.status, 200);
+            assert.equal(list.body.result.tools.length, 2);
+            const challenge = await post('tools/call');
+            assert.equal(challenge.status, 200);
+            assert.equal(challenge.body.result.isError, true);
+            assert.match(challenge.body.result._meta['mcp/www_authenticate'][0], /resource_metadata=/);
+            assert.equal(context.executions(), 0);
+            assert.equal((await post('tools/call', 'wrong-resource')).status, 403);
+            assert.equal(context.executions(), 0);
+            assert.equal((await post('tools/call', 'valid')).body.result.content[0].text, 'ok');
+            assert.equal(context.executions(), 1);
+        } finally {
+            await new Promise(resolve => server.stopServer(() => resolve()));
+        }
     });
 });
 
@@ -975,6 +1125,10 @@ describe('stable OAuth routes', () => {
     }
 
     it('keeps HTTP discovery stable after replacement and removes old node-ID routes', async () => {
+        // The test replaces the listener; do not reuse its old keep-alive sockets.
+        const fetch = (url, options = {}) => globalThis.fetch(url, {
+            ...options, headers: { ...options.headers, connection: 'close' }
+        });
         const oldAuth = auth('old-auth-id');
         const context = setup(oldAuth);
         let active = context.server;

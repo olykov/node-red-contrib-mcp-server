@@ -180,7 +180,19 @@ Config-node details retain ordinary property types and values. Node-RED's flow A
 
 `get_flow` never requests the full `/flows` export. The tab index walks Node-RED's in-memory configuration once and caches only compact tab metadata until the next runtime deploy; it does not serialize or transfer full flows. `meta.cached` indicates whether the index was reused. The index excludes undeployed editor changes. Tab detail modes read `/flow/:id`; subflow modes read `/flow/global` and optionally the specified tab. These endpoints still make Node-RED prepare the selected flow before the palette applies its response limits. Responses cap lists at 40 items and edges at 80; Admin API reads have a 15-second timeout and a 32 MiB response limit. Tab indexing stops above 100,000 configuration nodes; graph inspection stops above 20,000 nodes or 100,000 wire visits. `meta` reports the source, scan count, returned node count and truncation.
 
-Protected endpoints return `401` with `WWW-Authenticate` pointing to OAuth protected-resource metadata. Access decisions combine endpoint groups, endpoint scopes, and tool scopes.
+`initialize`, `notifications/initialized` and `tools/list` allow anonymous discovery,
+even when supplied credentials have expired. Discovery exposes server information
+and tool names, descriptions, schemas, annotations and security metadata; it does
+not execute tools or return flow data. Protected tools advertise `securitySchemes`
+and the matching `_meta.securitySchemes`, including OAuth policies with empty scopes.
+
+All protected tool calls validate credentials before flow or admin execution.
+Missing or invalid tokens return an MCP `result` with `isError: true` and
+`_meta["mcp/www_authenticate"]`; insufficient tool scopes use the same contract.
+Endpoint role/scope and resource failures remain HTTP 403. Unresolved required auth
+configuration fails closed. GET/SSE still requires authentication and returns HTTP
+401 with `WWW-Authenticate`. Client support for an in-chat OAuth linking UI must be
+verified separately; emitting the challenge does not guarantee that UI.
 
 The authorization endpoint requires PKCE S256, validates the client metadata host allow-list, checks the exact redirect URI against the client metadata document, delegates login to the configured OIDC issuer, validates the returned ID token through JWKS, and issues short-lived opaque MCP access tokens.
 

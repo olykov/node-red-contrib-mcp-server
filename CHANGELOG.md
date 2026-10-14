@@ -11,6 +11,13 @@
 - Added authorization-code exchange with PKCE S256, OIDC ID token validation, and opaque MCP access tokens.
 - Added tests for OAuth challenges, token exchange, authorized initialization, tool filtering, and forbidden tool calls.
 
+## 2.0.2-upstream.1
+
+- Keep initialization and tool discovery available without valid credentials while enforcing authorization before tool execution.
+- Advertise OAuth policies on protected flow and admin tools and return tool-level authentication challenges for missing/invalid tokens or insufficient tool scopes.
+- Fail closed for unresolved required auth configuration; preserve role/resource denials and authenticated GET/SSE.
+- Avoid stale keep-alive socket reuse in the listener-replacement regression test.
+
 ## 2.0.1-upstream.1
 
 - Allow registered HTTP loopback redirect ports when CIMD omits `application_type`, as well as for explicit native clients.

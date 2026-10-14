@@ -18,7 +18,8 @@ module.exports = function (RED)
         policyAllowsTool,
         protectedResourceMetadata,
         validateRequest,
-        writeAuthFailure
+        writeAuthFailure,
+        writeToolAuthFailure
     } = require('./lib/mcp-auth');
 
 
@@ -46,18 +47,19 @@ module.exports = function (RED)
         return Array.from(new Set(values.filter(Boolean)));
     }
 
-    function securitySchemes(scopes)
+    function securitySchemes(scopes, oauthRequired)
     {
         const normalized = Array.isArray(scopes) ? scopes : [];
-        return normalized.length ? [{ type: 'oauth2', scopes: normalized }] : [];
+        return normalized.length || oauthRequired ? [{ type: 'oauth2', scopes: normalized }] : [];
     }
 
-    function withSecurityMeta(tool, scopes, extraMeta = {})
+    function withSecurityMeta(tool, scopes, extraMeta = {}, oauthRequired = false)
     {
-        const schemes = securitySchemes(scopes);
+        const schemes = securitySchemes(scopes, oauthRequired);
         const meta = Object.assign({}, tool._meta || {}, extraMeta || {});
         if (schemes.length) meta.securitySchemes = schemes;
-        return Object.assign({}, tool, Object.keys(meta).length ? { _meta: meta } : {});
+        return Object.assign({}, tool, schemes.length ? { securitySchemes: schemes } : {},
+            Object.keys(meta).length ? { _meta: meta } : {});
     }
 
     function normalizePath(value)
@@ -428,14 +430,22 @@ module.exports = function (RED)
             let handledToolCall = false;
             try
             {
+                // Discovery stays visible; authorization is enforced before tool execution.
+                if (request.method === 'initialize') return node.handleInitialize(request, res);
+                if (request.method === 'tools/list') return node.handleToolsList(request, res);
+                if (request.method === 'notifications/initialized' && request.id === undefined)
+                    return res.status(202).end();
                 const authResult = await validateRequest(node, req);
-                if (!authResult.ok) return writeAuthFailure(req, res, node, authResult);
+                if (!authResult.ok)
+                {
+                    if (toolRequest && authResult.status === 401)
+                        return writeToolAuthFailure(req, res, node, request.id);
+                    return writeAuthFailure(req, res, node, authResult);
+                }
                 req.mcpAuth = authResult.claims;
                 switch (request.method)
                 {
-                    case 'tools/list': node.handleToolsList(request, res, req.mcpAuth); break;
                     case 'tools/call': handledToolCall = true; await node.handleToolCall(request, req, res); break;
-                    case 'initialize': node.handleInitialize(request, res); break;
                     default:
                         node.rpcError(res, request.id, -32601, 'Method not found: ' + request.method);
                 }
@@ -503,18 +513,18 @@ module.exports = function (RED)
                 inputSchema: tool.inputSchema,
                 ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
                 ...(tool.annotations ? { annotations: tool.annotations } : {})
-            }, node.toolScopes(tool), tool._meta);
+            }, node.toolScopes(tool), tool._meta, isAuthRequired(node));
         };
 
-        node.handleToolsList = function (request, res, authClaims)
+        node.handleToolsList = function (request, res)
         {
             const tools = node.registeredTools()
-                .filter(tool => !authClaims || policyAllowsTool(node, tool, authClaims))
                 .map(tool => node.toolDescriptor(tool));
 
             if (node.adminToolsEnabled)
             {
-                node.adminTools.TOOLS.forEach(tool => tools.push(withSecurityMeta(tool, node.advertisedScopes)));
+                node.adminTools.TOOLS.forEach(tool => tools.push(withSecurityMeta(tool,
+                    node.toolScopes(tool), {}, isAuthRequired(node))));
             }
 
             res.json({ jsonrpc: '2.0', id: request.id, result: { tools } });
@@ -550,7 +560,7 @@ module.exports = function (RED)
                 toolName = tool.name;
                 if (req && req.mcpAuth && !policyAllowsTool(node, tool, req.mcpAuth))
                 {
-                    return node.rpcError(res, request.id, -32001, 'Forbidden', 'Insufficient tool scope', 403);
+                    return writeToolAuthFailure(req, res, node, request.id, 'insufficient_scope');
                 }
                 const result = await node.executeToolFlow(tool, args);
                 const normalized = normalizeToolResult(result);
