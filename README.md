@@ -2,16 +2,15 @@
 
 Upstream-first fork of `node-red-contrib-mcp-server@1.1.5` for MCP tool runtimes.
 
-The package keeps the upstream node model and adds endpoint-scoped MCP flow serving, read-only admin helpers, and package-level OAuth support for MCP endpoints.
+The package exposes Node-RED flows as endpoint-scoped MCP servers with read-only admin helpers and package-level OAuth support.
 
 ## Scope
 
 Included nodes:
 
-- `mcp-server`
-- `mcp-client`
 - `mcp-flow-server`
 - `mcp-tool-registry`
+- `mcp-server-metrics`
 - `mcp-runtime` config node
 - `mcp-redis` config node
 - `mcp-auth` config node
@@ -19,9 +18,9 @@ Included nodes:
 Local extensions:
 
 - Runtime config nodes for local MCP listener settings.
-- Endpoint nodes for logical MCP names, paths, and base scopes.
+- Endpoint nodes for logical MCP names and paths.
 - Endpoint-scoped and shared tool registration.
-- Per-tool required scopes in `_meta.securitySchemes`.
+- Automatic provider scopes in `_meta.securitySchemes`.
 - Optional read-only `get_flow` tool gated by runtime admin settings and an exact endpoint path.
 - OIDC-backed MCP authorization configuration.
 - Memory or Redis-backed storage for short-lived auth state and opaque access tokens.
@@ -32,7 +31,6 @@ Local extensions:
 Not included yet:
 
 - Verified interoperability with hosted MCP clients.
-- Refresh token support.
 - Removed local compatibility nodes from earlier fork revisions.
 
 ## Architecture
@@ -67,13 +65,23 @@ npm link <package-name>
 
 ## Flow Server Extensions
 
-`mcp-runtime` owns the local HTTP listener: port, public base URL, auto-start, CORS, and optional admin API settings.
+`mcp-runtime` owns the local HTTP listener: port, base URL and optional admin API settings. Endpoints start automatically on Node-RED's `flows:started` event. Responses do not enable cross-origin browser access.
+
+Base URL is the address clients and their browsers use to reach the MCP runtime,
+directly or through a proxy. It may be VPN-only; public internet exposure is not
+required. Changing that address requires updating the runtime configuration,
+provider callback registration and client endpoint URLs, not OAuth code.
+The runtime listener currently serves HTTP. HTTPS must terminate outside that
+listener; removing TLS termination entirely requires separate HTTPS runtime
+support. This is independent of whether the endpoint is VPN-only or internet-facing.
 
 `mcp-redis` defines storage for short-lived authorization state and opaque access tokens. Memory mode is for local development only. Redis-backed modes are intended for shared or restarted runtimes.
 
-`mcp-auth` selects its active identity provider using the Authentik or Microsoft Entra ID tab.
-Each provider keeps separate client settings and secrets. Shared settings select storage, client metadata hosts and token TTLs.
+`mcp-auth` selects its active identity provider using the Microsoft Entra ID or OIDC tab.
+Each provider keeps separate client settings and secrets. Shared settings select storage, client metadata hosts and token TTLs. Provider scopes are fixed in code, not editable fields.
 Secrets are stored as Node-RED credentials or read from environment variables.
+Authorization state and one-time authorization codes expire after a fixed 300
+seconds. Auth configurations have no separate enable/disable switch.
 
 Set an explicit shared **OAuth slug**, for example `team-login`. It must start with a
 lowercase letter and contain only lowercase letters, digits or hyphens (1-63 characters).
@@ -81,10 +89,11 @@ Register `https://mcp.example.test/oauth/team-login/callback` with the selected 
 Authorize, token and authorization-server metadata routes use the same slug, not the
 Node-RED node ID. Keep the slug when replacing an auth node; the registered callback
 stays unchanged, but users must sign in again. Separate auth configurations cannot
-share a slug on the same listener or public base URL. Multiple endpoints can share
+share a slug on the same listener or base URL. Multiple endpoints can share
 one auth configuration. There is no fallback or alias for node-ID routes.
 
-Authentik uses an HTTPS issuer URL, client ID, scopes and UserInfo claim names.
+OIDC uses an HTTPS issuer URL, client ID and UserInfo claim names;
+its base scopes are fixed to `openid profile email groups`.
 Microsoft uses a tenant GUID and application client GUID; its tenant-specific v2 issuer,
 `openid profile email` scopes and `roles` claim are fixed. Microsoft permissions come only
 from the verified ID token; at least one assigned app role is required. Endpoint Allowed Groups
@@ -98,7 +107,7 @@ its unexpired tokens; switching is not a token-revocation mechanism.
 
 Client metadata hosts must be allow-listed. This prevents the authorization endpoint from fetching arbitrary user-provided URLs during client metadata validation.
 
-`mcp-flow-server` defines one logical MCP endpoint on a selected runtime: MCP name, HTTP path, optional auth config, endpoint groups/scopes, and base scopes. A runtime is required.
+`mcp-flow-server` defines one logical MCP endpoint: MCP name, HTTP path and allowed groups. Both runtime and OAuth auth configurations are required. There is no public or inherited authorization mode.
 
 One runtime owns one local port. Multiple endpoints may share that runtime port when their MCP paths differ.
 
@@ -124,7 +133,7 @@ The `mcp-flow-server` output emits tool execution and status messages. Return ma
 
 ## Configuration Notes
 
-`mcp-flow-server` endpoint scopes and `mcp-tool-registry` required scopes are both enforced when an endpoint requires OAuth. Tool descriptors also advertise the combined scopes in `_meta.securitySchemes`.
+Tool execution always requires OAuth and checks endpoint roles/groups. Provider scopes are advertised automatically in `securitySchemes` and `_meta.securitySchemes`; custom endpoint/tool scope policies are not supported. `offline_access` is advertised only when refresh is configured.
 
 `mcp-tool-registry` requires an explicit endpoint choice. Select a specific endpoint for endpoint-scoped tools, or select `Shared (All MCPs)` only for tools intentionally exposed on every endpoint in the same Node-RED runtime.
 
@@ -162,8 +171,8 @@ Use `includeConfig: true` with `mode: "node"` to inspect supported execution set
 | `switch` | Property/type, rules, check-all, repair and outputs |
 | `catch` | Scoped node IDs and uncaught setting |
 | `mongodb4` | Operation mode, collection, operation, output, timeout and ID handling |
-| `mcp-flow-server` | Route, auth mode, groups and required/advertised scopes |
-| `mcp-tool-registry` | Description, input/output schemas, endpoint, behavior, world access and scopes |
+| `mcp-flow-server` | Route and allowed groups |
+| `mcp-tool-registry` | Description, input/output schemas, endpoint, behavior and world access |
 
 Settings retain their configured types; absent fields are not filled with inferred defaults.
 `node.configSupported` identifies supported types. Values over 32 KiB, excessive nested structures
@@ -188,8 +197,8 @@ and the matching `_meta.securitySchemes`, including OAuth policies with empty sc
 
 All protected tool calls validate credentials before flow or admin execution.
 Missing or invalid tokens return an MCP `result` with `isError: true` and
-`_meta["mcp/www_authenticate"]`; insufficient tool scopes use the same contract.
-Endpoint role/scope and resource failures remain HTTP 403. Unresolved required auth
+`_meta["mcp/www_authenticate"]`.
+Endpoint role and resource failures remain HTTP 403. Unresolved required auth
 configuration fails closed. GET/SSE still requires authentication and returns HTTP
 401 with `WWW-Authenticate`. Client support for an in-chat OAuth linking UI must be
 verified separately; emitting the challenge does not guarantee that UI.
@@ -202,6 +211,43 @@ callback on `127.0.0.1`, `[::1]` or `localhost` when CIMD declares `native` or o
 fragments and invalid ports are rejected by this exception. Explicitly non-native
 clients retain exact matching. The token endpoint always requires the exact URI,
 including the port, used in the authorization request.
+
+## Refresh Tokens
+
+Refresh is enabled only when the selected provider's Refresh Key credential contains
+a 32-byte key encoded as 64 hexadecimal characters. Each provider tab has its own
+password field; generate a key with `openssl rand -hex 32`. Keep it stable across
+restarts and out of packages/logs. Replacing it requires new
+sign-ins for existing refresh sessions. Without it, discovery advertises only the
+authorization-code grant. Clients requesting `offline_access` receive a separate
+opaque MCP refresh token; the upstream provider credential stays encrypted on the
+server with AES-256-GCM, bound to the auth configuration namespace.
+
+Default and maximum lifetimes are 900 seconds for access, 604800 seconds of refresh
+inactivity and 1814400 seconds from initial sign-in for the absolute session.
+Shorter values can be configured for testing. Each successful refresh resets only
+the inactivity window; neither rotation nor continuous use extends the absolute
+deadline. Access issuance is capped to the remaining session lifetime.
+
+The token endpoint accepts `grant_type=refresh_token`, `refresh_token`, `client_id`,
+and optional `resource`/`scope`. Client, resource and endpoint remain bound; scope
+can be narrowed but never increased. Refresh tokens are hashed in storage, rotated
+atomically and checked for reuse. Reuse or a concurrent redemption closes the
+session, including access tokens linked to it. Provider failure also closes it;
+an ambiguous network failure requires new sign-in rather than replaying a possibly
+consumed provider credential.
+
+Every refresh contacts the selected provider. Microsoft requires a freshly signed
+ID token with the expected issuer, audience, tenant, subject and current app roles.
+For OIDC providers, current UserInfo groups are checked, and a returned ID token is
+validated when present. No cached role/group fallback is used. Account and role
+administration remain the identity administrator's responsibility.
+
+Use the existing Redis-backed auth storage for persistence and protect its network
+access, credentials and backups. Memory storage loses sessions on restart. Local
+tests use synthetic providers and a Redis adapter double; real provider, Redis
+restart and native client silent-refresh acceptance are separate rollout checks.
+No callback or proxy route change is needed for the refresh grant.
 
 ## Verification
 

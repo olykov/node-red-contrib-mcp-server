@@ -2,8 +2,10 @@ module.exports = function (RED)
 {
     "use strict";
 
-    const { createStorage, hashToken, normalizeTtl } = require('./lib/auth-storage');
+    const { createStorage, hashToken } = require('./lib/auth-storage');
     const { providerSettings, authStorageScope, authRouteSlug } = require('./lib/auth-provider');
+    const { RefreshTokenStore, refreshEncryptionKey, boundedTtl, ACCESS_TTL, REFRESH_IDLE_TTL, SESSION_TTL } = require('./lib/refresh-tokens');
+    const OAUTH_TRANSACTION_TTL = 300;
 
     function envOrCredential(node, envName, credentialName)
     {
@@ -61,7 +63,6 @@ module.exports = function (RED)
         const node = this;
         const getNode = RED.nodes && typeof RED.nodes.getNode === 'function' ? RED.nodes.getNode.bind(RED.nodes) : null;
         node.name = config.name || '';
-        node.enabled = config.enabled !== false;
         const settings = providerSettings(config);
         Object.assign(node, settings);
         node.oauthSlug = authRouteSlug(config);
@@ -69,9 +70,9 @@ module.exports = function (RED)
         node.allowedClientHosts = config.allowedClientHosts || '';
         node.redisConfigId = config.redis || '';
         node.redisConfig = node.redisConfigId && getNode ? getNode(node.redisConfigId) : null;
-        node.accessTokenTtl = normalizeTtl(config.accessTokenTtl || 3600);
-        node.authCodeTtl = normalizeTtl(config.authCodeTtl || 300);
-        node.stateTtl = normalizeTtl(config.stateTtl || 300);
+        node.accessTokenTtl = boundedTtl(config.accessTokenTtl, ACCESS_TTL);
+        node.refreshTokenTtl = boundedTtl(config.refreshTokenTtl, REFRESH_IDLE_TTL);
+        node.sessionTtl = boundedTtl(config.sessionTtl, SESSION_TTL);
         node.storage = null;
 
         node.clientSecret = function ()
@@ -94,6 +95,11 @@ module.exports = function (RED)
             return node.storage;
         };
 
+        const encryptionKey = refreshEncryptionKey(node.credentials && node.credentials[
+            node.provider === 'microsoft' ? 'microsoftRefreshKey' : 'oidcRefreshKey']);
+        node.refreshStore = encryptionKey ? new RefreshTokenStore(() => node.getStorage(),
+            storageScope, encryptionKey, node.refreshTokenTtl, node.sessionTtl) : null;
+
         node.writeAccessToken = async function (token, claims, ttlSeconds)
         {
             await node.getStorage().set('access:' + storageScope, hashToken(token), claims, ttlSeconds || node.accessTokenTtl);
@@ -104,9 +110,9 @@ module.exports = function (RED)
             return node.getStorage().get('access:' + storageScope, hashToken(token));
         };
 
-        node.writeState = async function (state, value, ttlSeconds)
+        node.writeState = async function (state, value)
         {
-            await node.getStorage().set('state:' + storageScope, state, value, ttlSeconds || node.stateTtl);
+            await node.getStorage().set('state:' + storageScope, state, value, OAUTH_TRANSACTION_TTL);
         };
 
         node.readState = async function (state)
@@ -119,9 +125,9 @@ module.exports = function (RED)
             await node.getStorage().delete('state:' + storageScope, state);
         };
 
-        node.writeCode = async function (code, value, ttlSeconds)
+        node.writeCode = async function (code, value)
         {
-            await node.getStorage().set('code:' + storageScope, code, value, ttlSeconds || node.authCodeTtl);
+            await node.getStorage().set('code:' + storageScope, code, value, OAUTH_TRANSACTION_TTL);
         };
 
         node.readCode = async function (code)
@@ -132,6 +138,17 @@ module.exports = function (RED)
         node.deleteCode = async function (code)
         {
             await node.getStorage().delete('code:' + storageScope, code);
+        };
+
+        node.consumeCode = async function (code)
+        {
+            const record = await node.readCode(code);
+            if (!record || record.consumed) return null;
+            const consumed = await node.getStorage().compareAndSet('code:' + storageScope,
+                code, record, { consumed: true }, OAUTH_TRANSACTION_TTL);
+            if (!consumed) return null;
+            await node.deleteCode(code);
+            return record;
         };
 
         node.on('close', function (done)
@@ -148,7 +165,9 @@ module.exports = function (RED)
     RED.nodes.registerType('mcp-auth', MCPAuthConfigNode, {
         credentials: {
             clientSecret: { type: 'password' },
-            microsoftClientSecret: { type: 'password' }
+            microsoftClientSecret: { type: 'password' },
+            oidcRefreshKey: { type: 'password' },
+            microsoftRefreshKey: { type: 'password' }
         }
     });
 };

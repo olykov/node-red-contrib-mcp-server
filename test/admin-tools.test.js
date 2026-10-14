@@ -244,11 +244,11 @@ describe('lib/admin-tools', () => {
                 rules: [{ t: 'eq', v: 'findOne', vt: 'str' }, { t: 'else' }], checkall: 'true', repair: false, outputs: 2 }],
             ['catch', { scope: ['database'], uncaught: false }],
             ['mongodb4', { mode: 'collection', collection: 'items', operation: 'find', output: 'toArray', maxTimeMS: '5000', handleDocId: false }],
-            ['mcp-flow-server', { serverPath: '/mcp/items', authMode: 'inherit', allowedGroups: 'Readers', requiredScopes: 'items:read', advertisedScopes: 'openid' }],
+            ['mcp-flow-server', { serverPath: '/mcp/items', allowedGroups: 'Readers' }],
             ['mcp-tool-registry', { toolName: 'read_items', endpoint: 'items', toolDescription: 'Read items',
                 toolSchema: JSON.stringify({ type: 'object', properties: { count: { type: 'integer' } } }),
                 outputSchema: JSON.stringify({ type: 'array', items: { type: 'object' } }),
-                toolBehavior: 'read-only', worldAccess: 'closed', requiredScopes: 'items:read' }]
+                toolBehavior: 'read-only', worldAccess: 'closed' }]
         ];
         for (const [type, settings] of cases) {
             const target = { id: 'target', type, ...settings, wires: [], credentials: { password: 'private-value' },
@@ -309,7 +309,8 @@ describe('lib/admin-tools', () => {
             { type: 'catch', scope: Array(2001).fill('node') },
             { type: 'switch', rules: [{ t: 'eq', v: '\u00e9'.repeat(17000) }] },
             { type: 'mcp-tool-registry', toolSchema: JSON.stringify(deep) },
-            { type: 'mcp-flow-server', serverPath: 'a'.repeat(30000), authMode: 'b'.repeat(30000), allowedGroups: 'c'.repeat(30000) }
+            { type: 'mcp-flow-server', serverPath: 'a'.repeat(40000) },
+            { type: 'mcp-tool-registry', toolName: 'a'.repeat(30000), toolDescription: 'b'.repeat(30000), toolSchema: 'c'.repeat(30000) }
         ];
         for (const settings of cases) {
             const target = { id: 'target', ...settings, wires: [] };

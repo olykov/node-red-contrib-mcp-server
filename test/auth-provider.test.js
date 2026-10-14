@@ -13,7 +13,7 @@ const { beginAuthorization, completeAuthorization, exchangeClientCode, validateR
 const tenant = '00000000-0000-0000-0000-000000000001';
 const client = '00000000-0000-0000-0000-000000000002';
 const microsoft = { provider: 'microsoft', oauthSlug: 'test-login', microsoftTenantId: tenant, microsoftClientId: client };
-const authentik = { provider: 'authentik', oauthSlug: 'test-login', issuerUrl: 'https://idp.example.test/oidc', clientId: 'test-client' };
+const oidc = { provider: 'oidc', oauthSlug: 'test-login', issuerUrl: 'https://idp.example.test/oidc', clientId: 'test-client' };
 
 function runtime() {
     const types = {};
@@ -46,7 +46,7 @@ describe('provider configuration', () => {
     it('requires an explicit safe slug without node ID fallback', () => {
         for (const oauthSlug of [undefined, '', 'Uppercase', '../login', 'login/path', 'a%2fb', ' login', 'a'.repeat(64), '1login']) {
             assert.throws(() => authRouteSlug({ id: 'auth-test', oauthSlug }), /OAuth slug/);
-            assert.throws(() => runtime()({ ...authentik, oauthSlug }), /OAuth slug/);
+            assert.throws(() => runtime()({ ...oidc, oauthSlug }), /OAuth slug/);
         }
         assert.equal(authRouteSlug({ oauthSlug: 'mcp-login-2' }), 'mcp-login-2');
     });
@@ -60,12 +60,13 @@ describe('provider configuration', () => {
         assert.equal(node.clientSecret(), 'active-test-value');
     });
 
-    it('selects only Authentik settings and secret', () => {
-        const node = runtime()({ ...authentik, microsoftTenantId: 'invalid', microsoftClientId: 'invalid',
+    it('selects only OIDC settings and secret', () => {
+        const node = runtime()({ ...oidc, microsoftTenantId: 'invalid', microsoftClientId: 'invalid',
             credentials: { clientSecret: 'active-test-value', microsoftClientSecret: 'unused-test-value' } });
-        assert.equal(node.issuerUrl, authentik.issuerUrl);
+        assert.equal(node.issuerUrl, oidc.issuerUrl);
         assert.equal(node.clientSecret(), 'active-test-value');
         assert.equal(node.groupClaim, 'groups');
+        assert.equal(node.baseScopes, 'openid profile email groups');
     });
 
     it('reads the selected environment variable without falling back to another provider secret', () => {
@@ -84,21 +85,21 @@ describe('provider configuration', () => {
 
     it('rejects missing/unknown provider, non-GUID tenant/client and unsafe issuer', () => {
         for (const config of [{}, { provider: 'unknown' }, { ...microsoft, microsoftTenantId: 'common' },
-            { ...microsoft, microsoftClientId: 'invalid' }, { ...authentik, issuerUrl: 'http://idp.example.test' },
-            { ...authentik, issuerUrl: 'https://user:pass@idp.example.test' }, { ...authentik, clientId: '' }]) {
+            { ...microsoft, microsoftClientId: 'invalid' }, { ...oidc, issuerUrl: 'http://idp.example.test' },
+            { ...oidc, issuerUrl: 'https://user:pass@idp.example.test' }, { ...oidc, clientId: '' }]) {
             assert.throws(() => providerSettings(config));
         }
     });
 
     it('isolates state, codes and tokens by provider, auth node, tenant and client', async () => {
         const build = runtime();
-        const original = build(authentik);
+        const original = build(oidc);
         await original.writeState('state', { marker: true });
         await original.writeCode('code', { marker: true });
         await original.writeAccessToken('token', { marker: true });
-        assert.deepEqual(await build(authentik).readAccessToken('token'), { marker: true });
-        for (const config of [microsoft, { ...authentik, id: 'other-auth' }, { ...authentik, oauthSlug: 'other-login' },
-            { ...authentik, clientId: 'other-client' }, { ...authentik, issuerUrl: 'https://other.example.test/oidc' }]) {
+        assert.deepEqual(await build(oidc).readAccessToken('token'), { marker: true });
+        for (const config of [microsoft, { ...oidc, id: 'other-auth' }, { ...oidc, oauthSlug: 'other-login' },
+            { ...oidc, clientId: 'other-client' }, { ...oidc, issuerUrl: 'https://other.example.test/oidc' }]) {
             const other = build(config);
             assert.equal(await other.readAccessToken('token'), null);
             assert.equal(await other.readState('state'), null);
@@ -116,7 +117,7 @@ describe('provider configuration', () => {
 
     it('keeps public URLs stable after node replacement without sharing old credentials', async () => {
         const build = runtime();
-        for (const settings of [authentik, microsoft]) {
+        for (const settings of [oidc, microsoft]) {
             const old = build({ ...settings, id: 'old-node' });
             const replacement = build({ ...settings, id: 'replacement-node' });
             const node = authConfig => ({ authConfig, publicBaseUrl: 'https://mcp.example.test' });
@@ -143,7 +144,7 @@ describe('Microsoft signed-token authorization', () => {
         const auth = runtime()({ ...microsoft, credentials: { microsoftClientSecret: 'test-secret' },
             allowedClientHosts: 'client.example.test' });
         auth.jwks = createLocalJWKSet({ keys: [jwk] });
-        const node = { endpointId: 'endpoint-test', authMode: 'oauth', authConfig: auth,
+        const node = { endpointId: 'endpoint-test', authConfig: auth,
             publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test', allowedGroups: options.allowedGroups || 'MCP.Reader' };
         const state = { client_id: 'https://client.example.test/metadata.json', redirect_uri: 'https://client.example.test/callback',
             client_state: 'client-state', code_challenge: sha256Base64Url('test-verifier'),
@@ -244,7 +245,7 @@ describe('Microsoft signed-token authorization', () => {
         try {
             await beginAuthorization({ headers: {}, query: { response_type: 'code', code_challenge_method: 'S256',
                 code_challenge: 'challenge', client_id: 'https://client.example.test/metadata.json',
-                redirect_uri: 'https://client.example.test/callback', state: 'client-state', scope: 'groups arbitrary' }
+                redirect_uri: 'https://client.example.test/callback', state: 'client-state', scope: 'openid profile email' }
             }, res, { endpointId: 'test', authConfig: auth, publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test' });
             const url = new URL(res.location);
             assert.equal(url.searchParams.get('scope'), 'openid profile email');
@@ -352,10 +353,13 @@ describe('auth provider editor', () => {
     const definitions = {};
     const values = {};
     const visible = {};
+    const handlers = {};
     let tabs;
     const $ = selector => ({
         val(value) { if (value !== undefined) values[selector] = value; return values[selector]; },
-        hide() { visible['#mcp-auth-authentik'] = false; visible['#mcp-auth-microsoft'] = false; },
+        text(value) { values[selector] = value; },
+        on(event, handler) { handlers[selector + ':' + event] = handler; },
+        hide() { visible['#mcp-auth-oidc'] = false; visible['#mcp-auth-microsoft'] = false; },
         show() { visible[selector] = true; }
     });
     vm.runInNewContext(html.match(/<script type="text\/javascript">([\s\S]*?)<\/script>/)[1], {
@@ -367,27 +371,29 @@ describe('auth provider editor', () => {
 
     it('selects, persists and reopens either provider tab without losing inactive values', () => {
         const definition = definitions['mcp-auth'];
-        values['#node-config-input-clientId'] = 'authentik-client';
+        values['#node-config-input-clientId'] = 'oidc-client';
         values['#node-config-input-microsoftClientId'] = client;
         definition.oneditprepare.call({ provider: 'microsoft' });
+        assert.deepEqual(tabs.definitions.map(tab => tab.id), ['microsoft', 'oidc']);
+        assert.equal(tabs.definitions[1].label, 'OIDC');
         assert.equal(values['#node-config-input-provider'], 'microsoft');
         assert.equal(visible['#mcp-auth-microsoft'], true);
-        assert.equal(visible['#mcp-auth-authentik'], false);
-        tabs.activateTab('authentik');
-        assert.equal(values['#node-config-input-provider'], 'authentik');
-        assert.equal(visible['#mcp-auth-authentik'], true);
+        assert.equal(visible['#mcp-auth-oidc'], false);
+        tabs.activateTab('oidc');
+        assert.equal(values['#node-config-input-provider'], 'oidc');
+        assert.equal(visible['#mcp-auth-oidc'], true);
         assert.equal(visible['#mcp-auth-microsoft'], false);
         assert.equal(values['#node-config-input-microsoftClientId'], client);
         definition.oneditprepare.call({ provider: values['#node-config-input-provider'] });
-        assert.equal(visible['#mcp-auth-authentik'], true);
-        assert.equal(values['#node-config-input-clientId'], 'authentik-client');
+        assert.equal(visible['#mcp-auth-oidc'], true);
+        assert.equal(values['#node-config-input-clientId'], 'oidc-client');
     });
 
     it('validates only active settings and declares both secrets as credentials', () => {
         const definition = definitions['mcp-auth'];
         assert.equal(definition.defaults.issuerUrl.validate.call({ provider: 'microsoft' }, ''), true);
-        assert.equal(definition.defaults.issuerUrl.validate.call({ provider: 'authentik' }, 'http://idp.example.test'), false);
-        assert.equal(definition.defaults.microsoftTenantId.validate.call({ provider: 'authentik' }, ''), true);
+        assert.equal(definition.defaults.issuerUrl.validate.call({ provider: 'oidc' }, 'http://idp.example.test'), false);
+        assert.equal(definition.defaults.microsoftTenantId.validate.call({ provider: 'oidc' }, ''), true);
         assert.equal(definition.defaults.microsoftTenantId.validate.call({ provider: 'microsoft' }, 'common'), false);
         assert.equal(definition.defaults.microsoftTenantId.validate.call({ provider: 'microsoft' }, tenant), true);
         assert.equal(definition.credentials.clientSecret.type, 'password');
@@ -395,5 +401,20 @@ describe('auth provider editor', () => {
         for (const key of Object.keys(definition.defaults)) {
             assert.ok(html.includes('id="node-config-input-' + key + '"'), key);
         }
+    });
+
+    it('updates the redirect template from the typed slug without reading a runtime', () => {
+        values['#node-config-input-oauthSlug'] = 'first-login';
+        definitions['mcp-auth'].oneditprepare.call({ id: 'auth' });
+        assert.equal(values['#mcp-auth-redirect-url'], 'Redirect URL: https://<nodered>/oauth/first-login/callback');
+        values['#node-config-input-oauthSlug'] = 'second-login';
+        handlers['#node-config-input-oauthSlug:input']();
+        assert.equal(values['#mcp-auth-redirect-url'], 'Redirect URL: https://<nodered>/oauth/second-login/callback');
+        values['#node-config-input-oauthSlug'] = '<script>';
+        handlers['#node-config-input-oauthSlug:input']();
+        assert.match(values['#mcp-auth-redirect-url'], /invalid slug/);
+        values['#node-config-input-oauthSlug'] = 'login';
+        handlers['#node-config-input-oauthSlug:input']();
+        assert.equal(values['#mcp-auth-redirect-url'], 'Redirect URL: https://<nodered>/oauth/login/callback');
     });
 });

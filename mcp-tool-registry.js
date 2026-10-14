@@ -2,13 +2,6 @@ module.exports = function (RED)
 {
     "use strict";
 
-    function parseList(value)
-    {
-        if (Array.isArray(value)) return value.map(String).map(s => s.trim()).filter(Boolean);
-        if (typeof value !== 'string') return [];
-        return value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
-    }
-
     function normalizeEndpoint(value)
     {
         return value === '__shared__' ? '' : (value || '');
@@ -49,7 +42,6 @@ module.exports = function (RED)
         node.toolName = config.toolName || '';
         node.toolDescription = config.toolDescription || '';
         node.endpoint = normalizeEndpoint(config.endpoint);
-        node.requiredScopes = parseList(config.requiredScopes || '');
         node.toolBehavior = config.toolBehavior || '';
         node.worldAccess = config.worldAccess || '';
         node.toolSchema = config.toolSchema || '{}';
@@ -114,7 +106,6 @@ module.exports = function (RED)
                 ...(annotations ? { annotations } : {}),
                 endpointId: binding.endpointId,
                 serverName: binding.serverName,
-                requiredScopes: node.requiredScopes,
                 registeredBy: node.id,
                 registrationTime: new Date()
             };

@@ -35,31 +35,31 @@
         category: 'config',
         defaults: {
             name: { value: '' },
-            enabled: { value: true },
             oauthSlug: { value: '', required: true, validate: function(v) { return typeof v === 'string' && /^[a-z][a-z0-9-]{0,62}$/.test(v); } },
-            provider: { value: 'authentik', required: true, validate: function(v) { return v === 'authentik' || v === 'microsoft'; } },
+            provider: { value: 'oidc', required: true, validate: function(v) { return v === 'oidc' || v === 'microsoft'; } },
             issuerUrl: { value: '', validate: function(v) {
-                if (this.provider !== 'authentik') return true;
+                if (this.provider !== 'oidc') return true;
                 try { var u = new URL(v); return u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash; }
                 catch (_) { return false; }
             } },
-            clientId: { value: '', validate: function(v) { return this.provider !== 'authentik' || (typeof v === 'string' && v.trim().length > 0); } },
+            clientId: { value: '', validate: function(v) { return this.provider !== 'oidc' || (typeof v === 'string' && v.trim().length > 0); } },
             clientSecretEnv: { value: '' },
             microsoftTenantId: { value: '', validate: function(v) { return this.provider !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
             microsoftClientId: { value: '', validate: function(v) { return this.provider !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
             microsoftClientSecretEnv: { value: '' },
             allowedClientHosts: { value: '', required: true },
-            baseScopes: { value: 'openid profile email groups' },
             groupClaim: { value: 'groups' },
             userClaim: { value: 'email' },
             redis: { value: '', type: 'mcp-redis', required: true },
-            accessTokenTtl: { value: 3600 },
-            authCodeTtl: { value: 300 },
-            stateTtl: { value: 300 }
+            accessTokenTtl: { value: 900, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 900; } },
+            refreshTokenTtl: { value: 604800, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 604800; } },
+            sessionTtl: { value: 1814400, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 1814400; } }
         },
         credentials: {
             clientSecret: { type: 'password' },
-            microsoftClientSecret: { type: 'password' }
+            microsoftClientSecret: { type: 'password' },
+            oidcRefreshKey: { type: 'password' },
+            microsoftRefreshKey: { type: 'password' }
         },
         label: function() {
             return this.name || 'MCP OIDC Auth';
@@ -73,9 +73,19 @@
                     $('#mcp-auth-' + tab.id).show();
                 }
             });
-            tabs.addTab({ id: 'authentik', label: 'Authentik' });
             tabs.addTab({ id: 'microsoft', label: 'Microsoft Entra ID' });
-            tabs.activateTab(this.provider || 'authentik');
+            tabs.addTab({ id: 'oidc', label: 'OIDC' });
+            tabs.activateTab(this.provider || 'oidc');
+
+            function updateRedirectUrl() {
+                var slug = $('#node-config-input-oauthSlug').val();
+                var text = /^[a-z][a-z0-9-]{0,62}$/.test(slug || '') ?
+                    'Redirect URL: https://<nodered>/oauth/' + slug + '/callback' :
+                    'Redirect URL: unavailable (invalid slug)';
+                $('#mcp-auth-redirect-url').text(text);
+            }
+            $('#node-config-input-oauthSlug').on('input', updateRedirectUrl);
+            updateRedirectUrl();
         }
     });
 </script>
@@ -87,7 +97,7 @@
     </div>
     <div class="form-row">
         <label for="node-config-input-mode"><i class="fa fa-database"></i> Mode</label>
-        <select id="node-config-input-mode">
+        <select id="node-config-input-mode" style="width: 70%;">
             <option value="memory">Memory</option>
             <option value="env">Redis URL from environment</option>
             <option value="manual">Manual Redis settings</option>
@@ -139,19 +149,16 @@
         <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
         <input type="text" id="node-config-input-name" placeholder="Optional display name">
     </div>
-    <div class="form-row">
-        <label for="node-config-input-enabled"><i class="fa fa-check"></i> Enabled</label>
-        <input type="checkbox" id="node-config-input-enabled" style="width: auto;">
-    </div>
     <input type="hidden" id="node-config-input-provider">
     <div class="form-row">
-        <label for="node-config-input-oauthSlug"><i class="fa fa-link"></i> OAuth slug</label>
+        <label for="node-config-input-oauthSlug"><i class="fa fa-link"></i> Slug</label>
         <input type="text" id="node-config-input-oauthSlug" maxlength="63" autocomplete="off">
+        <div id="mcp-auth-redirect-url" style="margin-left: 100px; margin-top: 6px; font-size: 12px; overflow-wrap: anywhere;"></div>
     </div>
     <div class="form-row">
         <ul id="mcp-auth-provider-tabs"></ul>
     </div>
-    <div id="mcp-auth-authentik" class="mcp-auth-provider-panel">
+    <div id="mcp-auth-oidc" class="mcp-auth-provider-panel">
     <div class="form-row">
         <label for="node-config-input-issuerUrl"><i class="fa fa-link"></i> Issuer URL</label>
         <input type="text" id="node-config-input-issuerUrl" placeholder="https://idp.example.com/oidc/app">
@@ -165,12 +172,12 @@
         <input type="password" id="node-config-input-clientSecret" autocomplete="off">
     </div>
     <div class="form-row">
-        <label for="node-config-input-clientSecretEnv"><i class="fa fa-terminal"></i> Secret Env</label>
-        <input type="text" id="node-config-input-clientSecretEnv" placeholder="Optional environment variable">
+        <label for="node-config-input-oidcRefreshKey"><i class="fa fa-key"></i> Refresh Key</label>
+        <input type="password" id="node-config-input-oidcRefreshKey" autocomplete="off" placeholder="openssl rand -hex 32">
     </div>
     <div class="form-row">
-        <label for="node-config-input-baseScopes"><i class="fa fa-lock"></i> Base Scopes</label>
-        <input type="text" id="node-config-input-baseScopes" placeholder="openid profile email">
+        <label for="node-config-input-clientSecretEnv"><i class="fa fa-terminal"></i> Secret Env</label>
+        <input type="text" id="node-config-input-clientSecretEnv" placeholder="Optional environment variable">
     </div>
     <div class="form-row">
         <label for="node-config-input-groupClaim"><i class="fa fa-users"></i> Group Claim</label>
@@ -195,6 +202,10 @@
             <input type="password" id="node-config-input-microsoftClientSecret" autocomplete="off">
         </div>
         <div class="form-row">
+            <label for="node-config-input-microsoftRefreshKey"><i class="fa fa-key"></i> Refresh Key</label>
+            <input type="password" id="node-config-input-microsoftRefreshKey" autocomplete="off" placeholder="openssl rand -hex 32">
+        </div>
+        <div class="form-row">
             <label for="node-config-input-microsoftClientSecretEnv"><i class="fa fa-terminal"></i> Secret Env</label>
             <input type="text" id="node-config-input-microsoftClientSecretEnv" placeholder="Optional environment variable">
         </div>
@@ -209,15 +220,15 @@
     </div>
     <div class="form-row">
         <label for="node-config-input-accessTokenTtl"><i class="fa fa-clock-o"></i> Access TTL</label>
-        <input type="number" id="node-config-input-accessTokenTtl" min="60" placeholder="3600">
+        <input type="number" id="node-config-input-accessTokenTtl" min="1" max="900" placeholder="900">
     </div>
     <div class="form-row">
-        <label for="node-config-input-authCodeTtl"><i class="fa fa-clock-o"></i> Code TTL</label>
-        <input type="number" id="node-config-input-authCodeTtl" min="60" placeholder="300">
+        <label for="node-config-input-refreshTokenTtl"><i class="fa fa-clock-o"></i> Refresh TTL</label>
+        <input type="number" id="node-config-input-refreshTokenTtl" min="1" max="604800" placeholder="604800">
     </div>
     <div class="form-row">
-        <label for="node-config-input-stateTtl"><i class="fa fa-clock-o"></i> State TTL</label>
-        <input type="number" id="node-config-input-stateTtl" min="60" placeholder="300">
+        <label for="node-config-input-sessionTtl"><i class="fa fa-clock-o"></i> Session TTL</label>
+        <input type="number" id="node-config-input-sessionTtl" min="1" max="1814400" placeholder="1814400">
     </div>
 </script>
 
@@ -229,11 +240,17 @@
 <script type="text/html" data-help-name="mcp-auth">
     <p>Defines OIDC settings used by MCP endpoints that require OAuth authorization.</p>
     <p>Secrets are stored as Node-RED credentials or read from environment variables.</p>
-    <p>OAuth slug is the stable public route name, independent of the Node-RED node ID.
-    Register https://your-public-host/oauth/your-slug/callback with the provider.
+    <p>Access tokens last at most 15 minutes. Refresh idle TTL is at most 7 days;
+    absolute session TTL is at most 21 days and never increases on refresh. TTL values are seconds.</p>
+    <p>Refresh requires the selected provider's Refresh Key (64 hex characters) and
+    provider offline_access consent. Use persistent Redis storage for sessions
+    that must survive runtime restarts; memory mode is for local tests only.</p>
+    <p>Slug is the stable OAuth route name, independent of the Node-RED node ID.
+    Register https://your-nodered-host/oauth/your-slug/callback with the provider.
     Keep the slug when replacing this node. Slugs must be unique across separate auth
-    configurations on the same listener or public base URL.</p>
-    <p>The selected provider tab is active. Authentik uses its configured issuer and UserInfo groups.
+    configurations on the same listener or base URL.</p>
+    <p>The selected provider tab is active. OIDC uses its configured issuer, UserInfo groups
+    and fixed openid profile email groups scopes.
     Microsoft Entra ID uses a single-tenant v2 issuer and roles from the verified ID token;
     scopes are fixed to openid profile email. At least one app role is required.</p>
     <p>Each auth configuration and provider identity has isolated authorization storage.

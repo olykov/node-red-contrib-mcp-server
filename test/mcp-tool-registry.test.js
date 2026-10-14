@@ -42,7 +42,7 @@ describe('mcp-tool-registry', () => {
             toolName: 'read_status',
             toolDescription: 'Read status',
             endpoint: 'endpoint-1',
-            requiredScopes: 'status:read audit:read',
+
             toolSchema: '{"type":"object","properties":{}}'
         }, { 'endpoint-1': endpoint });
 
@@ -51,7 +51,6 @@ describe('mcp-tool-registry', () => {
         assert.strictEqual(emitted[0].event, 'register');
         assert.strictEqual(emitted[0].tool.endpointId, 'endpoint-1');
         assert.strictEqual(emitted[0].tool.serverName, 'ops');
-        assert.deepStrictEqual(emitted[0].tool.requiredScopes, ['status:read', 'audit:read']);
         assert.strictEqual(emitted[0].tool.annotations, undefined);
     });
 

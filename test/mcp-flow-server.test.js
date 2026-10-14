@@ -8,6 +8,9 @@ function createRuntime(config = {}) {
     const types = {};
     const events = new EventEmitter();
     const nodeMap = config.__nodes || {};
+    nodeMap['default-auth'] = { id: 'default-auth', oauthSlug: 'default-login',
+        baseScopes: 'openid profile email', readAccessToken: async token => token === 'test-token' ?
+            { groups: [], scopes: ['openid', 'profile', 'email'] } : null };
     const flowNodes = config.__flowNodes || [];
     const RED = {
         events,
@@ -41,15 +44,14 @@ function createRuntime(config = {}) {
     const runtimeConfig = Object.assign({
         id: 'runtime-1',
         runtimeName: 'test-runtime',
-        serverPort: 18001,
-        autoStart: false,
-        enableCors: true
+        serverPort: 18001
     }, config.__runtime || {});
     const runtimeNode = new types['mcp-runtime'](runtimeConfig);
     nodeMap[runtimeConfig.id] = runtimeNode;
     const nodeConfig = Object.assign({
         id: 'endpoint-1',
         runtime: runtimeConfig.id,
+        auth: 'default-auth',
         serverName: 'test',
         serverPath: '/mcp/test',
     }, config);
@@ -87,7 +89,7 @@ function mockReq(body, headers = {}) {
 
 describe('upstream mcp-flow-server local extensions', () => {
     it('keeps upstream registry tools and advertises _meta.securitySchemes', () => {
-        const { RED, server } = buildServer({ advertisedScopes: 'openid profile email' });
+        const { RED, server } = buildServer();
         RED.events.emit('mcp-tool-register', {
             name: 'sample_ping',
             description: 'Sample ping',
@@ -98,8 +100,6 @@ describe('upstream mcp-flow-server local extensions', () => {
         const tool = res.body.result.tools.find(t => t.name === 'sample_ping');
         assert.deepStrictEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['openid', 'profile', 'email'] }]);
     });
-
-
 
     it('advertises registered tool output schemas', () => {
         const { RED, server } = buildServer();
@@ -117,7 +117,7 @@ describe('upstream mcp-flow-server local extensions', () => {
     });
 
     it('preserves registered tool annotations and security metadata', () => {
-        const { RED, server } = buildServer({ advertisedScopes: 'openid' });
+        const { RED, server } = buildServer();
         RED.events.emit('mcp-tool-register', {
             name: 'read_status',
             description: 'Read status',
@@ -131,7 +131,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.deepStrictEqual(tool.annotations, {
             readOnlyHint: true, destructiveHint: false, openWorldHint: false
         });
-        assert.deepStrictEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['openid'] }]);
+        assert.deepStrictEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['openid', 'profile', 'email'] }]);
     });
 
     it('serves registry annotations through the MCP tools/list request', async () => {
@@ -170,14 +170,13 @@ describe('upstream mcp-flow-server local extensions', () => {
         const { RED, server, runtimeNode } = buildServer({
             serverName: 'ops',
             serverPath: '/mcp/ops',
-            advertisedScopes: 'openid profile',
-            __runtime: { serverPort: 18002, enableCors: false }
+
+            __runtime: { serverPort: 18002 }
         });
         RED.events.emit('mcp-tool-register', {
             name: 'read_status',
             description: 'Read status',
             endpointId: 'endpoint-1',
-            requiredScopes: ['status:read'],
             inputSchema: { type: 'object', properties: {} }
         });
 
@@ -186,9 +185,8 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.strictEqual(server.serverName, 'ops');
         assert.strictEqual(server.serverPath, '/mcp/ops');
         assert.strictEqual(server.serverPort, 18002);
-        assert.strictEqual(server.enableCors, false);
         assert.strictEqual(runtimeNode.serverPort, 18002);
-        assert.deepStrictEqual(res.body.result.tools[0]._meta.securitySchemes, [{ type: 'oauth2', scopes: ['openid', 'profile', 'status:read'] }]);
+        assert.deepStrictEqual(res.body.result.tools[0]._meta.securitySchemes, [{ type: 'oauth2', scopes: ['openid', 'profile', 'email'] }]);
     });
 
     it('filters registered tools by endpoint id when a binding is configured', () => {
@@ -233,6 +231,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         const serverB = new runtime.types['mcp-flow-server']({
             id: 'endpoint-b',
             runtime: 'runtime-shared',
+            auth: 'default-auth',
             serverName: 'b',
             serverPath: '/mcp/b'
         });
@@ -254,14 +253,13 @@ describe('upstream mcp-flow-server local extensions', () => {
         const runtimeB = new runtime.types['mcp-runtime']({
             id: 'runtime-b',
             runtimeName: 'runtime-b',
-            serverPort: 18006,
-            autoStart: false,
-            enableCors: true
+            serverPort: 18006
         });
         runtime.nodeMap['runtime-b'] = runtimeB;
         const serverB = new runtime.types['mcp-flow-server']({
             id: 'endpoint-b',
             runtime: 'runtime-b',
+            auth: 'default-auth',
             serverName: 'b',
             serverPath: '/mcp/b'
         });
@@ -401,7 +399,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         const pending = server.handleMcpHttpRequest(mockReq({
             jsonrpc: '2.0', id: 1, method: 'tools/call',
             params: { name: 'sample_ping', arguments: { secret: 'private-argument' } }
-        }), response);
+        }, { authorization: 'Bearer test-token' }), response);
         await new Promise(resolve => setImmediate(resolve));
         const execution = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
         server.emit('input', {
@@ -450,7 +448,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         await server.handleMcpHttpRequest(mockReq({
             jsonrpc: '2.0', id: 1, method: 'tools/call',
             params: { name: 'sample_tool', arguments: {} }
-        }), failed);
+        }, { authorization: 'Bearer test-token' }), failed);
         assert.equal(failed.body.result.isError, true);
         assert.deepStrictEqual(metrics.sent[0].payload.tool, 'sample_tool');
         assert.equal(metrics.sent[0].payload.status, 'failed');
@@ -459,7 +457,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         await server.handleMcpHttpRequest(mockReq({
             jsonrpc: '2.0', id: 2, method: 'tools/call',
             params: { name: 'unbounded-private-tool-name', arguments: {} }
-        }), unknown);
+        }, { authorization: 'Bearer test-token' }), unknown);
         assert.equal(unknown.body.error.code, -32602);
         assert.equal(metrics.sent[1].payload.tool, 'unknown');
         assert.equal(metrics.sent[1].payload.status, 'failed');
@@ -472,7 +470,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         const direct = mockRes();
         await server.handleMcpHttpRequest(mockReq({
             jsonrpc: '2.0', id: 3, method: 'sample_tool', params: {}
-        }), direct);
+        }, { authorization: 'Bearer test-token' }), direct);
         assert.equal(direct.body.error.code, -32601);
         assert.equal(executed, false);
         assert.equal(metrics.sent.length, 2);
@@ -480,21 +478,18 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.ok(!JSON.stringify(metrics.sent).includes('private-failure'));
     });
 
-    it('tracks authentication and tool-scope denials without executing the tool', async () => {
+    it('tracks authentication and role denials without executing the tool', async () => {
         const authNode = {
             id: 'auth-1', oauthSlug: 'test-login',
-            enabled: true,
             baseScopes: 'openid profile email',
             readAccessToken: async () => ({
                 resource: 'https://mcp.example.test/mcp/test',
-                scopes: ['resource:read'],
-                groups: ['team-a']
+                scopes: ['openid'],
+                groups: []
             })
         };
         const { RED, server, runtimeNode, types } = buildServer({
             auth: 'auth-1',
-            authMode: 'oauth',
-            requiredScopes: 'resource:read',
             allowedGroups: 'team-a',
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
@@ -502,7 +497,6 @@ describe('upstream mcp-flow-server local extensions', () => {
         RED.events.emit('mcp-tool-register', {
             name: 'write_tool',
             description: 'Write',
-            requiredScopes: ['tool:write'],
             inputSchema: { type: 'object', properties: {} }
         });
         const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
@@ -517,9 +511,9 @@ describe('upstream mcp-flow-server local extensions', () => {
 
         const forbidden = mockRes();
         await server.handleMcpHttpRequest(mockReq(request, { authorization: 'Bearer scoped-token' }), forbidden);
-        assert.equal(forbidden.statusCode, 200);
-        assert.match(forbidden.body.result._meta['mcp/www_authenticate'][0], /error="insufficient_scope"/);
-        assert.equal(metrics.sent[1].payload.tool, 'write_tool');
+        assert.equal(forbidden.statusCode, 403);
+        assert.equal(forbidden.body.error, 'insufficient_access');
+        assert.equal(metrics.sent[1].payload.tool, 'unknown');
         assert.equal(metrics.sent[1].payload.status, 'failed');
         assert.equal(metrics.sent.length, 2);
         assert.equal(server.sent.length, 0);
@@ -538,7 +532,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         await server.handleMcpHttpRequest(mockReq({
             jsonrpc: '2.0', id: 1, method: 'tools/call',
             params: { name: 'sample_ping', arguments: {} }
-        }), response);
+        }, { authorization: 'Bearer test-token' }), response);
         assert.equal(response.body.error.message, 'Tool execution timeout');
         assert.equal(metrics.sent.length, 1);
         assert.equal(metrics.sent[0].payload.tool, 'sample_ping');
@@ -550,6 +544,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         const serverB = new runtime.types['mcp-flow-server']({
             id: 'endpoint-b',
             runtime: runtime.runtimeNode.id,
+            auth: 'default-auth',
             serverName: 'beta',
             serverPath: '/mcp/b'
         });
@@ -671,7 +666,6 @@ describe('upstream mcp-flow-server local extensions', () => {
         }
     });
 
-
     it('keeps same tool name isolated across endpoint bindings', () => {
         const { RED, server } = buildServer({ id: 'alpha-endpoint', serverName: 'alpha' });
         RED.events.emit('mcp-tool-register', {
@@ -715,6 +709,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         const replacement = new runtime.types['mcp-flow-server']({
             id: 'endpoint-shared',
             runtime: 'runtime-1',
+            auth: 'default-auth',
             serverName: 'test-replacement',
             serverPath: '/mcp/a'
         });
@@ -740,11 +735,9 @@ describe('upstream mcp-flow-server local extensions', () => {
     });
 
     it('permits initialize without a bearer token on an OAuth endpoint', async () => {
-        const authNode = { id: 'auth-1', oauthSlug: 'test-login', enabled: true, baseScopes: 'openid profile email', readAccessToken: async () => null };
+        const authNode = { id: 'auth-1', oauthSlug: 'test-login', baseScopes: 'openid profile email', readAccessToken: async () => null };
         const { server } = buildServer({
             auth: 'auth-1',
-            authMode: 'oauth',
-            requiredScopes: 'resource:read',
             allowedGroups: 'team-a',
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
@@ -759,10 +752,9 @@ describe('upstream mcp-flow-server local extensions', () => {
     });
 
     it('returns OAuth challenge for GET discovery probes on an OAuth endpoint', async () => {
-        const authNode = { id: 'auth-1', oauthSlug: 'test-login', enabled: true, baseScopes: 'openid profile email', readAccessToken: async () => null };
+        const authNode = { id: 'auth-1', oauthSlug: 'test-login', baseScopes: 'openid profile email', readAccessToken: async () => null };
         const { server } = buildServer({
             auth: 'auth-1',
-            authMode: 'oauth',
             __nodes: { 'auth-1': authNode },
             __runtime: { serverPort: 18110, publicBaseUrl: 'https://mcp.example.test' }
         });
@@ -781,10 +773,9 @@ describe('upstream mcp-flow-server local extensions', () => {
     });
 
     it('serves root protected resource metadata for a single OAuth endpoint', async () => {
-        const authNode = { id: 'auth-1', oauthSlug: 'test-login', enabled: true, baseScopes: 'openid profile email', readAccessToken: async () => null };
+        const authNode = { id: 'auth-1', oauthSlug: 'test-login', baseScopes: 'openid profile email', readAccessToken: async () => null };
         const { server } = buildServer({
             auth: 'auth-1',
-            authMode: 'oauth',
             __nodes: { 'auth-1': authNode },
             __runtime: { serverPort: 18111, publicBaseUrl: 'https://mcp.example.test' }
         });
@@ -814,18 +805,15 @@ describe('upstream mcp-flow-server local extensions', () => {
     it('parses allowed groups as comma-separated names so spaces inside group names are preserved', async () => {
         const authNode = {
             id: 'auth-1', oauthSlug: 'test-login',
-            enabled: true,
             baseScopes: 'openid profile email',
             readAccessToken: async () => ({
                 resource: 'https://mcp.example.test/mcp/test',
-                scopes: ['resource:read'],
+                scopes: ['openid'],
                 groups: ['Team B']
             })
         };
         const { server } = buildServer({
             auth: 'auth-1',
-            authMode: 'oauth',
-            requiredScopes: 'resource:read',
             allowedGroups: 'MCP Users, Team B',
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
@@ -844,19 +832,16 @@ describe('upstream mcp-flow-server local extensions', () => {
     it('allows initialize with a valid endpoint-scoped access token', async () => {
         const authNode = {
             id: 'auth-1', oauthSlug: 'test-login',
-            enabled: true,
             baseScopes: 'openid profile email',
             readAccessToken: async token => token === 'configured-value' ? {
                 resource: 'https://mcp.example.test/mcp/test',
-                scopes: ['resource:read'],
+                scopes: ['openid'],
                 groups: ['team-a'],
                 subject: 'user-1'
             } : null
         };
         const { server } = buildServer({
             auth: 'auth-1',
-            authMode: 'oauth',
-            requiredScopes: 'resource:read',
             allowedGroups: 'team-a',
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
@@ -872,21 +857,18 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.strictEqual(res.body.result.serverInfo.name, 'test');
     });
 
-    it('keeps scope-protected tools visible in tools/list', async () => {
+    it('advertises automatic OAuth scopes on every tool', async () => {
         const authNode = {
             id: 'auth-1', oauthSlug: 'test-login',
-            enabled: true,
             baseScopes: 'openid profile email',
             readAccessToken: async () => ({
                 resource: 'https://mcp.example.test/mcp/test',
-                scopes: ['resource:read', 'tool:read'],
+                scopes: ['openid', 'profile'],
                 groups: ['team-a']
             })
         };
         const { RED, server } = buildServer({
             auth: 'auth-1',
-            authMode: 'oauth',
-            requiredScopes: 'resource:read',
             allowedGroups: 'team-a',
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
@@ -894,13 +876,11 @@ describe('upstream mcp-flow-server local extensions', () => {
         RED.events.emit('mcp-tool-register', {
             name: 'read_tool',
             description: 'Read',
-            requiredScopes: ['tool:read'],
             inputSchema: { type: 'object', properties: {} }
         });
         RED.events.emit('mcp-tool-register', {
             name: 'write_tool',
             description: 'Write',
-            requiredScopes: ['tool:write'],
             inputSchema: { type: 'object', properties: {} }
         });
         const res = mockRes();
@@ -912,24 +892,21 @@ describe('upstream mcp-flow-server local extensions', () => {
 
         assert.deepStrictEqual(res.body.result.tools.map(tool => tool.name), ['read_tool', 'write_tool']);
         assert.deepStrictEqual(res.body.result.tools[1].securitySchemes,
-            [{ type: 'oauth2', scopes: ['resource:read', 'tool:write'] }]);
+            [{ type: 'oauth2', scopes: ['openid', 'profile', 'email'] }]);
     });
 
-    it('rejects tools/call when the token lacks the tool scope', async () => {
+    it('allows tools/call by role without requiring additional scopes', async () => {
         const authNode = {
             id: 'auth-1', oauthSlug: 'test-login',
-            enabled: true,
             baseScopes: 'openid profile email',
             readAccessToken: async () => ({
                 resource: 'https://mcp.example.test/mcp/test',
-                scopes: ['resource:read'],
+                scopes: ['openid'],
                 groups: ['team-a']
             })
         };
         const { RED, server } = buildServer({
             auth: 'auth-1',
-            authMode: 'oauth',
-            requiredScopes: 'resource:read',
             allowedGroups: 'team-a',
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
@@ -937,19 +914,19 @@ describe('upstream mcp-flow-server local extensions', () => {
         RED.events.emit('mcp-tool-register', {
             name: 'write_tool',
             description: 'Write',
-            requiredScopes: ['tool:write'],
             inputSchema: { type: 'object', properties: {} }
         });
         const res = mockRes();
 
+        server.executeToolFlow = async () => ({ content: [{ type: 'text', text: 'ok' }] });
         await server.handleMcpHttpRequest(mockReq(
             { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'write_tool', arguments: {} } },
             { authorization: 'Bearer scoped-token' }
         ), res);
 
         assert.strictEqual(res.statusCode, 200);
-        assert.strictEqual(res.body.result.isError, true);
-        assert.match(res.body.result._meta['mcp/www_authenticate'][0], /error="insufficient_scope"/);
+        assert.strictEqual(res.body.result.content[0].text, 'ok');
+        assert.strictEqual(res.body.result._meta, undefined);
         assert.strictEqual(server.sent.length, 0);
     });
 });
@@ -958,7 +935,7 @@ describe('tool-level OAuth discovery', () => {
     function setup(runtime = {}) {
         let reads = 0;
         const auth = {
-            id: 'auth-1', oauthSlug: 'test-login', enabled: true,
+            id: 'auth-1', oauthSlug: 'test-login',
             readAccessToken: async token => {
                 reads++;
                 if (token === 'invalid' || token === 'expired') return null;
@@ -969,7 +946,7 @@ describe('tool-level OAuth discovery', () => {
             }
         };
         const context = buildServer({
-            auth: auth.id, authMode: 'oauth', allowedGroups: 'operators',
+            auth: auth.id, allowedGroups: 'operators',
             __nodes: { [auth.id]: auth },
             __runtime: { publicBaseUrl: 'https://mcp.example.test', adminPort: 1880,
                 credentials: { adminToken: 'test-admin-token' }, adminEndpointPath: '/mcp/test', ...runtime }
@@ -1048,8 +1025,9 @@ describe('tool-level OAuth discovery', () => {
     });
 
     it('fails closed when required auth configuration is unresolved', async () => {
-        for (const authMode of ['oauth', 'inherit']) {
-            const { server } = buildServer({ auth: 'missing-auth', authMode });
+        for (const auth of ['', 'missing-auth']) {
+            const { server } = buildServer({ auth });
+            assert.throws(() => server.initializeServer(), /auth configuration is required/);
             const res = mockRes();
             await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1,
                 method: 'tools/call', params: { name: 'get_flow' } }), res);
@@ -1057,6 +1035,16 @@ describe('tool-level OAuth discovery', () => {
             assert.equal(res.body.error, 'auth_not_configured');
             assert.equal(server.sent.length, 0);
         }
+    });
+
+    it('does not allow an old public setting to bypass OAuth', async () => {
+        const { server } = buildServer({ authMode: 'public' });
+        const res = mockRes();
+        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1,
+            method: 'tools/call', params: { name: 'get_flow' } }), res);
+        assert.equal(res.body.result.isError, true);
+        assert.match(res.body.result._meta['mcp/www_authenticate'][0], /invalid_token/);
+        assert.equal(server.sent.length, 0);
     });
 
     it('serves anonymous HTTP discovery and challenges protected HTTP calls', async () => {
@@ -1099,20 +1087,100 @@ describe('tool-level OAuth discovery', () => {
     });
 });
 
+describe('automatic runtime startup without CORS', () => {
+    it('starts shared endpoints after flow startup and can stop and start them again', async () => {
+        const context = createRuntime({ __runtime: { serverPort: 18116 } });
+        const second = new context.types['mcp-flow-server']({ id: 'endpoint-second',
+            runtime: context.runtimeNode.id, auth: 'default-auth', serverPath: '/mcp/second' });
+        const endpoints = [context.server, second];
+        const start = async () => {
+            const pending = endpoints.map(node => new Promise((resolve, reject) => {
+                const original = node.startServer;
+                node.startServer = () => original(error => {
+                    node.startServer = original;
+                    if (error) reject(error); else resolve();
+                });
+            }));
+            context.RED.events.emit('flows:started');
+            const results = await Promise.allSettled(pending);
+            for (const result of results) assert.equal(result.status, 'fulfilled', result.reason && result.reason.message);
+        };
+        const stop = async () => {
+            for (const node of endpoints) await new Promise(resolve => node.stopServer(resolve));
+        };
+        try {
+            assert.equal(context.server.isRunning, false);
+            await start();
+            for (const node of endpoints) {
+                assert.equal(node.isRunning, true);
+                const response = await fetch('http://127.0.0.1:18116' + node.serverPath, {
+                    method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://browser.example.test' },
+                    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+                });
+                assert.equal(response.status, 200);
+                assert.equal(response.headers.get('access-control-allow-origin'), null);
+                assert.equal(response.headers.get('access-control-allow-methods'), null);
+                assert.equal(response.headers.get('access-control-allow-headers'), null);
+                await response.json();
+            }
+            const preflight = await fetch('http://127.0.0.1:18116/mcp/test', { method: 'OPTIONS',
+                headers: { origin: 'https://browser.example.test', 'access-control-request-method': 'POST' } });
+            assert.equal(preflight.headers.get('access-control-allow-origin'), null);
+            await preflight.text();
+            const controller = new AbortController();
+            const stream = await fetch('http://127.0.0.1:18116/mcp/test/sse', { signal: controller.signal });
+            try {
+                assert.equal(stream.status, 200);
+                assert.equal(stream.headers.get('content-type'), 'text/event-stream');
+                assert.equal(stream.headers.get('access-control-allow-origin'), null);
+                const chunk = await stream.body.getReader().read();
+                assert.match(new TextDecoder().decode(chunk.value), /connected/);
+            } finally { controller.abort(); }
+            await stop();
+            await start();
+            assert.ok(endpoints.every(node => node.isRunning));
+        } finally { await stop(); }
+    });
+
+    it('can close during startup and reuse the same port with a replacement node', async () => {
+        const { RED, server, types, runtimeNode } = createRuntime({ __runtime: { serverPort: 18117 } });
+        RED.events.emit('flows:started');
+        await new Promise(resolve => server.emit('close', resolve));
+        assert.equal(server.isRunning, false);
+        const replacement = new types['mcp-flow-server']({ id: 'replacement', runtime: runtimeNode.id,
+            auth: 'default-auth', serverPath: '/mcp/test' });
+        try {
+            await new Promise((resolve, reject) => replacement.startServer(error => error ? reject(error) : resolve()));
+            assert.equal(replacement.isRunning, true);
+        } finally { await new Promise(resolve => replacement.emit('close', resolve)); }
+        assert.equal(RED.events.listenerCount('flows:started'), 0);
+    });
+
+    it('removes the startup subscription when closed before startup', async () => {
+        const { RED, server } = createRuntime();
+        let starts = 0;
+        server.startServer = () => { starts++; };
+        await new Promise(resolve => server.emit('close', resolve));
+        assert.equal(RED.events.listenerCount('flows:started'), 0);
+        RED.events.emit('flows:started');
+        assert.equal(starts, 0);
+    });
+});
+
 describe('stable OAuth routes', () => {
     function auth(id, slug = 'test-login') {
-        return { id, oauthSlug: slug, enabled: true, baseScopes: 'openid profile email',
+        return { id, oauthSlug: slug, baseScopes: 'openid profile email',
             readState: async () => null, readCode: async () => null, readAccessToken: async () => null };
     }
 
     function setup(authNode, port = 18112) {
-        return createRuntime({ auth: authNode.id, authMode: 'oauth', __nodes: { [authNode.id]: authNode },
+        return createRuntime({ auth: authNode.id, __nodes: { [authNode.id]: authNode },
             __runtime: { serverPort: port, publicBaseUrl: 'https://mcp.example.test' } });
     }
 
     function endpoint(context, authNode, id, path, runtimeId = 'runtime-1') {
         context.nodeMap[authNode.id] = authNode;
-        return new context.types['mcp-flow-server']({ id, auth: authNode.id, authMode: 'oauth',
+        return new context.types['mcp-flow-server']({ id, auth: authNode.id,
             runtime: runtimeId, serverPath: path, serverName: id });
     }
 
@@ -1165,7 +1233,7 @@ describe('stable OAuth routes', () => {
         assert.throws(() => duplicate.initializeServer(), /OAuth slug already registered/);
         assert.strictEqual(context.server.portState.routes.has('/mcp/duplicate'), false);
         context.nodeMap['runtime-other'] = new context.types['mcp-runtime']({ id: 'runtime-other',
-            serverPort: 18113, autoStart: false, publicBaseUrl: 'https://mcp.example.test/' });
+            serverPort: 18113, publicBaseUrl: 'https://mcp.example.test/' });
         const crossPort = endpoint(context, auth('cross-port-auth'), 'cross-port', '/mcp/other', 'runtime-other');
         assert.throws(() => crossPort.initializeServer(), /OAuth slug already registered/);
         const missing = endpoint(context, { ...auth('missing-slug'), oauthSlug: '' }, 'missing', '/mcp/missing');
@@ -1186,7 +1254,7 @@ describe('stable OAuth routes', () => {
             assert.strictEqual(callback.status, 400);
             assert.strictEqual((await callback.json()).error, 'invalid_state');
             const token = await fetch(url + '/oauth/first-login/token', {
-                method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'code=test'
+                method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'grant_type=authorization_code&code=test'
             });
             assert.strictEqual(token.status, 400);
             assert.strictEqual((await token.json()).error, 'invalid_grant');

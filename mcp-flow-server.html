@@ -6,8 +6,6 @@
             runtimeName: { value: 'mcp-runtime', required: true },
             serverPort: { value: 8001, required: true, validate: function(v) { return v > 0 && v < 65536; } },
             publicBaseUrl: { value: '' },
-            autoStart: { value: false },
-            enableCors: { value: true },
             adminPort: { value: 1880, required: false, validate: function(v) { return v === '' || (v > 0 && v < 65536); } },
             adminEndpointPath: { value: '' }
         },
@@ -25,13 +23,10 @@
         defaults: {
             name: { value: '' },
             runtime: { value: '', type: 'mcp-runtime', required: true },
-            auth: { value: '', type: 'mcp-auth', required: false },
+            auth: { value: '', type: 'mcp-auth', required: true },
             serverName: { value: 'node-red-mcp-server', required: true },
             serverPath: { value: '/mcp', required: true },
-            authMode: { value: 'inherit' },
-            allowedGroups: { value: '' },
-            requiredScopes: { value: '' },
-            advertisedScopes: { value: '' }
+            allowedGroups: { value: '' }
         },
         inputs: 1,
         outputs: 1,
@@ -84,16 +79,8 @@
         <input type="number" id="node-config-input-serverPort" min="1" max="65535" placeholder="8001">
     </div>
     <div class="form-row">
-        <label for="node-config-input-publicBaseUrl"><i class="fa fa-link"></i> Public Base URL</label>
+        <label for="node-config-input-publicBaseUrl"><i class="fa fa-link"></i> Base URL</label>
         <input type="text" id="node-config-input-publicBaseUrl" placeholder="https://mcp.example.com">
-    </div>
-    <div class="form-row">
-        <label for="node-config-input-autoStart"><i class="fa fa-play"></i> Auto Start</label>
-        <input type="checkbox" id="node-config-input-autoStart" style="width: auto;">
-    </div>
-    <div class="form-row">
-        <label for="node-config-input-enableCors"><i class="fa fa-globe"></i> CORS</label>
-        <input type="checkbox" id="node-config-input-enableCors" style="width: auto;">
     </div>
 
     <hr>
@@ -108,7 +95,7 @@
         <input type="password" id="node-config-input-adminToken" autocomplete="off" placeholder="Uses NODE_RED_ADMIN_API_TOKEN when empty">
     </div>
     <div class="form-row">
-        <label for="node-config-input-adminEndpointPath"><i class="fa fa-link"></i> Admin Endpoint Path</label>
+        <label for="node-config-input-adminEndpointPath"><i class="fa fa-link"></i> Admin Path</label>
         <input type="text" id="node-config-input-adminEndpointPath" placeholder="/mcp/admin">
     </div>
     <div class="form-tips mcp-admin-tools-note">
@@ -143,24 +130,8 @@
         <input type="text" id="node-input-serverPath" placeholder="/mcp">
     </div>
     <div class="form-row">
-        <label for="node-input-authMode"><i class="fa fa-shield"></i> Auth Mode</label>
-        <select id="node-input-authMode">
-            <option value="inherit">Inherit auth config</option>
-            <option value="public">Public</option>
-            <option value="oauth">OAuth required</option>
-        </select>
-    </div>
-    <div class="form-row">
         <label for="node-input-allowedGroups"><i class="fa fa-users"></i> Allowed Groups</label>
         <input type="text" id="node-input-allowedGroups" placeholder="Optional comma- or space-separated groups">
-    </div>
-    <div class="form-row">
-        <label for="node-input-requiredScopes"><i class="fa fa-check"></i> Required Scopes</label>
-        <input type="text" id="node-input-requiredScopes" placeholder="Optional endpoint scopes">
-    </div>
-    <div class="form-row">
-        <label for="node-input-advertisedScopes"><i class="fa fa-lock"></i> Base Scopes</label>
-        <input type="text" id="node-input-advertisedScopes" placeholder="openid profile email">
     </div>
 
 
@@ -215,17 +186,13 @@
     <dl class="message-properties">
         <dt>Port <span class="property-type">number</span></dt>
         <dd>Local HTTP port. Multiple MCP Flow Server nodes may share one runtime port when their MCP paths differ.</dd>
-        <dt>Public Base URL <span class="property-type">string</span></dt>
-        <dd>External base URL used when building OAuth metadata and challenges. If empty, request headers are used.</dd>
-        <dt>Auto Start <span class="property-type">boolean</span></dt>
-        <dd>Start endpoints on this runtime when Node-RED starts.</dd>
-        <dt>CORS <span class="property-type">boolean</span></dt>
-        <dd>Add browser CORS headers to responses from this local listener.</dd>
+        <dt>Base URL <span class="property-type">string</span></dt>
+        <dd>Client-facing base URL used for OAuth metadata and challenges, directly or through a proxy. It may be reachable only over VPN. If empty, request headers are used.</dd>
         <dt>Admin Port <span class="property-type">number</span></dt>
         <dd>Local Node-RED Admin API port used by read-only admin tools.</dd>
         <dt>Admin Token <span class="property-type">credential</span></dt>
         <dd>Bearer token sent to the local Node-RED Admin API. Leave empty to use <code>NODE_RED_ADMIN_API_TOKEN</code>.</dd>
-        <dt>Admin Endpoint Path <span class="property-type">string</span></dt>
+        <dt>Admin Path <span class="property-type">string</span></dt>
         <dd>Exact MCP path allowed to expose read-only admin tools.</dd>
     </dl>
     <p>Admin tools are exposed only when Admin Port, Admin Token or <code>NODE_RED_ADMIN_API_TOKEN</code>, and Admin Endpoint Path are set, and an MCP Flow Server on this runtime uses exactly that path.</p>
@@ -238,19 +205,13 @@
         <dt>Runtime <span class="property-type">mcp-runtime</span></dt>
         <dd>Local HTTP runtime that listens on a port and hosts this endpoint path.</dd>
         <dt>Auth <span class="property-type">mcp-auth</span></dt>
-        <dd>Optional OIDC auth configuration used when this endpoint requires OAuth.</dd>
+        <dd>Required OIDC auth configuration. All tool execution requires OAuth.</dd>
         <dt>MCP Name <span class="property-type">string</span></dt>
         <dd>Name returned in MCP initialize responses and used for endpoint-scoped tool registration.</dd>
         <dt>MCP Path <span class="property-type">string</span></dt>
         <dd>HTTP JSON-RPC path served by this endpoint, for example <code>/mcp/ops</code>.</dd>
-        <dt>Auth Mode <span class="property-type">string</span></dt>
-        <dd>Controls whether this endpoint is public or requires OAuth. Inherit uses the selected auth config state.</dd>
         <dt>Allowed Groups <span class="property-type">string</span></dt>
         <dd>Optional any-of group list checked against the authenticated user claims.</dd>
-        <dt>Required Scopes <span class="property-type">string</span></dt>
-        <dd>Optional scopes required for every tool on this endpoint.</dd>
-        <dt>Base Scopes <span class="property-type">string</span></dt>
-        <dd>Space- or comma-separated scopes advertised on tools exposed by this endpoint.</dd>
     </dl>
     <h3>Runtime</h3>
     <p>Output 1 sends <code>mcp-tool-execute</code> and status messages. The node waits for matching <code>mcp-tool-response</code> messages on its input.</p>

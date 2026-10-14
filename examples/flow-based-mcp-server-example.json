@@ -13,8 +13,6 @@
         "name": "Demo MCP Server",
         "serverName": "demo-flow-server",
         "serverPort": 8001,
-        "autoStart": true,
-        "enableCors": true,
         "x": 180,
         "y": 100,
         "wires": [["tool-execution-router"]]
@@ -153,108 +151,6 @@
         "wires": []
     },
     {
-        "id": "test-client",
-        "type": "mcp-client",
-        "z": "mcp-flow-example",
-        "name": "Test Client",
-        "serverUrl": "http://localhost:8001",
-        "connectionType": "sse",
-        "autoConnect": false,
-        "reconnect": true,
-        "reconnectInterval": 5000,
-        "timeout": 30000,
-        "x": 170,
-        "y": 380,
-        "wires": [["debug-test-client"]]
-    },
-    {
-        "id": "debug-test-client",
-        "type": "debug",
-        "z": "mcp-flow-example",
-        "name": "Test Responses",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "true",
-        "targetType": "full",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 390,
-        "y": 380,
-        "wires": []
-    },
-    {
-        "id": "inject-connect",
-        "type": "inject",
-        "z": "mcp-flow-example",
-        "name": "Connect to Server",
-        "props": [
-            {
-                "p": "topic",
-                "vt": "str"
-            }
-        ],
-        "repeat": "",
-        "crontab": "",
-        "once": false,
-        "onceDelay": 0.1,
-        "topic": "connect",
-        "x": 120,
-        "y": 440,
-        "wires": [["test-client"]]
-    },
-    {
-        "id": "inject-test-calc",
-        "type": "inject",
-        "z": "mcp-flow-example",
-        "name": "Test Calculator",
-        "props": [
-            {
-                "p": "payload"
-            },
-            {
-                "p": "topic",
-                "vt": "str"
-            }
-        ],
-        "repeat": "",
-        "crontab": "",
-        "once": false,
-        "onceDelay": 0.1,
-        "topic": "request",
-        "payload": "{\"method\":\"tools/call\",\"params\":{\"name\":\"calculate_tool\",\"arguments\":{\"operation\":\"multiply\",\"a\":7,\"b\":6}}}",
-        "payloadType": "json",
-        "x": 120,
-        "y": 500,
-        "wires": [["test-client"]]
-    },
-    {
-        "id": "inject-test-greet",
-        "type": "inject",
-        "z": "mcp-flow-example",
-        "name": "Test Greeting",
-        "props": [
-            {
-                "p": "payload"
-            },
-            {
-                "p": "topic",
-                "vt": "str"
-            }
-        ],
-        "repeat": "",
-        "crontab": "",
-        "once": false,
-        "onceDelay": 0.1,
-        "topic": "request",
-        "payload": "{\"method\":\"tools/call\",\"params\":{\"name\":\"greet_user_tool\",\"arguments\":{\"name\":\"Node-RED User\",\"language\":\"spanish\",\"formal\":false}}}",
-        "payloadType": "json",
-        "x": 110,
-        "y": 560,
-        "wires": [["test-client"]]
-    },
-    {
         "id": "comment-flow-1",
         "type": "comment",
         "z": "mcp-flow-example",
@@ -283,15 +179,5 @@
         "x": 500,
         "y": 200,
         "wires": []
-    },
-    {
-        "id": "comment-flow-4",
-        "type": "comment",
-        "z": "mcp-flow-example",
-        "name": "Testing the Server",
-        "info": "These nodes demonstrate testing the MCP server we just created.\nThe client connects to our Flow Server and calls the tools we defined.",
-        "x": 150,
-        "y": 340,
-        "wires": []
     }
-] 
+]

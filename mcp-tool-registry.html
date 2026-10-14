@@ -13,7 +13,6 @@
                     return value === '__shared__' || Boolean(value);
                 }
             },
-            requiredScopes: { value: '' },
             toolBehavior: { value: '' },
             worldAccess: { value: '' },
             toolSchema: { value: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}' },
@@ -116,7 +115,7 @@
 
 <script type="text/html" data-template-name="mcp-tool-registry">
     <div class="form-row">
-        <label for="node-input-name"><i class="fa fa-tag"></i> Display Name</label>
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
         <input type="text" id="node-input-name" placeholder="Human-readable tool name">
     </div>
 
@@ -127,85 +126,57 @@
     </div>
 
     <div class="form-row">
-        <label for="node-input-toolDescription"><i class="fa fa-info-circle"></i> Tool Description</label>
-        <textarea id="node-input-toolDescription" rows="2" placeholder="Describe what this tool does"></textarea>
-        <div class="mcp-help-text">Shown to MCP clients and models in the tool descriptor.</div>
+        <label for="node-input-toolDescription"><i class="fa fa-info-circle"></i> Description</label>
+        <textarea id="node-input-toolDescription" rows="4" style="width: 70%; resize: vertical;" placeholder="Describe what this tool does"></textarea>
     </div>
 
     <div class="form-row">
         <label for="node-input-endpoint"><i class="fa fa-sitemap"></i> Endpoint</label>
-        <select id="node-input-endpoint"></select>
-        <div class="mcp-help-text">Choose a specific endpoint, or explicitly choose Shared only for tools intended to be available on every MCP endpoint.</div>
-    </div>
-
-    <div class="form-row">
-        <label for="node-input-requiredScopes"><i class="fa fa-lock"></i> Required Scopes</label>
-        <input type="text" id="node-input-requiredScopes" placeholder="resource:read">
-        <div class="mcp-help-text">Optional extra OAuth scopes for this tool. Leave empty unless this tool needs stricter access than its endpoint.</div>
-    </div>
-
-    <div class="form-row">
-        <label for="node-input-toolBehavior"><i class="fa fa-shield"></i> Tool Behavior</label>
-        <select id="node-input-toolBehavior">
-            <option value="">Unspecified</option>
-            <option value="read">Read only</option>
-            <option value="write">Non-destructive write</option>
-            <option value="destructive">Destructive write</option>
-        </select>
-        <div class="mcp-help-text">Choose based on every execution path. Unspecified keeps conservative client defaults.</div>
-    </div>
-
-    <div class="form-row">
-        <label for="node-input-worldAccess"><i class="fa fa-globe"></i> World Access</label>
-        <select id="node-input-worldAccess">
-            <option value="">Unspecified</option>
-            <option value="closed">Bounded private workspace</option>
-            <option value="open">Open internet or external recipients</option>
-        </select>
-        <div class="mcp-help-text">Use Open for public internet access, even when the tool only reads.</div>
+        <select id="node-input-endpoint" style="width: 70%;"></select>
     </div>
 
     <hr>
-    <h4>Parameter Schema</h4>
+    <h4>Annotations</h4>
 
     <div class="form-row">
-        <label for="node-input-toolSchema"><i class="fa fa-code"></i> JSON Schema</label>
-        <textarea id="node-input-toolSchema" rows="8" placeholder='{"type": "object", "properties": {}, "required": []}'></textarea>
+        <label for="node-input-toolBehavior"><i class="fa fa-shield"></i> Behavior</label>
+        <select id="node-input-toolBehavior" style="width: 70%;">
+            <option value="">Unspecified</option>
+            <option value="read">Read only</option>
+            <option value="write">Add only</option>
+            <option value="destructive">Change / Delete / Send</option>
+        </select>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-worldAccess"><i class="fa fa-globe"></i> Scope</label>
+        <select id="node-input-worldAccess" style="width: 70%;">
+            <option value="">Unspecified</option>
+            <option value="closed">Fixed target</option>
+            <option value="open">Open-ended</option>
+        </select>
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-toolSchema" style="display: block; width: auto;"><i class="fa fa-code"></i> Input Schema</label>
+        <textarea id="node-input-toolSchema" rows="12" style="display: block; width: 100%; resize: vertical; font-family: monospace;" placeholder='{"type": "object", "properties": {}, "required": []}'></textarea>
         <div id="schema-validation" class="mcp-validation"></div>
     </div>
 
-    <hr>
-    <h4>Output Schema</h4>
-
     <div class="form-row">
-        <label for="node-input-outputSchema"><i class="fa fa-code"></i> Output Schema</label>
-        <textarea id="node-input-outputSchema" rows="8" placeholder='{"type": "object", "properties": {}}'></textarea>
-        <div class="mcp-help-text">Optional JSON Schema for structured tool results.</div>
+        <label for="node-input-outputSchema" style="display: block; width: auto;"><i class="fa fa-code"></i> Output Schema</label>
+        <textarea id="node-input-outputSchema" rows="12" style="display: block; width: 100%; resize: vertical; font-family: monospace;" placeholder='{"type": "object", "properties": {}}'></textarea>
         <div id="output-schema-validation" class="mcp-validation"></div>
     </div>
-
-    <hr>
-    <h4>Editor Utilities</h4>
 
     <div class="form-row">
         <label></label>
         <button type="button" id="format-json-fields-btn" class="btn btn-secondary">
             <i class="fa fa-magic"></i> Format JSON Fields
         </button>
-        <div class="mcp-help-text">Formats Input Schema and Output Schema. Empty Output Schema is allowed.</div>
-    </div>
-
-    <div class="form-row">
-        <label></label>
-        <div class="mcp-help-text">Tools currently register automatically on start and deploy.</div>
     </div>
 
     <style>
-        .mcp-help-text {
-            margin-top: 5px;
-            font-size: 12px;
-            color: var(--red-ui-secondary-text-color, #666);
-        }
         .mcp-validation {
             display: none;
             margin-top: 5px;
@@ -225,11 +196,9 @@
         <dd>MCP tool name. Use lowercase letters, numbers, and underscores.</dd>
         <dt>Endpoint <span class="property-type">mcp-flow-server</span></dt>
         <dd>Required endpoint binding. Choose <code>Shared (All MCPs)</code> only for tools intentionally exposed on every endpoint.</dd>
-        <dt>Required Scopes <span class="property-type">string</span></dt>
-        <dd>Optional extra OAuth scopes added to this tool descriptor and enforced for tool listing and calls.</dd>
-        <dt>Tool Behavior <span class="property-type">select</span></dt>
+        <dt>Behavior <span class="property-type">select</span></dt>
         <dd>MCP safety annotations for read-only, non-destructive write, or destructive write behavior.</dd>
-        <dt>World Access <span class="property-type">select</span></dt>
+        <dt>Scope <span class="property-type">select</span></dt>
         <dd>MCP open-world annotation. Public internet and external recipients are open-world access.</dd>
         <dt>JSON Schema <span class="property-type">JSON</span></dt>
         <dd>JSON Schema defining the tool input parameters.</dd>

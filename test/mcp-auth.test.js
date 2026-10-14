@@ -33,6 +33,11 @@ function authNodeWithCode(record) {
         id: 'auth-1', oauthSlug: 'test-login',
         accessTokenTtl: 3600,
         readCode: async code => code === 'valid-code' ? state.code : null,
+        consumeCode: async code => {
+            if (code !== 'valid-code' || state.deleted) return null;
+            state.deleted = true;
+            return state.code;
+        },
         deleteCode: async code => {
             if (code === 'valid-code') state.deleted = true;
         },
@@ -60,7 +65,7 @@ describe('mcp auth token exchange', () => {
         const node = {
             publicBaseUrl: 'https://mcp.example.test',
             serverPath: '/mcp/test',
-            endpointRequiredScopes: 'resource:read',
+
             authConfig: { id: 'auth-1', oauthSlug: 'test-login', baseScopes: 'openid profile email' }
         };
 
@@ -73,6 +78,17 @@ describe('mcp auth token exchange', () => {
         assert.strictEqual(Object.prototype.hasOwnProperty.call(authorizationServer, ['registration', 'endpoint'].join('_')), false);
         assert.deepStrictEqual(protectedResource.authorization_servers, ['https://mcp.example.test']);
         assert.strictEqual(protectedResource.resource, 'https://mcp.example.test/mcp/test');
+    });
+
+    it('uses the configured base URL identically for direct and proxied requests', () => {
+        const node = { publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test',
+            authConfig: { oauthSlug: 'test-login', baseScopes: 'openid profile email' } };
+        const direct = { protocol: 'https', headers: { host: 'mcp.example.test' } };
+        const proxied = { protocol: 'http', headers: { host: '127.0.0.1:8001', 'x-forwarded-proto': 'https' } };
+        assert.deepStrictEqual(authorizeMetadata(direct, node), authorizeMetadata(proxied, node));
+        assert.deepStrictEqual(protectedResourceMetadata(direct, node), protectedResourceMetadata(proxied, node));
+        assert.equal(authorizeMetadata(direct, node).token_endpoint, 'https://mcp.example.test/oauth/test-login/token');
+        assert.equal(protectedResourceMetadata(direct, node).resource, 'https://mcp.example.test/mcp/test');
     });
 
     it('bridges authorize and callback through OIDC discovery and userinfo', async () => {
@@ -92,15 +108,13 @@ describe('mcp auth token exchange', () => {
         const store = { state: null, code: null };
         const auth = {
             id: 'auth-1', oauthSlug: 'test-login',
-            provider: 'authentik',
+            provider: 'oidc',
             issuerUrl: 'https://issuer.example.test/oidc',
             clientId: 'upstream-client',
             baseScopes: 'openid profile email',
             allowedClientHosts: 'client.example.test',
             groupClaim: 'groups',
             userClaim: 'email',
-            stateTtl: 300,
-            authCodeTtl: 300,
             jwks: createLocalJWKSet({ keys: [publicJwk] }),
             clientSecret: () => 'placeholder-value',
             writeState: async (state, value) => { store.state = { state, value }; },
@@ -112,7 +126,7 @@ describe('mcp auth token exchange', () => {
             endpointId: 'endpoint-1',
             publicBaseUrl: 'https://mcp.example.test',
             serverPath: '/mcp/test',
-            endpointRequiredScopes: ['resource:read'],
+
             authConfig: auth
         };
 
@@ -173,7 +187,7 @@ describe('mcp auth token exchange', () => {
             assert.strictEqual(clientRedirect.searchParams.get('code'), store.code.code);
             assert.strictEqual(store.state.deleted, true);
             assert.deepStrictEqual(store.code.value.groups, ['team-a']);
-            assert.deepStrictEqual(store.code.value.scopes, ['openid', 'profile', 'resource:read']);
+            assert.deepStrictEqual(store.code.value.scopes, ['openid', 'profile']);
             const matchingUserInfo = axios.get;
             axios.get = async url => url === 'https://issuer.example.test/userinfo'
                 ? { data: { sub: 'different-subject', groups: ['team-a'] } }
@@ -242,7 +256,7 @@ describe('mcp auth token exchange', () => {
 
         assert.strictEqual(res.statusCode, 200);
         assert.strictEqual(res.body.token_type, 'Bearer');
-        assert.strictEqual(res.body.expires_in, 3600);
+        assert.strictEqual(res.body.expires_in, 900);
         assert.strictEqual(res.body.scope, 'resource:read');
         assert.ok(res.body.access_token);
         assert.strictEqual(auth.state.deleted, true);
