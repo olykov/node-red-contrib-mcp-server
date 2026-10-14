@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.1-upstream.1
+
+- Allow encrypted, idempotent refresh retries within a configurable 30-second grace window; bound it to 0-120 seconds.
+- Wait briefly for concurrent refresh completion without revoking legitimate sessions; preserve strict replay rejection outside grace.
+- Return retryable 503 responses for provider outages and restore claims atomically; retain definitive identity and policy rejection.
+- Preserve encrypted pending results across interrupted token storage/rotation and log only non-sensitive outcome classes.
+- Treat provider `invalid_client`/`unauthorized_client` refresh responses as configuration errors: return 503, keep the session and log `provider_config` at error level.
+
 ## Unreleased
 
 - Remove external-process server and remote-client nodes, their editor forms, client example branch and unused dependencies.

@@ -98,7 +98,8 @@ module.exports = function (RED)
         const encryptionKey = refreshEncryptionKey(node.credentials && node.credentials[
             node.provider === 'microsoft' ? 'microsoftRefreshKey' : 'oidcRefreshKey']);
         node.refreshStore = encryptionKey ? new RefreshTokenStore(() => node.getStorage(),
-            storageScope, encryptionKey, node.refreshTokenTtl, node.sessionTtl) : null;
+            storageScope, encryptionKey, node.refreshTokenTtl, node.sessionTtl,
+            config.refreshReuseGraceSeconds) : null;
 
         node.writeAccessToken = async function (token, claims, ttlSeconds)
         {

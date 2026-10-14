@@ -232,12 +232,43 @@ deadline. Access issuance is capped to the remaining session lifetime.
 The token endpoint accepts `grant_type=refresh_token`, `refresh_token`, `client_id`,
 and optional `resource`/`scope`. Client, resource and endpoint remain bound; scope
 can be narrowed but never increased. Refresh tokens are hashed in storage, rotated
-atomically and checked for reuse. Reuse or a concurrent redemption closes the
-session, including access tokens linked to it. Provider failure also closes it;
-an ambiguous network failure requires new sign-in rather than replaying a possibly
-consumed provider credential.
+atomically and checked for reuse. `refreshReuseGraceSeconds` (Reuse Grace in the
+editor) defaults to 30 seconds and accepts integers from 0 to 120. Zero preserves
+strict single-use behavior. Within grace, an identical retry receives the same
+token pair without calling the provider again. The cached response is encrypted
+with AES-256-GCM and bound to the namespace, session and previous token hash.
+Its storage TTL is bounded by grace and the original access/session expiry;
+returned `expires_in` decreases with the remaining access lifetime. Scope changes
+cannot reuse a response issued for a different scope set.
 
-Every refresh contacts the selected provider. Microsoft requires a freshly signed
+Concurrent requests poll shared storage every 25 milliseconds for at most five
+seconds. If the first request has not finished, the waiter receives HTTP 503
+`temporarily_unavailable`; it does not revoke the session. Reuse outside grace,
+client/resource/endpoint mismatches and definitive provider authorization or
+identity/policy failures revoke the session and return `invalid_grant`.
+
+Network errors, timeouts, provider 429/5xx and unavailable discovery/JWKS return
+HTTP 503 `temporarily_unavailable`, with a validated upstream `Retry-After` when
+present. The claim is restored using compare-and-set, without extending expiry.
+A provider `invalid_client` or `unauthorized_client` response (for example an
+expired client secret) is a configuration error, not a user failure: it also
+returns 503, keeps the session and logs `provider_config` at error level.
+Once a provider response has been verified, an encrypted pending result permits
+retrying interrupted access storage or rotation without refreshing the provider
+again. Claims have a 60-second ownership deadline so retries can recover after
+an interrupted worker or a failed rollback; stale workers cannot commit rotation.
+A permanently unavailable storage backend cannot guarantee claim recovery.
+Microsoft permits reuse of its previous provider refresh credential after a lost
+response; a generic OIDC provider that consumes it immediately may still require
+sign-in after an ambiguous network failure.
+
+Grace is a bounded replay-detection tradeoff: possession of the old bearer token
+and its public client bindings can retrieve the cached pair during this window.
+Set grace to zero when strict replay rejection is required. Logs contain only
+`transient`, `provider_config`, `revoked`, `replay` or `grace_reuse`, never
+credential payloads.
+
+Every new rotation contacts the selected provider. Microsoft requires a freshly signed
 ID token with the expected issuer, audience, tenant, subject and current app roles.
 For OIDC providers, current UserInfo groups are checked, and a returned ID token is
 validated when present. No cached role/group fallback is used. Account and role

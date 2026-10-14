@@ -53,7 +53,8 @@
             redis: { value: '', type: 'mcp-redis', required: true },
             accessTokenTtl: { value: 900, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 900; } },
             refreshTokenTtl: { value: 604800, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 604800; } },
-            sessionTtl: { value: 1814400, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 1814400; } }
+            sessionTtl: { value: 1814400, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 1814400; } },
+            refreshReuseGraceSeconds: { value: 30, validate: function(v) { return v !== '' && Number.isInteger(Number(v)) && v >= 0 && v <= 120; } }
         },
         credentials: {
             clientSecret: { type: 'password' },
@@ -230,6 +231,10 @@
         <label for="node-config-input-sessionTtl"><i class="fa fa-clock-o"></i> Session TTL</label>
         <input type="number" id="node-config-input-sessionTtl" min="1" max="1814400" placeholder="1814400">
     </div>
+    <div class="form-row">
+        <label for="node-config-input-refreshReuseGraceSeconds"><i class="fa fa-clock-o"></i> Reuse Grace</label>
+        <input type="number" id="node-config-input-refreshReuseGraceSeconds" min="0" max="120" placeholder="30">
+    </div>
 </script>
 
 <script type="text/html" data-help-name="mcp-redis">
@@ -242,6 +247,8 @@
     <p>Secrets are stored as Node-RED credentials or read from environment variables.</p>
     <p>Access tokens last at most 15 minutes. Refresh idle TTL is at most 7 days;
     absolute session TTL is at most 21 days and never increases on refresh. TTL values are seconds.</p>
+    <p>Reuse Grace allows identical refresh retries for 30 seconds by default (0-120 seconds).
+    Zero disables retries. Provider outages return temporarily_unavailable without revoking the session.</p>
     <p>Refresh requires the selected provider's Refresh Key (64 hex characters) and
     provider offline_access consent. Use persistent Redis storage for sessions
     that must survive runtime restarts; memory mode is for local tests only.</p>

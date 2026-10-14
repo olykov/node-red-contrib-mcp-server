@@ -18,6 +18,7 @@ const url = 'https://mcp.example.test';
 
 function response() {
     return { statusCode: 200, status(code) { this.statusCode = code; return this; },
+        headers: {}, set(name, value) { this.headers[name] = value; return this; },
         json(body) { this.body = body; return this; }, redirect(location) { this.location = location; return this; } };
 }
 
@@ -54,14 +55,15 @@ async function setup(t, options = {}) {
     auth.discovery = { value: discovery, expiresAt: Date.now() + 86400000 };
     const node = { authConfig: auth, endpointId: 'endpoint-1',
         serverPath: '/mcp/test', publicBaseUrl: url, allowedGroups: 'operators' };
-    const state = { roles: ['operators'], groups: ['operators'], subject: 'user-1', posts: [], fail: false };
+    const state = { roles: ['operators'], groups: ['operators'], subject: 'user-1', posts: [], fail: false, logs: [] };
+    node.log = message => state.logs.push(message);
     const sign = async (nonce, claims = {}) => new SignJWT({ sub: state.subject, roles: state.roles,
         tid: tenant, ...(nonce ? { nonce } : {}), ...claims }).setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
         .setIssuer(auth.issuerUrl).setAudience(auth.clientId).setIssuedAt().setExpirationTime('1h').sign(privateKey);
     t.mock.method(axios, 'post', async (_, body) => {
         const params = new URLSearchParams(body);
         state.posts.push(params);
-        if (state.fail) throw new Error('provider-test-secret must never appear in the response');
+        if (state.fail) throw state.fail;
         return { data: { access_token: 'upstream-access', refresh_token: 'upstream-refresh-' + state.posts.length,
             id_token: state.missingIdToken ? undefined : (state.idToken ||
                 await sign(params.get('grant_type') === 'authorization_code' ? 'initial-nonce' : undefined)) } };
@@ -99,6 +101,11 @@ describe('rotating refresh tokens', () => {
         assert.equal(auth.accessTokenTtl, 900);
         assert.equal(auth.refreshTokenTtl, 604800);
         assert.equal(auth.sessionTtl, 1814400);
+        assert.equal(auth.refreshStore.grace, 30);
+        assert.equal(authNode({ refreshReuseGraceSeconds: 0 }).refreshStore.grace, 0);
+        assert.equal(authNode({ refreshReuseGraceSeconds: 120 }).refreshStore.grace, 120);
+        for (const grace of [-1, 121, 0.5, 'invalid'])
+            assert.throws(() => authNode({ refreshReuseGraceSeconds: grace }), /0 to 120/);
         for (const maximum of [ACCESS_TTL, REFRESH_IDLE_TTL, SESSION_TTL]) {
             assert.equal(boundedTtl(maximum * 2, maximum), maximum);
             assert.equal(boundedTtl(1, maximum), 1);
@@ -192,10 +199,10 @@ describe('rotating refresh tokens', () => {
         assert.equal((await context.auth.readAccessToken(result.body.access_token)).sessionId, undefined);
     });
 
-    it('rejects client/resource changes and scope escalation without consuming a valid token', async t => {
+    it('rejects scope escalation without consuming a valid token', async t => {
         const context = await setup(t);
         const initial = await context.code(['openid', 'offline_access']);
-        for (const extra of [{ client_id: 'other-client' }, { resource: url + '/other' }, { scope: 'tool:write' }]) {
+        for (const extra of [{ scope: 'tool:write' }]) {
             const res = await context.refresh(initial.body.refresh_token, extra);
             assert.equal(res.statusCode, 400);
         }
@@ -207,7 +214,7 @@ describe('rotating refresh tokens', () => {
     });
 
     it('revokes the session on reuse, including its replacement refresh and access tokens', async t => {
-        const context = await setup(t);
+        const context = await setup(t, { refreshReuseGraceSeconds: 0 });
         const initial = await context.code();
         const next = await context.refresh(initial.body.refresh_token);
         assert.equal((await context.refresh(initial.body.refresh_token)).body.error, 'invalid_grant');
@@ -215,14 +222,241 @@ describe('rotating refresh tokens', () => {
         const result = await validateRequest(context.node, { headers: { authorization: 'Bearer ' + next.body.access_token } });
         assert.equal(result.ok, false);
         assert.equal(context.state.posts.length, 2);
+        assert.ok(context.state.logs.includes('OAuth refresh: replay'));
     });
 
-    it('does not redeem one refresh twice under concurrent calls', async t => {
+    it('returns the same encrypted rotation result under concurrent calls', async t => {
         const context = await setup(t);
         const initial = await context.code();
         const results = await Promise.all([context.refresh(initial.body.refresh_token), context.refresh(initial.body.refresh_token)]);
+        assert.equal(results[0].statusCode, 200);
+        assert.equal(results[1].statusCode, 200);
+        assert.deepEqual(results[0].body, results[1].body);
+        assert.equal(context.state.posts.length, 2);
+        assert.ok(context.state.logs.includes('OAuth refresh: grace_reuse'));
+        assert.ok(await context.auth.refreshStore.read(results[0].body.refresh_token));
+        const stored = JSON.stringify([...context.auth.getStorage().items]);
+        for (const token of Object.values(results[0].body).filter(value => typeof value === 'string' && value.length > 30))
+            assert.equal(stored.includes(token), false);
+    });
+
+    it('allows grace reuse without another provider request and revokes after grace', async t => {
+        const context = await setup(t);
+        let now = Date.now();
+        t.mock.method(Date, 'now', () => now);
+        const initial = await context.code();
+        const next = await context.refresh(initial.body.refresh_token);
+        now += 29000;
+        const retry = await context.refresh(initial.body.refresh_token);
+        assert.equal(retry.statusCode, 200);
+        assert.equal(retry.body.refresh_token, next.body.refresh_token);
+        assert.equal(retry.body.access_token, next.body.access_token);
+        assert.equal(retry.body.expires_in, 871);
+        assert.equal(context.state.posts.length, 2);
+        now += 1000;
+        assert.equal((await context.refresh(initial.body.refresh_token)).body.error, 'invalid_grant');
+        assert.equal(await context.auth.refreshStore.read(next.body.refresh_token), null);
+    });
+
+    it('revokes on client/resource/endpoint mismatch even during grace', async t => {
+        const context = await setup(t);
+        for (const extra of [{ client_id: 'other-client' }, { resource: url + '/other' }, { endpoint: true }]) {
+            const initial = await context.code();
+            const next = await context.refresh(initial.body.refresh_token);
+            if (extra.endpoint) context.node.endpointId = 'other-endpoint';
+            const denied = await context.refresh(initial.body.refresh_token, extra);
+            context.node.endpointId = 'endpoint-1';
+            assert.equal(denied.body.error, 'invalid_grant');
+            assert.equal(await context.auth.refreshStore.read(next.body.refresh_token), null);
+        }
+    });
+
+    it('restores the claim after network, 503 and 429 errors without leaking provider details', async t => {
+        const context = await setup(t);
+        for (const failure of [new axios.AxiosError('private provider details', 'ERR_NETWORK'),
+            { code: 'ETIMEDOUT' }, { code: 'ECONNRESET' }, { code: 'ENOTFOUND' },
+            { response: { status: 503 } }, { response: { status: 429, headers: { 'retry-after': '12' } } }]) {
+            const initial = await context.code();
+            context.state.fail = failure;
+            const failed = await context.refresh(initial.body.refresh_token);
+            assert.equal(failed.statusCode, 503);
+            assert.equal(failed.body.error, 'temporarily_unavailable');
+            assert.equal(failed.headers['Retry-After'], failure.response?.headers?.['retry-after']);
+            assert.equal((await context.auth.refreshStore.read(initial.body.refresh_token)).state, 'active');
+            context.state.fail = false;
+            assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 200);
+        }
+        assert.ok(context.state.logs.every(message => /^OAuth refresh: (transient|revoked|replay|grace_reuse)$/.test(message)));
+    });
+
+    it('revokes for definitive provider authorization failures', async t => {
+        const context = await setup(t);
+        for (const error of ['invalid_grant', 'interaction_required', 'consent_required', 'login_required']) {
+            const initial = await context.code();
+            context.state.fail = { response: { status: 400, data: { error } } };
+            assert.equal((await context.refresh(initial.body.refresh_token)).body.error, 'invalid_grant');
+            assert.equal(await context.auth.refreshStore.read(initial.body.refresh_token), null);
+            context.state.fail = false;
+        }
+    });
+
+    it('resumes an encrypted pending result after access-storage or rotation failure', async t => {
+        const context = await setup(t);
+        for (const method of ['writeAccessToken', 'rotate']) {
+            const initial = await context.code();
+            const target = method === 'rotate' ? context.auth.refreshStore : context.auth;
+            const original = target[method].bind(target);
+            const mock = t.mock.method(target, method, async () => { throw new Error('storage unavailable'); });
+            const failed = await context.refresh(initial.body.refresh_token);
+            assert.equal(failed.statusCode, 503);
+            const session = await context.auth.refreshStore.read(initial.body.refresh_token);
+            assert.equal(session.state, 'active');
+            assert.ok(session.pending);
+            const pending = context.auth.refreshStore.pendingResult(session);
+            assert.equal(JSON.stringify([...context.auth.getStorage().items]).includes(pending.response.refresh_token), false);
+            const requests = context.state.posts.length;
+            mock.mock.restore();
+            target[method] = original;
+            const retry = await context.refresh(initial.body.refresh_token);
+            assert.equal(retry.statusCode, 200);
+            assert.equal(retry.body.refresh_token, pending.response.refresh_token);
+            assert.equal(context.state.posts.length, requests);
+        }
+    });
+
+    it('keeps the session retryable when the provider rejects our client credentials', async t => {
+        const context = await setup(t);
+        for (const error of ['invalid_client', 'unauthorized_client']) {
+            const initial = await context.code();
+            context.state.fail = { response: { status: 401, data: { error } } };
+            const failed = await context.refresh(initial.body.refresh_token);
+            assert.equal(failed.statusCode, 503);
+            assert.equal(failed.body.error, 'temporarily_unavailable');
+            assert.ok(context.state.logs.includes('OAuth refresh: provider_config'));
+            context.state.fail = false;
+            assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 200);
+        }
+    });
+
+    it('waits at most five seconds for an in-flight claim without revoking it', async t => {
+        const context = await setup(t);
+        const initial = await context.code();
+        const store = context.auth.refreshStore;
+        const claimed = await store.claim(await store.read(initial.body.refresh_token), initial.body.refresh_token);
+        const failed = await context.refresh(initial.body.refresh_token);
+        assert.equal(failed.statusCode, 503);
+        assert.equal((await store.read(initial.body.refresh_token)).state, 'refreshing');
+        assert.equal(await store.release(claimed), true);
+        assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 200);
+    });
+
+    it('preserves strict concurrent replay rejection when grace is zero', async t => {
+        const context = await setup(t, { refreshReuseGraceSeconds: 0 });
+        const initial = await context.code();
+        const results = await Promise.all([context.refresh(initial.body.refresh_token), context.refresh(initial.body.refresh_token)]);
         assert.ok(results.filter(res => res.statusCode === 200).length <= 1);
-        assert.ok(context.state.posts.length <= 2);
+        assert.equal(await context.auth.refreshStore.read(initial.body.refresh_token), null);
+    });
+
+    it('keeps the session retryable when discovery or JWKS is unavailable', async t => {
+        const context = await setup(t);
+        const initial = await context.code();
+        const discovery = context.auth.discovery;
+        context.auth.discovery = null;
+        const get = t.mock.method(axios, 'get', async () => { throw new Error('discovery unavailable'); });
+        assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 503);
+        assert.equal((await context.auth.refreshStore.read(initial.body.refresh_token)).state, 'active');
+        get.mock.restore();
+        context.auth.discovery = discovery;
+        const jwks = context.auth.jwks;
+        context.auth.jwks = async () => { throw Object.assign(new Error('JWKS unavailable'), { code: 'ERR_JOSE_GENERIC' }); };
+        assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 503);
+        assert.equal((await context.auth.refreshStore.read(initial.body.refresh_token)).state, 'active');
+        context.auth.jwks = jwks;
+        assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 200);
+        assert.equal(context.state.posts[2].get('refresh_token'), 'upstream-refresh-2');
+    });
+
+    it('recovers a committed checkpoint or rotation even when its acknowledgement is lost', async t => {
+        const context = await setup(t);
+        for (const method of ['checkpoint', 'rotate']) {
+            const initial = await context.code();
+            const store = context.auth.refreshStore;
+            const original = store[method].bind(store);
+            const mock = t.mock.method(store, method, async (...args) => {
+                await original(...args);
+                throw new Error('storage acknowledgement lost');
+            });
+            assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 503);
+            mock.mock.restore();
+            const count = context.state.posts.length;
+            assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 200);
+            assert.equal(context.state.posts.length, count);
+        }
+    });
+
+    it('recovers an expired claim after storage also prevented rollback', async t => {
+        const context = await setup(t);
+        let now = Date.now();
+        t.mock.method(Date, 'now', () => now);
+        const initial = await context.code();
+        const store = context.auth.refreshStore;
+        const read = store.readSession.bind(store);
+        let reads = 0;
+        const unavailable = t.mock.method(store, 'readSession', async id => {
+            if (++reads === 2) throw new Error('storage unavailable during rollback');
+            return read(id);
+        });
+        const write = t.mock.method(context.auth, 'writeAccessToken', async () => { throw new Error('storage unavailable'); });
+        assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 503);
+        unavailable.mock.restore();
+        write.mock.restore();
+        const stale = await store.read(initial.body.refresh_token);
+        assert.equal(stale.state, 'refreshing');
+        const requests = context.state.posts.length;
+        now += 60001;
+        assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 200);
+        assert.equal(context.state.posts.length, requests);
+        assert.equal(await store.release(stale), false);
+    });
+
+    it('does not let a stale worker revoke a replacement rotation after its lease expired', async t => {
+        const context = await setup(t);
+        let now = Date.now();
+        t.mock.method(Date, 'now', () => now);
+        const initial = await context.code();
+        let release;
+        let arrived;
+        const blocked = new Promise(resolve => { release = resolve; });
+        const started = new Promise(resolve => { arrived = resolve; });
+        let requests = 0;
+        t.mock.method(axios, 'post', async () => {
+            if (++requests === 1) {
+                arrived();
+                await blocked;
+                throw { response: { status: 400, data: { error: 'invalid_grant' } } };
+            }
+            return { data: { access_token: 'upstream-access', refresh_token: 'replacement-provider-refresh',
+                id_token: await context.sign() } };
+        });
+        const stale = context.refresh(initial.body.refresh_token);
+        await started;
+        now += 60001;
+        const next = await context.refresh(initial.body.refresh_token);
+        assert.equal(next.statusCode, 200);
+        release();
+        assert.equal((await stale).statusCode, 503);
+        assert.ok(await context.auth.refreshStore.read(next.body.refresh_token));
+    });
+
+    it('rechecks endpoint policy when completing a pending rotation', async t => {
+        const context = await setup(t);
+        const initial = await context.code();
+        const write = t.mock.method(context.auth, 'writeAccessToken', async () => { throw new Error('storage unavailable'); });
+        assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 503);
+        write.mock.restore();
+        context.node.allowedGroups = 'different-role';
+        assert.equal((await context.refresh(initial.body.refresh_token)).body.error, 'invalid_grant');
         assert.equal(await context.auth.refreshStore.read(initial.body.refresh_token), null);
     });
 
@@ -233,7 +467,7 @@ describe('rotating refresh tokens', () => {
             context.state.roles = ['operators'];
             context.state.subject = 'user-1';
             const initial = await context.code();
-            if (failure === 'denied') context.state.fail = true;
+            if (failure === 'denied') context.state.fail = { response: { status: 400, data: { error: 'invalid_grant' } } };
             if (failure === 'roles') context.state.roles = [];
             if (failure === 'subject') context.state.subject = 'other-user';
             const res = await context.refresh(initial.body.refresh_token);
