@@ -86,7 +86,7 @@
         "name": "Add numbers",
         "toolName": "add_numbers",
         "toolDescription": "Adds two numbers.",
-        "endpoint": "mcp-example-server",
+        "endpoint": "/mcp/example",
         "toolBehavior": "read",
         "worldAccess": "closed",
         "toolSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"a\": { \"type\": \"number\" },\n    \"b\": { \"type\": \"number\" }\n  },\n  \"required\": [\"a\", \"b\"]\n}",

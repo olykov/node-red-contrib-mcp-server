@@ -92,14 +92,15 @@ describe('provider configuration', () => {
         }
     });
 
-    it('isolates state, codes and tokens by provider, auth node, tenant and client', async () => {
+    it('isolates state, codes and tokens by provider, slug, tenant and client', async () => {
         const build = runtime();
         const original = build(oidc);
         await original.writeState('state', { marker: true });
         await original.writeCode('code', { marker: true });
         await original.writeAccessToken('token', { marker: true });
         assert.deepEqual(await build(oidc).readAccessToken('token'), { marker: true });
-        for (const config of [microsoft, { ...oidc, id: 'other-auth' }, { ...oidc, oauthSlug: 'other-login' },
+        assert.deepEqual(await build({ ...oidc, id: 'other-auth' }).readAccessToken('token'), { marker: true });
+        for (const config of [microsoft, { ...oidc, oauthSlug: 'other-login' },
             { ...oidc, clientId: 'other-client' }, { ...oidc, issuerUrl: 'https://other.example.test/oidc' }]) {
             const other = build(config);
             assert.equal(await other.readAccessToken('token'), null);
@@ -116,7 +117,7 @@ describe('provider configuration', () => {
         assert.equal(await build({ ...microsoft, microsoftClientId: tenant }).readAccessToken('ms-token'), null);
     });
 
-    it('keeps public URLs stable after node replacement without sharing old credentials', async () => {
+    it('keeps public URLs and sessions after replacing the auth node with the same settings', async () => {
         const build = runtime();
         for (const settings of [oidc, microsoft]) {
             const old = build({ ...settings, id: 'old-node' });
@@ -127,9 +128,11 @@ describe('provider configuration', () => {
             await old.writeAccessToken('old-token', { marker: true });
             await old.writeState('old-state', { marker: true });
             await old.writeCode('old-code', { marker: true });
-            assert.equal(await replacement.readAccessToken('old-token'), null);
-            assert.equal(await replacement.readState('old-state'), null);
-            assert.equal(await replacement.readCode('old-code'), null);
+            assert.deepEqual(await replacement.readAccessToken('old-token'), { marker: true });
+            assert.deepEqual(await replacement.readState('old-state'), { marker: true });
+            assert.deepEqual(await replacement.readCode('old-code'), { marker: true });
+            assert.equal(await build({ ...settings, id: 'replacement-node', oauthSlug: 'new-login' })
+                .readAccessToken('old-token'), null);
         }
     });
 });
@@ -459,5 +462,36 @@ describe('auth configuration reporting', () => {
             storage.client.emit('error', new Error('connection refused'));
             assert.deepStrictEqual(seen, ['connection refused']);
         } finally { storage.client.disconnect(); }
+    });
+});
+
+describe('environment variable names', () => {
+    it('accepts only MCP_* variable names for editor-supplied secrets and storage', () => {
+        const { mcpEnvName } = require('../lib/auth-provider');
+        assert.strictEqual(mcpEnvName('MCP_REDIS_URL', 'URL Env'), 'MCP_REDIS_URL');
+        assert.strictEqual(mcpEnvName('', 'URL Env'), '');
+        for (const name of ['REDIS_URL', 'NODE_RED_CREDENTIAL_SECRET', 'NODE_RED_ADMIN_API_TOKEN', 'mcp_lower', 'MCP_', 'MCP_A-B'])
+            assert.throws(() => mcpEnvName(name, 'URL Env'), /must be an environment variable name starting with MCP_/);
+        const build = runtime();
+        assert.match(build({ ...microsoft, microsoftClientSecretEnv: 'NODE_RED_CREDENTIAL_SECRET' }).configError, /MCP_/);
+        assert.match(build({ ...oidc, clientSecretEnv: 'REDIS_PASSWORD' }).configError, /MCP_/);
+        assert.strictEqual(build({ ...oidc, clientSecretEnv: 'MCP_OIDC_SECRET' }).configError, undefined);
+    });
+
+    it('rejects non-MCP storage variables and stops the dependent auth configuration', () => {
+        const types = {};
+        const nodes = {};
+        const RED = { nodes: {
+            createNode(node, config) { Object.setPrototypeOf(node, EventEmitter.prototype); EventEmitter.call(node);
+                node.id = config.id; node.credentials = config.credentials || {};
+                node.error = message => (node.errorLog = node.errorLog || []).push(message); },
+            registerType(name, ctor) { types[name] = ctor; }, getNode(id) { return nodes[id]; } } };
+        require('../mcp-auth')(RED);
+        nodes.storage = new types['mcp-redis']({ id: 'storage', mode: 'env', redisUrlEnv: 'REDIS_URL' });
+        assert.match(nodes.storage.configError, /URL Env must be .*MCP_/);
+        assert.throws(() => nodes.storage.createStorage(), /storage configuration is invalid/);
+        const auth = new types['mcp-auth']({ id: 'auth', redis: 'storage', ...microsoft });
+        assert.match(auth.configError, /^storage: /);
+        assert.strictEqual(new types['mcp-redis']({ id: 'default', mode: 'env' }).redisUrlEnv, 'MCP_REDIS_URL');
     });
 });

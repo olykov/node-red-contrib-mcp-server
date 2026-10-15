@@ -14,8 +14,8 @@
         defaults: {
             name: { value: '' },
             mode: { value: 'memory', required: true, validate: function(v) { return ['memory', 'env', 'manual'].indexOf(v) !== -1; } },
-            redisUrlEnv: { value: 'REDIS_URL', validate: function(v) {
-                return mcpRedisMode(this) !== 'env' || /^[A-Za-z_][A-Za-z0-9_]*$/.test(v || '');
+            redisUrlEnv: { value: 'MCP_REDIS_URL', validate: function(v) {
+                return mcpRedisMode(this) !== 'env' || /^MCP_[A-Z0-9_]+$/.test(v || '');
             } },
             host: { value: '127.0.0.1', validate: function(v) { return mcpRedisMode(this) !== 'manual' || !!(v && String(v).trim()); } },
             port: { value: 6379, validate: function(v) {
@@ -26,7 +26,7 @@
             } },
             tls: { value: false },
             username: { value: '' },
-            passwordEnv: { value: '' },
+            passwordEnv: { value: '', validate: function(v) { return !v || /^MCP_[A-Z0-9_]+$/.test(v); } },
             keyPrefix: { value: 'mcp_auth:' }
         },
         credentials: {
@@ -60,10 +60,14 @@
                 catch (_) { return false; }
             } },
             clientId: { value: '', validate: function(v) { return mcpAuthProvider(this) !== 'oidc' || (typeof v === 'string' && v.trim().length > 0); } },
-            clientSecretEnv: { value: '' },
+            clientSecretEnv: { value: '', validate: function(v) {
+                return mcpAuthProvider(this) !== 'oidc' || !v || /^MCP_[A-Z0-9_]+$/.test(v);
+            } },
             microsoftTenantId: { value: '', validate: function(v) { return mcpAuthProvider(this) !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
             microsoftClientId: { value: '', validate: function(v) { return mcpAuthProvider(this) !== 'microsoft' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); } },
-            microsoftClientSecretEnv: { value: '' },
+            microsoftClientSecretEnv: { value: '', validate: function(v) {
+                return mcpAuthProvider(this) !== 'microsoft' || !v || /^MCP_[A-Z0-9_]+$/.test(v);
+            } },
             allowedClientHosts: { value: '', required: true },
             groupClaim: { value: 'groups' },
             userClaim: { value: 'email' },
@@ -127,7 +131,7 @@
     </div>
     <div class="form-row mcp-redis-env-row">
         <label for="node-config-input-redisUrlEnv"><i class="fa fa-terminal"></i> URL Env</label>
-        <input type="text" id="node-config-input-redisUrlEnv" placeholder="REDIS_URL">
+        <input type="text" id="node-config-input-redisUrlEnv" placeholder="MCP_REDIS_URL">
     </div>
     <div class="form-row mcp-redis-manual-row">
         <label for="node-config-input-host"><i class="fa fa-server"></i> Host</label>
@@ -155,7 +159,7 @@
     </div>
     <div class="form-row mcp-redis-manual-row">
         <label for="node-config-input-passwordEnv"><i class="fa fa-terminal"></i> Password Env</label>
-        <input type="text" id="node-config-input-passwordEnv" placeholder="Optional environment variable">
+        <input type="text" id="node-config-input-passwordEnv" placeholder="Optional MCP_* environment variable">
     </div>
     <div class="form-row">
         <label for="node-config-input-keyPrefix"><i class="fa fa-key"></i> Key Prefix</label>
@@ -196,7 +200,7 @@
     </div>
     <div class="form-row">
         <label for="node-config-input-clientSecretEnv"><i class="fa fa-terminal"></i> Secret Env</label>
-        <input type="text" id="node-config-input-clientSecretEnv" placeholder="Optional environment variable">
+        <input type="text" id="node-config-input-clientSecretEnv" placeholder="Optional MCP_* environment variable">
     </div>
     <div class="form-row">
         <label for="node-config-input-groupClaim"><i class="fa fa-users"></i> Group Claim</label>
@@ -226,7 +230,7 @@
         </div>
         <div class="form-row">
             <label for="node-config-input-microsoftClientSecretEnv"><i class="fa fa-terminal"></i> Secret Env</label>
-            <input type="text" id="node-config-input-microsoftClientSecretEnv" placeholder="Optional environment variable">
+            <input type="text" id="node-config-input-microsoftClientSecretEnv" placeholder="Optional MCP_* environment variable">
         </div>
     </div>
     <div class="form-row">
@@ -264,11 +268,13 @@
         users sign in again. <code>Redis URL from environment</code> or
         <code>Manual Redis settings</code> keep sessions across restarts.</dd>
         <dt>URL Env</dt>
-        <dd>Environment variable holding the Redis URL.</dd>
+        <dd>Environment variable holding the Redis URL, default <code>MCP_REDIS_URL</code>.</dd>
         <dt>Host, Port, DB, TLS, Username</dt>
         <dd>Manual Redis connection settings.</dd>
         <dt>Password, Password Env</dt>
         <dd>Redis password as a credential, or the name of an environment variable that holds it.</dd>
+        <dt>Environment variable names</dt>
+        <dd>Must start with <code>MCP_</code>, so a configuration cannot read other process secrets.</dd>
         <dt>Key Prefix</dt>
         <dd>Prefix for every stored key.</dd>
     </dl>
@@ -279,7 +285,7 @@
     <p>OAuth authorization for MCP endpoints, backed by Microsoft Entra ID or another OIDC provider.</p>
     <h3>Details</h3>
     <p>The selected provider tab is active. Secrets are stored as credentials or read from
-    environment variables. An invalid configuration is reported in the log and every endpoint that
+    environment variables whose names start with <code>MCP_</code>. An invalid configuration is reported in the log and every endpoint that
     uses it refuses to start.</p>
     <dl>
         <dt>Slug</dt>
@@ -306,9 +312,9 @@
         Zero disables it. Provider outages answer <code>temporarily_unavailable</code> without
         revoking the session.</dd>
     </dl>
-    <p>Sessions belong to this configuration node and its provider identity. Replacing the node,
-    changing provider, issuer, client ID, group claim or slug, or switching storage ends all
-    existing sessions, and users sign in again.</p>
+    <p>Sessions belong to the provider identity and slug, not to this node's ID: a replacement
+    node with the same settings keeps users signed in. Changing provider, issuer, client ID,
+    group claim or slug, or switching storage, ends all existing sessions.</p>
     <h3>References</h3>
     <ul>
         <li><a href="https://datatracker.ietf.org/doc/html/rfc6749">RFC 6749 OAuth 2.0</a></li>

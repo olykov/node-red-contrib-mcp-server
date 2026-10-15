@@ -37,7 +37,7 @@
         outputs: 1,
         paletteLabel: 'MCP flow server',
         inputLabels: 'mcp-tool-response or command',
-        outputLabels: 'Tool execution and status',
+        outputLabels: 'Tool calls (mcp-tool-execute)',
         icon: 'font-awesome/fa-cogs',
         label: function() {
             return this.name || 'MCP Flow Server';
@@ -208,7 +208,7 @@
     <dl class="message-properties">
         <dt>topic <span class="property-type">string</span></dt>
         <dd><code>mcp-tool-response</code> to answer a tool call, or a command:
-        <code>start</code>, <code>stop</code>, <code>restart</code> or <code>status</code>.</dd>
+        <code>start</code>, <code>stop</code> or <code>restart</code>. Commands produce no output.</dd>
         <dt class="optional">payload.executionId <span class="property-type">string</span></dt>
         <dd>For <code>mcp-tool-response</code>: the id received in the tool call.</dd>
         <dt class="optional">payload.result <span class="property-type">any</span></dt>
@@ -219,17 +219,14 @@
     <h3>Outputs</h3>
     <dl class="message-properties">
         <dt>topic <span class="property-type">string</span></dt>
-        <dd><code>mcp-tool-execute</code> for a tool call, <code>mcp-server-started</code> or
-        <code>mcp-server-stopped</code> for lifecycle events, or the original topic for a
-        <code>status</code> reply.</dd>
+        <dd>Always <code>mcp-tool-execute</code>.</dd>
         <dt>payload <span class="property-type">object</span></dt>
-        <dd>For <code>mcp-tool-execute</code>: <code>toolName</code>, <code>arguments</code> and
-        <code>executionId</code>. For <code>status</code>: endpoint name, path, port, running
-        state and tool count.</dd>
+        <dd><code>toolName</code>, <code>arguments</code> and <code>executionId</code>.</dd>
     </dl>
     <h3>Details</h3>
-    <p>Every tool call requires OAuth; discovery (<code>initialize</code>, <code>tools/list</code>)
-    stays visible. A call fails after 30 seconds without a matching
+    <p>The output carries only tool calls. Endpoint state is shown in the node status; tool
+    telemetry comes from the MCP metrics node. Every tool call requires OAuth; discovery
+    (<code>initialize</code>, <code>tools/list</code>) stays visible. A call fails after 30 seconds without a matching
     <code>mcp-tool-response</code>.</p>
     <dl>
         <dt>Runtime</dt>

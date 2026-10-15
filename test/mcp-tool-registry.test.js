@@ -24,7 +24,8 @@ function buildRegistry(config = {}, nodes = {}) {
                 node.warn = message => node.warnings.push(message);
             },
             registerType(name, ctor) { types[name] = ctor; },
-            getNode(id) { return nodes[id]; }
+            getNode(id) { return nodes[id]; },
+            eachNode(callback) { for (const node of Array.isArray(nodes) ? nodes : Object.values(nodes)) callback(node); }
         }
     };
     events.on('mcp-tool-register', tool => emitted.push({ event: 'register', tool }));
@@ -37,19 +38,18 @@ function buildRegistry(config = {}, nodes = {}) {
 
 describe('mcp-tool-registry', () => {
     it('registers tools against selected endpoints', () => {
-        const endpoint = { id: 'endpoint-1', serverName: 'ops' };
         const { registry, emitted } = buildRegistry({
             toolName: 'read_status',
             toolDescription: 'Read status',
-            endpoint: 'endpoint-1',
+            endpoint: '/mcp/ops',
 
             toolSchema: '{"type":"object","properties":{}}'
-        }, { 'endpoint-1': endpoint });
+        }, [{ type: 'mcp-flow-server', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops' }]);
 
         registry.registerTool();
 
         assert.strictEqual(emitted[0].event, 'register');
-        assert.strictEqual(emitted[0].tool.endpointId, 'endpoint-1');
+        assert.strictEqual(emitted[0].tool.endpointPath, '/mcp/ops');
         assert.strictEqual(emitted[0].tool.serverName, 'ops');
         assert.strictEqual(emitted[0].tool.annotations, undefined);
     });

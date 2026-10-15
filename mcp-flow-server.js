@@ -76,16 +76,17 @@ module.exports = function (RED)
         );
     }
 
-    function toolBelongsToEndpoint(tool, node)
+    // Tools bind to an endpoint by MCP path, which survives copy, import and node replacement.
+    function toolBelongsToEndpoint(tool, endpointPath)
     {
         if (!tool) return false;
-        if (tool.endpointId) return tool.endpointId === node.endpointId;
+        if (tool.endpointPath) return tool.endpointPath === endpointPath;
         return true;
     }
 
-    function registryKey(toolName, endpointId)
+    function registryKey(toolName, endpointPath)
     {
-        return (endpointId || '*') + ':' + toolName;
+        return (endpointPath || '*') + ':' + toolName;
     }
 
     function getPortServer(port)
@@ -105,17 +106,6 @@ module.exports = function (RED)
 
         state.app.use(express.json({ limit: '10mb' }));
         state.app.use(express.urlencoded({ extended: false, limit: '1mb' }));
-
-        state.app.get('/health', (req, res) =>
-        {
-            const servers = Array.from(state.nodes).map(node => ({
-                server: node.serverName,
-                path: node.serverPath,
-                running: node.isRunning,
-                tools: node.registeredTools().length
-            }));
-            res.json({ status: 'healthy', port: state.port, servers });
-        });
 
         state.app.get(/^\/\.well-known\/oauth-protected-resource(\/.*)?$/, (req, res) =>
         {
@@ -453,10 +443,10 @@ module.exports = function (RED)
         {
             const tools = toolRegistry.keys()
                 .map(key => toolRegistry.get(key))
-                .filter(tool => toolBelongsToEndpoint(tool, node));
+                .filter(tool => toolBelongsToEndpoint(tool, node.serverPath));
             const byName = new Map();
-            tools.filter(tool => !tool.endpointId).forEach(tool => byName.set(tool.name, tool));
-            tools.filter(tool => tool.endpointId).forEach(tool => byName.set(tool.name, tool));
+            tools.filter(tool => !tool.endpointPath).forEach(tool => byName.set(tool.name, tool));
+            tools.filter(tool => tool.endpointPath).forEach(tool => byName.set(tool.name, tool));
             return Array.from(byName.values());
         };
 
@@ -597,7 +587,6 @@ module.exports = function (RED)
                         isRunning: true
                     });
                     node.log('MCP Flow Server started on port ' + node.serverPort + ' path ' + node.serverPath);
-                    node.send({ topic: 'mcp-server-started', payload: { serverId: node.serverId, endpointId: node.endpointId, serverName: node.serverName, path: node.serverPath, port: node.serverPort, startTime: new Date() } });
                     callback(null, { success: true, message: 'Server started' });
                 };
                 const startError = error =>
@@ -652,11 +641,7 @@ module.exports = function (RED)
             {
                 node.isRunning = false;
                 serverInstances.del(node.serverId);
-                if (!closed)
-                {
-                    node.status({ fill: 'grey', shape: 'ring', text: 'stopped' });
-                    node.send({ topic: 'mcp-server-stopped', payload: { serverId: node.serverId } });
-                }
+                if (!closed) node.status({ fill: 'grey', shape: 'ring', text: 'stopped' });
                 callback(null, { success: true, message: 'Server stopped' });
             };
 
@@ -675,9 +660,9 @@ module.exports = function (RED)
         };
 
         let restartTimer = null;
+        // The output carries only tool calls; commands produce no messages.
         node.on('input', function (msg, send, done)
         {
-            send = send || function () { node.send.apply(node, arguments); };
             done = done || function (error) { if (error) node.error(error, msg); };
             const finished = error => done(error || undefined);
 
@@ -712,10 +697,6 @@ module.exports = function (RED)
                             node.startServer(finished);
                         }, 1000);
                     });
-                case 'status':
-                    msg.payload = { serverId: node.serverId, runtimeId: node.runtimeId, endpointId: node.endpointId, serverName: node.serverName, path: node.serverPath, isRunning: node.isRunning, port: node.serverPort, toolCount: node.registeredTools().length, authRequired: true };
-                    send(msg);
-                    return done();
                 default:
                     return done();
             }
@@ -753,7 +734,7 @@ module.exports = function (RED)
     RED.events.on('mcp-tool-register', (toolDef) =>
     {
         if (!toolDef || !toolDef.name) return;
-        toolRegistry.set(registryKey(toolDef.name, toolDef.endpointId), toolDef);
+        toolRegistry.set(registryKey(toolDef.name, toolDef.endpointPath), toolDef);
     });
     RED.events.on('mcp-tool-unregister', (toolDef) =>
     {
@@ -763,7 +744,7 @@ module.exports = function (RED)
             return;
         }
         if (!toolDef || !toolDef.name) return;
-        toolRegistry.del(registryKey(toolDef.name, toolDef.endpointId));
+        toolRegistry.del(registryKey(toolDef.name, toolDef.endpointPath));
     });
 
     const readPermission = RED.auth && typeof RED.auth.needsPermission === 'function' ?
@@ -778,7 +759,7 @@ module.exports = function (RED)
             {
                 const toolCount = toolRegistry.keys()
                     .map(toolKey => toolRegistry.get(toolKey))
-                    .filter(tool => toolBelongsToEndpoint(tool, server)).length;
+                    .filter(tool => toolBelongsToEndpoint(tool, server.path)).length;
                 servers.push({ serverId: key, runtimeId: server.runtimeId, endpointId: server.endpointId, serverName: server.serverName, path: server.path, isRunning: server.isRunning, port: server.port, startTime: server.startTime, toolCount });
             }
         });

@@ -1,6 +1,6 @@
 {
-  "name": "node-red-contrib-mcp-server",
-  "version": "2.1.2-upstream.1",
+  "name": "@olykov/node-red-mcp-server",
+  "version": "3.0.0-upstream.1",
   "description": "Upstream-first Node-RED palette for exposing flows as MCP servers and tools.",
   "main": "mcp-flow-server.js",
   "scripts": {
@@ -28,6 +28,7 @@
     "url": "https://github.com/olykov/node-red-contrib-mcp-server/issues"
   },
   "node-red": {
+    "version": ">=5.0.0",
     "nodes": {
       "mcp-auth": "mcp-auth.js",
       "mcp-flow-server": "mcp-flow-server.js",
@@ -44,9 +45,6 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  },
-  "peerDependencies": {
-    "node-red": ">=1.0.0"
   },
   "files": [
     "*.js",

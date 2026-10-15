@@ -10,7 +10,13 @@
                 value: '',
                 required: true,
                 validate: function(value) {
-                    return value === '__shared__' || Boolean(value);
+                    if (value === '__shared__') return true;
+                    if (!value || value.charAt(0) !== '/') return false;
+                    var found = false;
+                    RED.nodes.eachNode(function(node) {
+                        if (node.type === 'mcp-flow-server' && (node.serverPath || '/mcp') === value) found = true;
+                    });
+                    return found;
                 }
             },
             toolBehavior: { value: '' },
@@ -44,8 +50,9 @@
             if (RED.nodes && typeof RED.nodes.eachNode === 'function') {
                 RED.nodes.eachNode(function(node) {
                     if (node.type !== 'mcp-flow-server') return;
-                    var label = node.name || node.serverName || node.id;
-                    endpointSelect.append($('<option></option>').attr('value', node.id).text(label));
+                    var path = node.serverPath || '/mcp';
+                    var label = (node.name || node.serverName || path) + ' (' + path + ')';
+                    endpointSelect.append($('<option></option>').attr('value', path).text(label));
                 });
             }
             endpointSelect.val(currentEndpoint);
@@ -203,7 +210,8 @@
         <dt>Tool Name</dt>
         <dd>MCP tool name: lowercase letters, digits and underscores, starting with a letter.</dd>
         <dt>Endpoint</dt>
-        <dd>MCP Flow Server that offers the tool. <code>Shared (All MCPs)</code> exposes it on every endpoint.</dd>
+        <dd>MCP path of the MCP Flow Server that offers the tool, so the binding survives copy, import
+        and node replacement. <code>Shared (All MCPs)</code> exposes it on every endpoint.</dd>
         <dt>Behavior</dt>
         <dd>MCP safety annotation: read only, add only, or change, delete or send.</dd>
         <dt>Scope</dt>

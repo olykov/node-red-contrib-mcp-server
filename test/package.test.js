@@ -32,6 +32,9 @@ it('loads only the supported flow-serving palette nodes', () => {
 });
 
 it('declares accurate package metadata and ships the example instead of tests', () => {
+    assert.strictEqual(manifest.name, '@olykov/node-red-mcp-server');
+    assert.strictEqual(manifest['node-red'].version, '>=5.0.0');
+    assert.strictEqual(manifest.peerDependencies, undefined);
     assert.strictEqual(manifest.engines.node, '>=18.0.0');
     assert.strictEqual(manifest.dependencies.qs, undefined);
     assert.ok(manifest.repository && /github\.com\/olykov\/node-red-contrib-mcp-server/.test(manifest.repository.url));
@@ -49,7 +52,7 @@ it('ships an example flow whose nodes satisfy the current editor contracts', () 
     assert.strictEqual(byId.get(byId.get(server.auth).redis).type, 'mcp-redis');
     assert.strictEqual(server.serverPort, undefined);
     for (const tool of flow.filter(node => node.type === 'mcp-tool-registry')) {
-        assert.strictEqual(byId.get(tool.endpoint), server);
+        assert.strictEqual(tool.endpoint, server.serverPath);
         assert.deepStrictEqual(tool.wires, []);
         assert.match(tool.toolName, /^[a-z][a-z0-9_]*$/);
         JSON.parse(tool.toolSchema);

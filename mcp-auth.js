@@ -3,13 +3,13 @@ module.exports = function (RED)
     "use strict";
 
     const { createStorage, hashToken } = require('./lib/auth-storage');
-    const { providerSettings, authStorageScope, authRouteSlug } = require('./lib/auth-provider');
+    const { providerSettings, authStorageScope, authRouteSlug, mcpEnvName } = require('./lib/auth-provider');
     const { RefreshTokenStore, refreshEncryptionKey, boundedTtl, ACCESS_TTL, REFRESH_IDLE_TTL, SESSION_TTL } = require('./lib/refresh-tokens');
     const OAUTH_TRANSACTION_TTL = 300;
 
     function envOrCredential(node, envName, credentialName)
     {
-        const fromEnv = envName ? process.env[String(envName)] : '';
+        const fromEnv = envName ? process.env[mcpEnvName(envName, 'Environment variable')] : '';
         if (fromEnv) return fromEnv;
         return node.credentials && node.credentials[credentialName] ? node.credentials[credentialName] : '';
     }
@@ -20,7 +20,7 @@ module.exports = function (RED)
         const node = this;
         node.name = config.name || '';
         node.mode = config.mode || 'memory';
-        node.redisUrlEnv = config.redisUrlEnv || 'REDIS_URL';
+        node.redisUrlEnv = config.redisUrlEnv || 'MCP_REDIS_URL';
         node.host = config.host || '127.0.0.1';
         node.port = Number(config.port || 6379);
         node.db = Number(config.db || 0);
@@ -28,6 +28,15 @@ module.exports = function (RED)
         node.username = config.username || '';
         node.keyPrefix = config.keyPrefix || 'mcp_auth:';
         node.storage = null;
+        try
+        {
+            if (node.mode === 'env') mcpEnvName(node.redisUrlEnv, 'URL Env');
+            if (node.mode === 'manual') mcpEnvName(config.passwordEnv, 'Password Env');
+        } catch (error)
+        {
+            node.configError = error.message;
+            node.error('MCP auth storage configuration is invalid: ' + error.message);
+        }
         let lastStorageError = 0;
 
         function reportStorageError(error)
@@ -40,6 +49,7 @@ module.exports = function (RED)
 
         node.createStorage = function ()
         {
+            if (node.configError) throw new Error('MCP auth storage configuration is invalid: ' + node.configError);
             if (!node.storage)
             {
                 node.storage = createStorage({
@@ -89,10 +99,16 @@ module.exports = function (RED)
             return;
         }
         Object.assign(node, settings);
-        const storageScope = authStorageScope(node.id, { ...settings, oauthSlug: node.oauthSlug });
-        node.allowedClientHosts = config.allowedClientHosts || '';
         node.redisConfigId = config.redis || '';
         node.redisConfig = node.redisConfigId && getNode ? getNode(node.redisConfigId) : null;
+        if (node.redisConfig && node.redisConfig.configError)
+        {
+            node.configError = 'storage: ' + node.redisConfig.configError;
+            node.error('MCP auth configuration is invalid: ' + node.configError);
+            return;
+        }
+        const storageScope = authStorageScope({ ...settings, oauthSlug: node.oauthSlug });
+        node.allowedClientHosts = config.allowedClientHosts || '';
         node.storage = null;
 
         node.clientSecret = function ()

@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.0-upstream.1
+
+Breaking; see README "Upgrading to 3.0".
+
+- Rename the package to `@olykov/node-red-mcp-server`; declare `node-red.version >=5.0.0` instead of a `node-red` peer dependency.
+- Require the `MCP_` prefix for editor-supplied environment variable names; default storage URL variable is `MCP_REDIS_URL`; invalid names are reported and stop dependent endpoints.
+- Bind `mcp-tool-registry` tools to the endpoint MCP path instead of the node ID; `get_flow` reports `endpointPath`.
+- Emit only `mcp-tool-execute` on the `mcp-flow-server` output; remove lifecycle events, the `status` reply and the runtime `/health` route.
+- Key auth sessions by provider settings and slug instead of the auth node ID, so replacing the node keeps sessions.
+
 ## 2.1.2-upstream.1
 
 Review against the Node-RED Creating Nodes documentation:

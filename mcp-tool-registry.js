@@ -2,16 +2,31 @@ module.exports = function (RED)
 {
     "use strict";
 
-    function normalizeEndpoint(value)
+    function normalizePath(value)
     {
-        return value === '__shared__' ? '' : (value || '');
+        const raw = typeof value === 'string' ? value.trim() : '';
+        if (!raw) return '';
+        return raw.startsWith('/') ? raw : '/' + raw;
     }
 
-    function endpointName(RED, endpointId)
+    // Endpoint binding is the MCP path of an mcp-flow-server; '__shared__' exposes the tool everywhere.
+    function normalizeEndpoint(value)
     {
-        const getNode = RED.nodes && typeof RED.nodes.getNode === 'function' ? RED.nodes.getNode.bind(RED.nodes) : null;
-        const endpoint = endpointId && getNode ? getNode(endpointId) : null;
-        return endpoint ? endpoint.serverName : '';
+        return value === '__shared__' ? '' : normalizePath(value);
+    }
+
+    function endpointName(RED, endpointPath)
+    {
+        let name = '';
+        if (endpointPath && RED.nodes && typeof RED.nodes.eachNode === 'function')
+        {
+            RED.nodes.eachNode(candidate =>
+            {
+                if (!name && candidate.type === 'mcp-flow-server' && normalizePath(candidate.serverPath || '/mcp') === endpointPath)
+                    name = candidate.serverName || candidate.name || endpointPath;
+            });
+        }
+        return name;
     }
 
     function toolAnnotations(behavior, worldAccess)
@@ -77,9 +92,9 @@ module.exports = function (RED)
         {
             if (node.endpoint)
             {
-                return { endpointId: node.endpoint, serverName: endpointName(RED, node.endpoint) || '' };
+                return { endpointPath: node.endpoint, serverName: endpointName(RED, node.endpoint) || node.endpoint };
             }
-            return { endpointId: '', serverName: '' };
+            return { endpointPath: '', serverName: '' };
         };
 
         node.registerTool = function ()
@@ -104,7 +119,7 @@ module.exports = function (RED)
                 inputSchema: parsedSchema,
                 ...(parsedOutputSchema ? { outputSchema: parsedOutputSchema } : {}),
                 ...(annotations ? { annotations } : {}),
-                endpointId: binding.endpointId,
+                endpointPath: binding.endpointPath,
                 serverName: binding.serverName,
                 registeredBy: node.id,
                 registrationTime: new Date()
@@ -126,7 +141,7 @@ module.exports = function (RED)
             }
 
             const binding = node.binding();
-            RED.events.emit('mcp-tool-unregister', { name: node.toolName, endpointId: binding.endpointId, serverName: binding.serverName });
+            RED.events.emit('mcp-tool-unregister', { name: node.toolName, endpointPath: binding.endpointPath, serverName: binding.serverName });
 
             node.isRegistered = false;
             node.status({ fill: 'grey', shape: 'ring', text: 'unregistered' });

@@ -1,6 +1,8 @@
 # Node-RED MCP Server
 
-Upstream-first fork of `node-red-contrib-mcp-server@1.1.5` for MCP tool runtimes.
+`@olykov/node-red-mcp-server` is an upstream-first fork of `node-red-contrib-mcp-server@1.1.5`
+for MCP tool runtimes. The scoped name keeps an accidental install of the upstream package from
+replacing it. Requires Node-RED 5.0 or later and Node.js 18 or later.
 
 The package exposes Node-RED flows as endpoint-scoped MCP servers with read-only admin helpers and package-level OAuth support.
 
@@ -60,8 +62,27 @@ npm install
 npm test
 npm link
 cd ~/.node-red
-npm link <package-name>
+npm link @olykov/node-red-mcp-server
 ```
+
+## Upgrading to 3.0
+
+3.0 renames the package and changes three contracts. Before deploying it:
+
+1. Uninstall `node-red-contrib-mcp-server` from the Node-RED user directory and install
+   `@olykov/node-red-mcp-server`; the node types keep their names.
+2. Rename editor-supplied environment variables to the `MCP_` prefix, for example
+   `REDIS_URL` to `MCP_REDIS_URL`, in the runtime environment and in the `mcp-redis` and
+   `mcp-auth` configuration nodes. A configuration with another name is reported as
+   invalid and its endpoints do not start.
+3. Open every `mcp-tool-registry` node and select its endpoint again: tools now bind by
+   MCP path, not by node ID.
+4. The `mcp-flow-server` output now carries only `mcp-tool-execute` messages; the
+   `mcp-server-started`, `mcp-server-stopped` and `status` replies were removed, and the
+   runtime no longer serves `/health`. Endpoint state is shown in the node status.
+
+Existing sessions end once after the upgrade because session storage is no longer keyed by
+the auth node ID; users sign in again.
 
 ## Flow Server Extensions
 
@@ -88,7 +109,7 @@ lowercase letter and contain only lowercase letters, digits or hyphens (1-63 cha
 Register `https://mcp.example.test/oauth/team-login/callback` with the selected provider.
 Authorize, token and authorization-server metadata routes use the same slug, not the
 Node-RED node ID. Keep the slug when replacing an auth node; the registered callback
-stays unchanged, but users must sign in again. Separate auth configurations cannot
+stays unchanged and, with the same provider settings, existing sessions continue. Separate auth configurations cannot
 share a slug on the same listener or base URL. Multiple endpoints can share
 one auth configuration. There is no fallback or alias for node-ID routes.
 
@@ -127,7 +148,7 @@ msg.payload = { executionId, result };
 
 `result` can be a standard MCP result object. Plain strings and plain objects are normalized into text responses.
 
-The `mcp-flow-server` output emits tool execution and status messages. Return matching `mcp-tool-response` messages to the node input.
+The `mcp-flow-server` output emits only `mcp-tool-execute` messages. Return matching `mcp-tool-response` messages to the node input. The input also accepts `start`, `stop` and `restart` commands, which produce no output; endpoint state is shown in the node status and tool telemetry comes from `mcp-server-metrics`.
 
 `mcp-server-metrics` is a source node with no input and one output. Select the same `mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits one `mcp-tool-telemetry` message for each `tools/call` request across those endpoints, including failed calls and authentication failures. Its payload contains `endpoint`, `tool`, `mode`, `status`, `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. Unknown and unauthenticated tool names are reported as `unknown` to bound metric cardinality. It does not poll Node-RED or expose a metrics route.
 
@@ -135,7 +156,9 @@ The `mcp-flow-server` output emits tool execution and status messages. Return ma
 
 Tool execution always requires OAuth and checks endpoint roles/groups. Provider scopes are advertised automatically in `securitySchemes` and `_meta.securitySchemes`; custom endpoint/tool scope policies are not supported. `offline_access` is advertised only when refresh is configured.
 
-`mcp-tool-registry` requires an explicit endpoint choice. Select a specific endpoint for endpoint-scoped tools, or select `Shared (All MCPs)` only for tools intentionally exposed on every endpoint in the same Node-RED runtime.
+`mcp-tool-registry` requires an explicit endpoint choice. A specific endpoint is stored as its MCP path, so the binding survives copy, import and node replacement; endpoints with the same path on different runtimes share the tool. Select `Shared (All MCPs)` only for tools intentionally exposed on every endpoint in the same Node-RED runtime.
+
+Editor-supplied environment variable names (`URL Env`, `Password Env`, `Secret Env`) must start with `MCP_`, so a flow editor cannot point a configuration at other process secrets such as `NODE_RED_CREDENTIAL_SECRET`.
 
 
 Admin tools expose read-only `get_flow` only when the selected runtime has Admin Port, Admin Token, and Admin Endpoint Path configured, and the endpoint path exactly matches that Admin Endpoint Path.
