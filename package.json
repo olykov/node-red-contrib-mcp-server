@@ -1,6 +1,6 @@
 {
   "name": "@olykov/node-red-mcp-server",
-  "version": "3.0.1-upstream.1",
+  "version": "3.0.2-upstream.1",
   "description": "Upstream-first Node-RED palette for exposing flows as MCP servers and tools.",
   "main": "mcp-flow-server.js",
   "scripts": {

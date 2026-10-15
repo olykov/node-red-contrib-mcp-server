@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.2-upstream.1
+
+- Editor: mid-tone node colours so the white icons stay visible.
+
 ## 3.0.1-upstream.1
 
 - Remove the Reuse Grace editor field; refresh reuse grace is fixed at 30 seconds.
