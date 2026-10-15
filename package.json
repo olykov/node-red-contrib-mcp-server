@@ -1,11 +1,13 @@
 {
   "name": "@olykov/node-red-mcp-server",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "Upstream-first Node-RED palette for exposing flows as MCP servers and tools.",
   "main": "mcp-flow-server.js",
   "scripts": {
-    "test": "node --test",
-    "prepublishOnly": "npm test"
+    "lint": "eslint .",
+    "test": "node --test --test-timeout=30000",
+    "coverage": "node --test --test-timeout=30000 --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 --test-coverage-exclude=test/**",
+    "prepublishOnly": "npm run lint && npm test"
   },
   "keywords": [
     "mcp",
@@ -57,5 +59,10 @@
     "LICENSE",
     "lib/",
     "examples/"
-  ]
+  ],
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.13.0"
+  }
 }

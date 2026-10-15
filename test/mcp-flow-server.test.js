@@ -443,6 +443,22 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(server.sent.filter(Array.isArray).length, 0);
     });
 
+    it('rejects tool calls above the concurrency limit', async () => {
+        const { RED, server } = buildServer();
+        RED.events.emit('mcp-tool-register', { name: 'slow_tool', description: 'Slow', inputSchema: { type: 'object', properties: {} } });
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        server.executeToolFlow = async () => { await gate; return { ok: true }; };
+        const call = id => server.handleToolCall({ id, params: { name: 'slow_tool', arguments: {} } }, mockRes());
+        const running = Array.from({ length: 32 }, (_, i) => call(i));
+        const rejected = mockRes();
+        await server.handleToolCall({ id: 99, params: { name: 'slow_tool', arguments: {} } }, rejected);
+        assert.equal(rejected.body.error.code, -32000);
+        release();
+        await Promise.all(running);
+        assert.equal(server.activeToolCalls, 0);
+    });
+
     it('tracks flow errors and rejects legacy direct calls', async () => {
         const { RED, server, runtimeNode, types } = buildServer();
         RED.events.emit('mcp-tool-register', {
@@ -1419,7 +1435,7 @@ describe('3.0 configuration rules', () => {
 });
 
 describe('audit log and OAuth hardening', () => {
-    const events = (lines, name) => lines.map(line => { try { return JSON.parse(line); } catch (_) { return null; } })
+    const events = (lines, name) => lines.map(line => { try { return JSON.parse(line); } catch { return null; } })
         .filter(entry => entry && entry.event === name);
 
     it('audits tool calls with the caller and passes the identity to the flow, never the arguments', async () => {

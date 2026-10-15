@@ -67,39 +67,17 @@
                 }
             });
 
-            function validateSchemaField(selector, validationSelector, allowEmpty) {
-                var schema = $(selector).val();
-                if (allowEmpty && !schema.trim()) {
-                    $(selector).removeClass('input-error');
-                    $(validationSelector).hide();
-                    return;
-                }
-                try {
-                    var parsed = JSON.parse(schema);
-                    $(selector).removeClass('input-error');
-                    $(validationSelector).hide();
-                    if (!parsed.type || !parsed.properties) {
-                        $(validationSelector).show().css('color', 'var(--red-ui-text-color-warning, #c38916)').text("Warning: schema should have 'type' and 'properties' fields");
-                    }
-                } catch (error) {
-                    $(selector).addClass('input-error');
-                    $(validationSelector).show().css('color', 'var(--red-ui-text-color-error, #d6615f)').text('Invalid JSON: ' + error.message);
-                }
-            }
+            var node = this;
+            node.schemaEditors = {
+                toolSchema: RED.editor.createEditor({ id: 'node-input-toolSchema-editor', mode: 'ace/mode/json', value: $('#node-input-toolSchema').val() }),
+                outputSchema: RED.editor.createEditor({ id: 'node-input-outputSchema-editor', mode: 'ace/mode/json', value: $('#node-input-outputSchema').val() })
+            };
 
-            $('#node-input-toolSchema').on('blur', function() {
-                validateSchemaField('#node-input-toolSchema', '#schema-validation', false);
-            });
-
-            $('#node-input-outputSchema').on('blur', function() {
-                validateSchemaField('#node-input-outputSchema', '#output-schema-validation', true);
-            });
-
-            function formatJsonField(selector, label, allowEmpty) {
-                var schema = $(selector).val();
+            function formatJsonField(editor, label, allowEmpty) {
+                var schema = editor.getValue();
                 if (allowEmpty && !schema.trim()) return true;
                 try {
-                    $(selector).val(JSON.stringify(JSON.parse(schema), null, 2));
+                    editor.setValue(JSON.stringify(JSON.parse(schema), null, 2), -1);
                     return true;
                 } catch (error) {
                     RED.notify(label + ' invalid JSON: ' + error.message, 'error');
@@ -108,8 +86,8 @@
             }
 
             $('#format-json-fields-btn').on('click', function() {
-                var inputOk = formatJsonField('#node-input-toolSchema', 'Input schema', false);
-                var outputOk = formatJsonField('#node-input-outputSchema', 'Output schema', true);
+                var inputOk = formatJsonField(node.schemaEditors.toolSchema, 'Input schema', false);
+                var outputOk = formatJsonField(node.schemaEditors.outputSchema, 'Output schema', true);
                 if (inputOk && outputOk) RED.notify('JSON fields formatted', 'success');
             });
 
@@ -124,6 +102,18 @@
                     $('#tool-name-validation').hide();
                 }
             });
+        },
+        oneditsave: function() {
+            $('#node-input-toolSchema').val(this.schemaEditors.toolSchema.getValue());
+            $('#node-input-outputSchema').val(this.schemaEditors.outputSchema.getValue());
+            this.schemaEditors.toolSchema.destroy();
+            this.schemaEditors.outputSchema.destroy();
+            delete this.schemaEditors;
+        },
+        oneditcancel: function() {
+            this.schemaEditors.toolSchema.destroy();
+            this.schemaEditors.outputSchema.destroy();
+            delete this.schemaEditors;
         }
     });
 </script>
@@ -173,15 +163,15 @@
     </div>
 
     <div class="form-row">
-        <label for="node-input-toolSchema" style="display: block; width: auto;"><i class="fa fa-code"></i> Input Schema</label>
-        <textarea id="node-input-toolSchema" rows="12" style="display: block; width: 100%; resize: vertical; font-family: monospace;" placeholder='{"type": "object", "properties": {}, "required": []}'></textarea>
-        <div id="schema-validation" class="mcp-tool-registry-validation"></div>
+        <label for="node-input-toolSchema-editor" style="display: block; width: auto;"><i class="fa fa-code"></i> Input Schema</label>
+        <div style="height: 220px; min-height: 120px;" class="node-text-editor" id="node-input-toolSchema-editor"></div>
+        <input type="hidden" id="node-input-toolSchema">
     </div>
 
     <div class="form-row">
-        <label for="node-input-outputSchema" style="display: block; width: auto;"><i class="fa fa-code"></i> Output Schema</label>
-        <textarea id="node-input-outputSchema" rows="12" style="display: block; width: 100%; resize: vertical; font-family: monospace;" placeholder='{"type": "object", "properties": {}}'></textarea>
-        <div id="output-schema-validation" class="mcp-tool-registry-validation"></div>
+        <label for="node-input-outputSchema-editor" style="display: block; width: auto;"><i class="fa fa-code"></i> Output Schema</label>
+        <div style="height: 220px; min-height: 120px;" class="node-text-editor" id="node-input-outputSchema-editor"></div>
+        <input type="hidden" id="node-input-outputSchema">
     </div>
 
     <div class="form-row">

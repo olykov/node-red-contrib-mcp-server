@@ -177,6 +177,20 @@ Tool execution always requires OAuth and checks endpoint roles/groups. Provider 
 Editor-supplied environment variable names (`URL Env`, `Password Env`, `Secret Env`) must start with `MCP_`, so a flow editor cannot point a configuration at other process secrets such as `NODE_RED_CREDENTIAL_SECRET`.
 
 
+The authorization server issuer is the Base URL origin. Authorization responses carry it as `iss`
+(RFC 9207). Keep one `mcp-auth` configuration per runtime port: the root
+`/.well-known/oauth-authorization-server` document answers only while a single configuration
+serves the port.
+
+Deploy with **Modified Flows** and keep each MCP endpoint and its tool flows on their own tab.
+Stopping an endpoint fails its pending tool calls (the flow restarts with it); requests already
+being answered, such as `get_flow` or a token exchange, finish in the background, and the port
+stays open while any endpoint on it is running.
+
+Each endpoint runs at most 32 tool calls at once; further calls get JSON-RPC error `-32000`
+until one finishes. Tool arguments are not validated against the Input Schema, so the flow must
+check its own input.
+
 Admin tools expose read-only `get_flow` only when the selected runtime has Admin Port, Admin Token, and Admin Endpoint Path configured, and the endpoint path exactly matches that Admin Endpoint Path.
 
 ### Inspecting Node-RED flows
@@ -376,10 +390,15 @@ then undo the configuration that the newer version required:
 Run before commit:
 
 ```bash
-npm test
+npm run lint
+npm run coverage
 npm pack --dry-run
 npm audit --omit=dev
 ```
+
+`npm run coverage` runs the tests and fails below 90% lines, 80% branches or 85% functions.
+GitHub Actions (`.github/workflows/ci.yml`) runs the same checks on Node.js 22 and 24 for every
+push to `main`, release tag and pull request.
 
 Run source scans before publishing to confirm that sensitive material and environment-specific names are absent.
 

@@ -4,6 +4,17 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
+## 3.3.0 - 2026-10-15
+
+- At most 32 concurrent tool calls per endpoint; further calls get JSON-RPC error `-32000` and
+  an audit line with outcome `rejected`.
+- Authorization responses (code and error redirects) carry `iss` (RFC 9207); metadata advertises
+  `authorization_response_iss_parameter_supported`.
+- Editor: Input and Output Schema use the Node-RED code editor in JSON mode.
+- README: issuer scope and deploy guidance (Modified Flows, one tab per MCP endpoint).
+- Development: ESLint (`npm run lint`), coverage thresholds (`npm run coverage`) and a GitHub
+  Actions workflow on Node.js 22 and 24.
+
 ## 3.2.0 - 2026-10-15
 
 Breaking for clients that listed tools anonymously.

@@ -12,7 +12,7 @@ const { exchangeClientCode, exchangeRefreshToken, completeAuthorization, beginAu
 const VERIFIER = 'test-verifier-0123456789abcdefghijklmnopqrstuvwxyz';
 const refreshEvent = (logs, outcome) => logs.some(line => {
     try { const entry = JSON.parse(line); return entry.event === 'oauth.refresh' && entry.outcome === outcome; }
-    catch (_) { return false; }
+    catch { return false; }
 });
 
 const key = '12'.repeat(32);

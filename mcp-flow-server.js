@@ -9,6 +9,7 @@ module.exports = function (RED)
     const { createAdminTools } = require('./lib/admin-tools');
     const { auditLog } = require('./lib/audit');
     const PACKAGE_VERSION = require('./package.json').version;
+    const MAX_CONCURRENT_TOOL_CALLS = 32;
     const { authRouteSlug } = require('./lib/auth-provider');
     const {
         absoluteUrl,
@@ -277,7 +278,7 @@ module.exports = function (RED)
     function clientLabel(clientId)
     {
         let url;
-        try { url = new URL(String(clientId || '')); } catch (_) { return 'unknown'; }
+        try { url = new URL(String(clientId || '')); } catch { return 'unknown'; }
         if (url.hostname === 'claude.ai') return 'claude';
         if (url.hostname === 'chatgpt.com') return url.pathname.includes('/codex/') ? 'codex' : 'chatgpt';
         return url.hostname;
@@ -345,6 +346,7 @@ module.exports = function (RED)
         node.runtime = runtime;
         node.authConfig = configNode(RED, config.auth);
         node.endpointId = node.id;
+        node.activeToolCalls = 0;
         node.serverName = config.serverName || config.name || 'node-red-mcp-server';
         node.serverPath = normalizePath(config.serverPath);
         node.serverPort = runtime ? runtime.serverPort : 0;
@@ -525,6 +527,14 @@ module.exports = function (RED)
             let adminResult;
             let status = 'failed';
             let toolName = adminTool ? name : 'unknown';
+            // Arguments are not checked against inputSchema yet; flows validate their own input until per-tool schemas land.
+            if (node.activeToolCalls >= MAX_CONCURRENT_TOOL_CALLS)
+            {
+                auditLog(node, 'mcp.tool_call', { outcome: 'rejected', reason: 'too_many_calls', tool: name,
+                    endpoint: node.serverName, subject: claims.subject, client: claims.client, session: claims.session }, 'warn');
+                return node.rpcError(res, request.id, -32000, 'Too many concurrent tool calls');
+            }
+            node.activeToolCalls++;
             try
             {
                 if (adminTool)
@@ -548,6 +558,7 @@ module.exports = function (RED)
             }
             finally
             {
+                node.activeToolCalls--;
                 const meta = adminResult && adminResult.structuredContent && adminResult.structuredContent.meta;
                 auditLog(node, 'mcp.tool_call', { outcome: status, tool: toolName, endpoint: node.serverName,
                     subject: claims.subject, client: claims.client, session: claims.session,
