@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const EventEmitter = require('node:events');
 const axios = require('axios');
 const { generateKeyPair, exportJWK, createLocalJWKSet, SignJWT } = require('jose');
-const { RefreshTokenStore, boundedTtl, ACCESS_TTL, REFRESH_IDLE_TTL, SESSION_TTL } = require('../lib/refresh-tokens');
+const { RefreshTokenStore, boundedTtl, reuseGrace, ACCESS_TTL, REFRESH_IDLE_TTL, SESSION_TTL } = require('../lib/refresh-tokens');
 const { MemoryAuthStorage, RedisAuthStorage } = require('../lib/auth-storage');
 const { exchangeClientCode, exchangeRefreshToken, completeAuthorization, beginAuthorization,
     authorizeMetadata, validateRequest, sha256Base64Url } = require('../lib/mcp-auth');
@@ -36,11 +36,13 @@ function authNode(options = {}, withRefreshKey = true) {
     } };
     require('../mcp-auth')(RED);
     nodes.storage = new types['mcp-redis']({ id: 'storage', mode: 'memory' });
-    return new types['mcp-auth']({ id: 'auth-test', redis: 'storage', provider: 'microsoft',
+    const node = new types['mcp-auth']({ id: 'auth-test', redis: 'storage', provider: 'microsoft',
         oauthSlug: 'test-login', microsoftTenantId: tenant, microsoftClientId: client,
         credentials: { microsoftClientSecret: 'provider-test-secret', clientSecret: 'provider-test-secret',
             ...(withRefreshKey ? { microsoftRefreshKey: key, oidcRefreshKey: key } : {}) },
         allowedClientHosts: 'client.example.test', ...options });
+    if (options.refreshReuseGraceSeconds !== undefined) node.refreshStore.grace = reuseGrace(options.refreshReuseGraceSeconds);
+    return node;
 }
 
 async function setup(t, options = {}) {
@@ -103,10 +105,10 @@ describe('rotating refresh tokens', () => {
         assert.equal(auth.refreshTokenTtl, 604800);
         assert.equal(auth.sessionTtl, 1814400);
         assert.equal(auth.refreshStore.grace, 30);
-        assert.equal(authNode({ refreshReuseGraceSeconds: 0 }).refreshStore.grace, 0);
-        assert.equal(authNode({ refreshReuseGraceSeconds: 120 }).refreshStore.grace, 120);
+        assert.equal(reuseGrace(0), 0);
+        assert.equal(reuseGrace(120), 120);
         for (const grace of [-1, 121, 0.5, 'invalid'])
-            assert.match(authNode({ refreshReuseGraceSeconds: grace }).configError, /0 to 120/);
+            assert.throws(() => reuseGrace(grace), /0 to 120/);
         for (const maximum of [ACCESS_TTL, REFRESH_IDLE_TTL, SESSION_TTL]) {
             assert.equal(boundedTtl(maximum * 2, maximum), maximum);
             assert.equal(boundedTtl(1, maximum), 1);

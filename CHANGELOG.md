@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.0.1-upstream.1
+
+- Remove the Reuse Grace editor field; refresh reuse grace is fixed at 30 seconds.
+- Editor: short palette labels (MCP Server, MCP Metrics, MCP Tool) and light node colours with readable labels.
+
 ## 3.0.0-upstream.1
 
 Breaking; see README "Upgrading to 3.0".

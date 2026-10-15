@@ -58,8 +58,7 @@
         "redis": "mcp-example-storage",
         "accessTokenTtl": 900,
         "refreshTokenTtl": 604800,
-        "sessionTtl": 1814400,
-        "refreshReuseGraceSeconds": 30
+        "sessionTtl": 1814400
     },
     {
         "id": "mcp-example-server",

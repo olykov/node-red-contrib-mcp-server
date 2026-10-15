@@ -16,7 +16,7 @@
         credentials: {
             adminToken: { type: 'password' }
         },
-        paletteLabel: 'MCP runtime',
+        paletteLabel: 'MCP Runtime',
         label: function() {
             return this.name || this.runtimeName || 'MCP Runtime';
         }
@@ -24,7 +24,7 @@
 
     RED.nodes.registerType('mcp-flow-server', {
         category: 'mcp',
-        color: '#D8BFD8',
+        color: '#C0DEED',
         defaults: {
             name: { value: '' },
             runtime: { value: '', type: 'mcp-runtime', required: true },
@@ -35,12 +35,12 @@
         },
         inputs: 1,
         outputs: 1,
-        paletteLabel: 'MCP flow server',
+        paletteLabel: 'MCP Server',
         inputLabels: 'mcp-tool-response or command',
         outputLabels: 'Tool calls (mcp-tool-execute)',
         icon: 'font-awesome/fa-cogs',
         label: function() {
-            return this.name || 'MCP Flow Server';
+            return this.name || 'MCP Server';
         },
         labelStyle: function() {
             return this.name ? 'node_label_italic' : '';
@@ -107,7 +107,7 @@
         <input type="text" id="node-config-input-adminEndpointPath" placeholder="/mcp/admin">
     </div>
     <div class="form-tips mcp-admin-tools-note">
-        Admin tools are exposed only when Admin Port, Admin Token or NODE_RED_ADMIN_API_TOKEN, and Admin Endpoint Path are set, and an MCP Flow Server on this runtime uses exactly that path.
+        Admin tools are exposed only when Admin Port, Admin Token or NODE_RED_ADMIN_API_TOKEN, and Admin Endpoint Path are set, and an MCP Server on this runtime uses exactly that path.
     </div>
 </script>
 
@@ -175,7 +175,7 @@
 </script>
 
 <script type="text/html" data-help-name="mcp-runtime">
-    <p>Local MCP HTTP listener shared by one or more MCP Flow Server endpoints.</p>
+    <p>Local MCP HTTP listener shared by one or more MCP Server endpoints.</p>
     <h3>Details</h3>
     <p>Several endpoints may share one runtime port when their MCP paths differ.
     The runtime also hosts the OAuth routes of the auth configurations used by its endpoints.</p>
@@ -194,7 +194,7 @@
         <dd>Exact MCP path allowed to expose the read-only admin tools.</dd>
     </dl>
     <p>Admin tools are exposed only when Admin Port, a token and Admin Path are set and an
-    MCP Flow Server on this runtime uses exactly that path.</p>
+    MCP Server on this runtime uses exactly that path.</p>
     <h3>References</h3>
     <ul>
         <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>

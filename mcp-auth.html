@@ -32,7 +32,7 @@
         credentials: {
             password: { type: 'password' }
         },
-        paletteLabel: 'MCP auth storage',
+        paletteLabel: 'MCP Auth Storage',
         label: function() {
             return this.name || 'MCP Auth Storage';
         },
@@ -74,8 +74,7 @@
             redis: { value: '', type: 'mcp-redis', required: true },
             accessTokenTtl: { value: 900, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 900; } },
             refreshTokenTtl: { value: 604800, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 604800; } },
-            sessionTtl: { value: 1814400, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 1814400; } },
-            refreshReuseGraceSeconds: { value: 30, validate: function(v) { return v !== '' && Number.isInteger(Number(v)) && v >= 0 && v <= 120; } }
+            sessionTtl: { value: 1814400, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 1814400; } }
         },
         credentials: {
             clientSecret: { type: 'password' },
@@ -83,7 +82,7 @@
             oidcRefreshKey: { type: 'password' },
             microsoftRefreshKey: { type: 'password' }
         },
-        paletteLabel: 'MCP auth',
+        paletteLabel: 'MCP Auth',
         label: function() {
             return this.name || 'MCP OIDC Auth';
         },
@@ -253,10 +252,6 @@
         <label for="node-config-input-sessionTtl"><i class="fa fa-clock-o"></i> Session TTL</label>
         <input type="number" id="node-config-input-sessionTtl" min="1" max="1814400" placeholder="1814400">
     </div>
-    <div class="form-row">
-        <label for="node-config-input-refreshReuseGraceSeconds"><i class="fa fa-clock-o"></i> Reuse Grace</label>
-        <input type="number" id="node-config-input-refreshReuseGraceSeconds" min="0" max="120" placeholder="30">
-    </div>
 </script>
 
 <script type="text/html" data-help-name="mcp-redis">
@@ -306,11 +301,9 @@
         <dd>MCP auth storage; use Redis for sessions that must survive restarts.</dd>
         <dt>Access TTL, Refresh TTL, Session TTL</dt>
         <dd>Seconds. Access tokens last at most 15 minutes, refresh sessions expire after at most 7 idle
-        days and at most 21 days in total; refresh never extends the total.</dd>
-        <dt>Reuse Grace</dt>
-        <dd>Seconds (0-120, default 30) during which an identical refresh retry gets the same result.
-        Zero disables it. Provider outages answer <code>temporarily_unavailable</code> without
-        revoking the session.</dd>
+        days and at most 21 days in total; refresh never extends the total. An identical refresh
+        retry within 30 seconds gets the same result; provider outages answer
+        <code>temporarily_unavailable</code> without revoking the session.</dd>
     </dl>
     <p>Sessions belong to the provider identity and slug, not to this node's ID: a replacement
     node with the same settings keeps users signed in. Changing provider, issuer, client ID,

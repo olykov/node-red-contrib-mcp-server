@@ -261,9 +261,8 @@ deadline. Access issuance is capped to the remaining session lifetime.
 The token endpoint accepts `grant_type=refresh_token`, `refresh_token`, `client_id`,
 and optional `resource`/`scope`. Client, resource and endpoint remain bound; scope
 can be narrowed but never increased. Refresh tokens are hashed in storage, rotated
-atomically and checked for reuse. `refreshReuseGraceSeconds` (Reuse Grace in the
-editor) defaults to 30 seconds and accepts integers from 0 to 120. Zero preserves
-strict single-use behavior. Within grace, an identical retry receives the same
+atomically and checked for reuse. Reuse grace is fixed at 30 seconds and is not
+configurable in the editor. Within grace, an identical retry receives the same
 token pair without calling the provider again. The cached response is encrypted
 with AES-256-GCM and bound to the namespace, session and previous token hash.
 Its storage TTL is bounded by grace and the original access/session expiry;

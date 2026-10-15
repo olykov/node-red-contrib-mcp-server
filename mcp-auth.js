@@ -137,8 +137,7 @@ module.exports = function (RED)
             const encryptionKey = refreshEncryptionKey(node.credentials && node.credentials[
                 node.provider === 'microsoft' ? 'microsoftRefreshKey' : 'oidcRefreshKey']);
             node.refreshStore = encryptionKey ? new RefreshTokenStore(() => node.getStorage(),
-                storageScope, encryptionKey, node.refreshTokenTtl, node.sessionTtl,
-                config.refreshReuseGraceSeconds) : null;
+                storageScope, encryptionKey, node.refreshTokenTtl, node.sessionTtl) : null;
         } catch (error)
         {
             node.configError = error.message;

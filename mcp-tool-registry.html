@@ -1,7 +1,7 @@
 <script type="text/javascript">
     RED.nodes.registerType('mcp-tool-registry', {
         category: 'mcp',
-        color: '#E6E0F8',
+        color: '#FDF0C2',
         defaults: {
             name: { value: '' },
             toolName: { value: '', required: true, validate: RED.validators.regex(/^[a-z][a-z0-9_]*$/) },
@@ -33,10 +33,10 @@
         },
         inputs: 0,
         outputs: 0,
-        paletteLabel: 'MCP tool',
+        paletteLabel: 'MCP Tool',
         icon: 'font-awesome/fa-wrench',
         label: function() {
-            return this.name || this.toolName || 'Tool Registry';
+            return this.name || this.toolName || 'MCP Tool';
         },
         labelStyle: function() {
             return this.name ? 'node_label_italic' : '';
@@ -204,13 +204,13 @@
     <p>Registers one MCP tool for one endpoint or for every endpoint.</p>
     <h3>Details</h3>
     <p>The tool is advertised when the flow starts and removed when the node stops. Calls reach the
-    selected MCP Flow Server output as <code>mcp-tool-execute</code>; the flow must answer with
+    selected MCP Server output as <code>mcp-tool-execute</code>; the flow must answer with
     <code>mcp-tool-response</code>.</p>
     <dl>
         <dt>Tool Name</dt>
         <dd>MCP tool name: lowercase letters, digits and underscores, starting with a letter.</dd>
         <dt>Endpoint</dt>
-        <dd>MCP path of the MCP Flow Server that offers the tool, so the binding survives copy, import
+        <dd>MCP path of the MCP Server that offers the tool, so the binding survives copy, import
         and node replacement. <code>Shared (All MCPs)</code> exposes it on every endpoint.</dd>
         <dt>Behavior</dt>
         <dd>MCP safety annotation: read only, add only, or change, delete or send.</dd>
