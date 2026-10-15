@@ -2,7 +2,7 @@
 
 `@olykov/node-red-mcp-server` is an upstream-first fork of `node-red-contrib-mcp-server@1.1.5`
 for MCP tool runtimes. The scoped name keeps an accidental install of the upstream package from
-replacing it. Requires Node-RED 5.0 or later and Node.js 18 or later.
+replacing it. Requires Node-RED 5.0 or later and Node.js 22.9 or later.
 
 The package exposes Node-RED flows as endpoint-scoped MCP servers with read-only admin helpers and package-level OAuth support.
 
@@ -65,6 +65,17 @@ cd ~/.node-red
 npm link @olykov/node-red-mcp-server
 ```
 
+## Upgrading to 3.1
+
+1. Set the `mcp-runtime` **Base URL**. Endpoints no longer derive OAuth URLs from request
+   headers and do not start without it.
+2. Give every `mcp-flow-server` at least one **Group**. An endpoint without groups no longer
+   admits every identity-provider user; it does not start.
+3. Check **Client Hosts**: entries now match exactly. Use `*.example.com` to allow subdomains.
+   Client metadata documents must contain a `client_id` equal to their URL.
+4. Users sign in once more: sign-in now binds the upstream `state` to the browser with a
+   cookie, so sign-ins started before the upgrade are rejected.
+
 ## Upgrading to 3.0
 
 3.0 renames the package and changes three contracts. Before deploying it:
@@ -88,7 +99,7 @@ the auth node ID; users sign in again.
 
 `mcp-runtime` owns the local HTTP listener: port, base URL and optional admin API settings. Endpoints start automatically on Node-RED's `flows:started` event. Responses do not enable cross-origin browser access.
 
-Base URL is the address clients and their browsers use to reach the MCP runtime,
+Base URL is required. It is the address clients and their browsers use to reach the MCP runtime,
 directly or through a proxy. It may be VPN-only; public internet exposure is not
 required. Changing that address requires updating the runtime configuration,
 provider callback registration and client endpoint URLs, not OAuth code.
@@ -126,7 +137,7 @@ requires a new login. Existing configurations must explicitly select a provider 
 there is no legacy-provider inference. Switching back to an identical configuration can reuse
 its unexpired tokens; switching is not a token-revocation mechanism.
 
-Client metadata hosts must be allow-listed. This prevents the authorization endpoint from fetching arbitrary user-provided URLs during client metadata validation.
+Client metadata hosts must be allow-listed. Entries match the host exactly; `*.example.com` allows its subdomains. This prevents the authorization endpoint from fetching arbitrary user-provided URLs during client metadata validation. Private and loopback addresses (including bracketed IPv6 and IPv4-mapped forms) are rejected, documents are limited to 8 KiB, and the document's `client_id` must equal its URL. Host names are not resolved, so allow only hosts you trust.
 
 `mcp-flow-server` defines one logical MCP endpoint: MCP name, HTTP path and allowed groups. Both runtime and OAuth auth configurations are required. There is no public or inherited authorization mode.
 
@@ -150,7 +161,7 @@ msg.payload = { executionId, result };
 
 The `mcp-flow-server` output emits only `mcp-tool-execute` messages. Return matching `mcp-tool-response` messages to the node input. The input also accepts `start`, `stop` and `restart` commands, which produce no output; endpoint state is shown in the node status and tool telemetry comes from `mcp-server-metrics`.
 
-`mcp-server-metrics` is a source node with no input and one output. Select the same `mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits one `mcp-tool-telemetry` message for each `tools/call` request across those endpoints, including failed calls and authentication failures. Its payload contains `endpoint`, `tool`, `mode`, `status`, `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. Unknown and unauthenticated tool names are reported as `unknown` to bound metric cardinality. It does not poll Node-RED or expose a metrics route.
+`mcp-server-metrics` is a source node with no input and one output. Select the same `mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits one `mcp-tool-telemetry` message for each `tools/call` request across those endpoints, including failed calls and authentication failures. Its payload contains `endpoint`, `tool`, `user`, `client`, `mode`, `status`, `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. `user` is the caller's e-mail (subject when no e-mail is known) and `client` the MCP client (`claude`, `codex`, `chatgpt` or the client host); unauthenticated calls report `unknown`. Unknown and unauthenticated tool names are reported as `unknown` to bound metric cardinality. `user` is personal data: use it as a metric label only while the set of users is small and the metrics store is access-controlled. It does not poll Node-RED or expose a metrics route.
 
 ## Configuration Notes
 
@@ -208,7 +219,7 @@ secrets stored outside credential fields: this is not a general-purpose secret d
 Default node, tab, group and chain inspection remain compact. Config references remain available
 through `node_configs`; no credential API is called.
 
-Config-node details retain ordinary property types and values. Node-RED's flow API excludes declared credential values; an unexpected `credentials` container is replaced with `[REDACTED]` defensively. No credential API is called. A property over 32 KiB is listed in `omittedProperties` instead of being returned; config properties are paginated by 40 fields and 64 KiB of values. Properties that a node author stored outside Node-RED's credential mechanism remain ordinary properties and are not automatically redacted.
+Config-node details retain ordinary property types and values. Node-RED's flow API excludes declared credential values; an unexpected `credentials` container is replaced with `[REDACTED]` defensively. No credential API is called. Named secret keys (at any depth), user information in URLs and all `env` values are replaced with `[REDACTED]` and listed in `redactedProperties`. A property over 32 KiB is listed in `omittedProperties` instead of being returned; config properties are paginated by 40 fields and 64 KiB of values.
 
 `get_flow` never requests the full `/flows` export. The tab index walks Node-RED's in-memory configuration once and caches only compact tab metadata until the next runtime deploy; it does not serialize or transfer full flows. `meta.cached` indicates whether the index was reused. The index excludes undeployed editor changes. Tab detail modes read `/flow/:id`; subflow modes read `/flow/global` and optionally the specified tab. These endpoints still make Node-RED prepare the selected flow before the palette applies its response limits. Responses cap lists at 40 items and edges at 80; Admin API reads have a 15-second timeout and a 32 MiB response limit. Tab indexing stops above 100,000 configuration nodes; graph inspection stops above 20,000 nodes or 100,000 wire visits. `meta` reports the source, scan count, returned node count and truncation.
 
@@ -239,7 +250,16 @@ callback on `127.0.0.1`, `[::1]` or `localhost` when CIMD declares `native` or o
 `application_type`. The host, path and query must remain identical; credentials,
 fragments and invalid ports are rejected by this exception. Explicitly non-native
 clients retain exact matching. The token endpoint always requires the exact URI,
-including the port, used in the authorization request.
+including the port, used in the authorization request. This relaxation is a deliberate
+deviation from exact matching: Claude Code publishes `http://localhost/callback` and
+`http://127.0.0.1/callback` without `application_type` and listens on a random port.
+
+PKCE `code_challenge` must be 43 base64url characters and `code_verifier` 43-128
+RFC 7636 characters. The upstream `state` is bound to the browser that started sign-in
+with an HttpOnly, SameSite=Lax cookie (`__Host-` prefixed on HTTPS); a callback without
+that cookie is rejected. Request bodies are limited (JSON 256 KiB, form 16 KiB).
+The package has no request rate limiter; apply one in the reverse proxy for
+internet-facing deployments.
 
 ## Refresh Tokens
 
@@ -292,9 +312,9 @@ sign-in after an ambiguous network failure.
 
 Grace is a bounded replay-detection tradeoff: possession of the old bearer token
 and its public client bindings can retrieve the cached pair during this window.
-Set grace to zero when strict replay rejection is required. Logs contain only
-`transient`, `provider_config`, `unknown`, `revoked`, `replay` or `grace_reuse`, never
-credential payloads.
+Grace is fixed at 30 seconds and is not configurable. Refresh outcomes are logged as
+`success`, `transient`, `provider_config`, `unknown`, `revoked`, `replay` or `grace_reuse`
+(see Audit Log), never with credential payloads.
 
 Every new rotation contacts the selected provider. Microsoft requires a freshly signed
 ID token with the expected issuer, audience, tenant, subject and current app roles.
@@ -308,6 +328,44 @@ tests use synthetic providers and a Redis adapter double; real provider, Redis
 restart and native client silent-refresh acceptance are separate rollout checks.
 No callback or proxy route change is needed for the refresh grant.
 
+## Audit Log
+
+Security events are written to the Node-RED log as one JSON line each, through the node that
+handled them. Lines never contain tokens, authorization codes, PKCE values or tool arguments;
+sessions appear only as a 12-character hash.
+
+| `event` | When | Main fields |
+| --- | --- | --- |
+| `oauth.sign_in` | callback completes or is refused | `outcome`, `reason`, `subject`, `client`, `endpoint` |
+| `oauth.token` | authorization code exchange | `outcome`, `reason`, `subject`, `client`, `session` |
+| `oauth.refresh` | refresh grant | `outcome`, `subject`, `client`, `session` |
+| `mcp.auth` | rejected token or insufficient access (missing tokens are not logged) | `reason`, `subject`, `client`, `ip` |
+| `mcp.tool_call` | every `tools/call` | `outcome`, `tool`, `subject`, `client`, `session`, `durationMs` |
+| `mcp.command` | `start`, `stop`, `restart` input | `command`, `endpoint` |
+
+The flow also receives the caller in `msg.mcp` (`subject`, `email`, `groups`, `client`) with
+each `mcp-tool-execute` message. Retention and forwarding of the Node-RED log belong to the
+deployment.
+
+## Environment Variables
+
+| Variable | Used by | Notes |
+| --- | --- | --- |
+| `MCP_REDIS_URL` (default name) | `mcp-redis` in env mode | Any `MCP_*` name can be configured. |
+| `MCP_*` | `mcp-redis` Password Env, `mcp-auth` Secret Env | Names outside `MCP_` are rejected. |
+| `NODE_RED_ADMIN_API_TOKEN` | `mcp-runtime` admin tools | Overrides the Admin Token credential when set. Give it read-only Node-RED permissions; `get_flow` only issues GET requests. |
+
+## Rollback
+
+Production pins the palette by commit. To roll back, pin the previous commit and redeploy,
+then undo the configuration that the newer version required:
+
+- 3.1 -> 3.0: no configuration change is required; Base URL, Groups and exact Client Hosts
+  remain valid. Users sign in again.
+- 3.0 -> 2.x: install `node-red-contrib-mcp-server` instead of `@olykov/node-red-mcp-server`,
+  restore `REDIS_URL` in `mcp-redis`, re-select registry endpoints (2.x binds by node ID),
+  and sign in again.
+
 ## Verification
 
 Run before commit:
@@ -315,6 +373,7 @@ Run before commit:
 ```bash
 npm test
 npm pack --dry-run
+npm audit --omit=dev
 ```
 
 Run source scans before publishing to confirm that sensitive material and environment-specific names are absent.

@@ -1,6 +1,6 @@
 {
   "name": "@olykov/node-red-mcp-server",
-  "version": "3.0.2-upstream.1",
+  "version": "3.1.0",
   "description": "Upstream-first Node-RED palette for exposing flows as MCP servers and tools.",
   "main": "mcp-flow-server.js",
   "scripts": {
@@ -12,13 +12,16 @@
     "model-context-protocol",
     "tools",
     "server",
-    "sse",
     "automation",
     "interactive",
     "visual-programming",
     "flow-based"
   ],
   "license": "MIT",
+  "author": "Oleksii Lykov",
+  "contributors": [
+    "D. Edens (upstream node-red-contrib-mcp-server)"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/olykov/node-red-contrib-mcp-server.git"
@@ -44,7 +47,7 @@
     "node-cache": "^5.1.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.9"
   },
   "files": [
     "*.js",

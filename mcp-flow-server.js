@@ -7,6 +7,8 @@ module.exports = function (RED)
     const { randomUUID: uuidv4 } = require('crypto');
     const NodeCache = require('node-cache');
     const { createAdminTools } = require('./lib/admin-tools');
+    const { auditLog } = require('./lib/audit');
+    const PACKAGE_VERSION = require('./package.json').version;
     const { authRouteSlug } = require('./lib/auth-provider');
     const {
         absoluteUrl,
@@ -104,8 +106,8 @@ module.exports = function (RED)
             isListening: false
         };
 
-        state.app.use(express.json({ limit: '10mb' }));
-        state.app.use(express.urlencoded({ extended: false, limit: '1mb' }));
+        state.app.use(express.json({ limit: '256kb' }));
+        state.app.use(express.urlencoded({ extended: false, limit: '16kb' }));
 
         state.app.get(/^\/\.well-known\/oauth-protected-resource(\/.*)?$/, (req, res) =>
         {
@@ -200,7 +202,8 @@ module.exports = function (RED)
                         item.authConfig && item.authConfig === auth && item.endpointId === record.endpointId);
                     if (node) return await exchangeClientCode(req, res, node);
                 }
-                if (owner && body.grant_type === 'refresh_token') owner.log('OAuth refresh: unknown');
+                if (owner && body.grant_type === 'refresh_token')
+                    auditLog(owner, 'oauth.refresh', { outcome: 'unknown', client: body.client_id, endpoint: owner.serverName });
                 res.status(400).json({ error: 'invalid_grant' });
             } catch (error)
             {
@@ -229,7 +232,11 @@ module.exports = function (RED)
                 directNode.error('MCP auth storage error: ' + error.message);
                 return res.status(503).json({ error: 'temporarily_unavailable' });
             }
-            if (!authResult.ok) return writeAuthFailure(req, res, directNode, authResult);
+            if (!authResult.ok)
+            {
+                directNode.auditDenied(req, authResult);
+                return writeAuthFailure(req, res, directNode, authResult);
+            }
             return res.status(405).json({ error: 'method_not_allowed', error_description: 'Use JSON-RPC POST for MCP requests' });
         });
 
@@ -252,10 +259,29 @@ module.exports = function (RED)
 
     function normalizeToolResult(result)
     {
+        if (result === undefined || result === null) return { content: [] };
+        if (Buffer.isBuffer(result)) return textResult(result.toString('utf8'));
         if (isMcpResult(result)) return result;
         if (Array.isArray(result)) return { content: result };
         if (typeof result === 'string') return textResult(result);
         return textResult(JSON.stringify(result));
+    }
+
+    function errorText(error)
+    {
+        if (typeof error === 'string') return error;
+        if (error && typeof error.message === 'string') return error.message;
+        return JSON.stringify(error);
+    }
+
+    // Bounded client label for metrics: the MCP client product, not its metadata URL.
+    function clientLabel(clientId)
+    {
+        let url;
+        try { url = new URL(String(clientId || '')); } catch (_) { return 'unknown'; }
+        if (url.hostname === 'claude.ai') return 'claude';
+        if (url.hostname === 'chatgpt.com') return url.pathname.includes('/codex/') ? 'codex' : 'chatgpt';
+        return url.hostname;
     }
 
     function responseBytes(res)
@@ -360,6 +386,12 @@ module.exports = function (RED)
                 throw new Error('MCP auth configuration is required');
             if (node.authConfig.configError)
                 throw new Error('MCP auth configuration is invalid: ' + node.authConfig.configError);
+            // OAuth metadata must not be derived from request headers.
+            if (!/^https?:\/\/[^/]+/.test(String(node.publicBaseUrl || '')))
+                throw new Error('MCP runtime Base URL is required');
+            // Deny by default: an endpoint without groups would admit every user of the identity provider.
+            if (!node.allowedGroups.length)
+                throw new Error('MCP endpoint Groups are required');
             const portState = getPortServer(node.serverPort);
             if (portState.runtimeId && portState.runtimeId !== node.runtimeId)
             {
@@ -405,13 +437,14 @@ module.exports = function (RED)
                 const authResult = await validateRequest(node, req);
                 if (!authResult.ok)
                 {
+                    node.auditDenied(req, authResult);
                     if (toolRequest && authResult.status === 401)
                         return writeToolAuthFailure(req, res, node, request.id);
                     return writeAuthFailure(req, res, node, authResult);
                 }
                 switch (request.method)
                 {
-                    case 'tools/call': handledToolCall = true; await node.handleToolCall(request, res); break;
+                    case 'tools/call': handledToolCall = true; await node.handleToolCall(request, res, authResult.claims); break;
                     default:
                         node.rpcError(res, request.id, -32601, 'Method not found: ' + request.method);
                 }
@@ -424,7 +457,7 @@ module.exports = function (RED)
                 if (toolRequest && !handledToolCall)
                 {
                     node.publishToolTelemetry({
-                        tool: 'unknown', mode: 'unknown', status: 'failed',
+                        tool: 'unknown', mode: 'unknown', status: 'failed', user: 'unknown', client: 'unknown',
                         durationMs: Number(process.hrtime.bigint() - started) / 1e6,
                         responseBytes: responseBytes(res), scannedNodes: null, cached: null
                     });
@@ -475,7 +508,17 @@ module.exports = function (RED)
             res.json({ jsonrpc: '2.0', id: request.id, result: { tools } });
         };
 
-        node.handleToolCall = async function (request, res)
+        // A missing token is the normal start of sign-in; only rejected credentials are audit events.
+        node.auditDenied = function (req, result)
+        {
+            if (result.error === 'missing_token') return;
+            const claims = result.claims || {};
+            auditLog(node, 'mcp.auth', { outcome: 'denied', reason: result.error, subject: claims.subject,
+                client: claims.client, session: claims.session, endpoint: node.serverName,
+                ip: (req.headers && req.headers['x-forwarded-for']) || (req.socket && req.socket.remoteAddress) });
+        };
+
+        node.handleToolCall = async function (request, res, claims = {})
         {
             const params = request.params || {};
             const name = params.name;
@@ -498,7 +541,7 @@ module.exports = function (RED)
                 const tool = node.registeredTools().find(candidate => candidate.name === name);
                 if (!tool) return node.rpcError(res, request.id, -32602, 'Tool not found: ' + name);
                 toolName = tool.name;
-                const result = await node.executeToolFlow(tool, args);
+                const result = await node.executeToolFlow(tool, args, claims);
                 const normalized = normalizeToolResult(result);
                 res.json({ jsonrpc: '2.0', id: request.id, result: normalized });
                 status = normalized.isError ? 'failed' : 'success';
@@ -509,8 +552,13 @@ module.exports = function (RED)
             finally
             {
                 const meta = adminResult && adminResult.structuredContent && adminResult.structuredContent.meta;
+                auditLog(node, 'mcp.tool_call', { outcome: status, tool: toolName, endpoint: node.serverName,
+                    subject: claims.subject, client: claims.client, session: claims.session,
+                    durationMs: Math.round(Number(process.hrtime.bigint() - started) / 1e6) });
                 node.publishToolTelemetry({
                     tool: toolName,
+                    user: claims.email || claims.subject || 'unknown',
+                    client: clientLabel(claims.client),
                     mode: adminTool && adminResult && adminResult.structuredContent ? adminResult.structuredContent.mode : (adminTool ? 'unknown' : 'flow'),
                     status,
                     durationMs: Number(process.hrtime.bigint() - started) / 1e6,
@@ -530,17 +578,18 @@ module.exports = function (RED)
                 result: {
                     protocolVersion: '2024-11-05',
                     capabilities,
-                    serverInfo: { name: node.serverName, version: '1.0.0', description: 'Node-RED MCP Flow Server' }
+                    serverInfo: { name: node.serverName, version: PACKAGE_VERSION, description: 'Node-RED MCP Flow Server' }
                 }
             });
         };
 
-        node.executeToolFlow = function (tool, args)
+        node.executeToolFlow = function (tool, args, claims = {})
         {
             return new Promise((resolve, reject) =>
             {
                 const executionId = uuidv4();
-                const executionMsg = { topic: 'mcp-tool-execute', payload: { toolName: tool.name, arguments: args, executionId } };
+                const executionMsg = { topic: 'mcp-tool-execute', payload: { toolName: tool.name, arguments: args, executionId },
+                    mcp: { subject: claims.subject || '', email: claims.email || '', groups: claims.groups || [], client: claims.client || '' } };
                 const timeout = setTimeout(() =>
                 {
                     pendingExecutions.delete(executionId);
@@ -575,7 +624,7 @@ module.exports = function (RED)
                     portState.httpServer.removeListener('error', startError);
                     if (closed) return;
                     node.isRunning = true;
-                    node.status({ fill: 'green', shape: 'dot', text: 'running :' + node.serverPort + node.serverPath });
+                    node.status({ fill: 'green', shape: 'dot', text: 'running :' + node.serverPort });
                     serverInstances.set(node.serverId, {
                         nodeId: String(node.id),
                         runtimeId: String(node.runtimeId || ''),
@@ -676,12 +725,13 @@ module.exports = function (RED)
                 }
                 clearTimeout(pending.timeout);
                 pendingExecutions.delete(msg.payload.executionId);
-                if (msg.payload.error) pending.reject(new Error(msg.payload.error));
+                if (msg.payload.error) pending.reject(new Error(errorText(msg.payload.error)));
                 else pending.resolve(msg.payload.result);
                 return done();
             }
 
             const command = msg.topic || (msg.payload && msg.payload.command);
+            if (['start', 'stop', 'restart'].includes(command)) auditLog(node, 'mcp.command', { command, endpoint: node.serverName });
             switch (command)
             {
                 case 'start': return node.startServer(finished);

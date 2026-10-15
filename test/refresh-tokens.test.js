@@ -8,7 +8,12 @@ const { generateKeyPair, exportJWK, createLocalJWKSet, SignJWT } = require('jose
 const { RefreshTokenStore, boundedTtl, reuseGrace, ACCESS_TTL, REFRESH_IDLE_TTL, SESSION_TTL } = require('../lib/refresh-tokens');
 const { MemoryAuthStorage, RedisAuthStorage } = require('../lib/auth-storage');
 const { exchangeClientCode, exchangeRefreshToken, completeAuthorization, beginAuthorization,
-    authorizeMetadata, validateRequest, sha256Base64Url } = require('../lib/mcp-auth');
+    authorizeMetadata, validateRequest, sha256Base64Url, bindingCookieName, hashToken } = require('../lib/mcp-auth');
+const VERIFIER = 'test-verifier-0123456789abcdefghijklmnopqrstuvwxyz';
+const refreshEvent = (logs, outcome) => logs.some(line => {
+    try { const entry = JSON.parse(line); return entry.event === 'oauth.refresh' && entry.outcome === outcome; }
+    catch (_) { return false; }
+});
 
 const key = '12'.repeat(32);
 const tenant = '00000000-0000-0000-0000-000000000001';
@@ -73,20 +78,21 @@ async function setup(t, options = {}) {
     });
     t.mock.method(axios, 'get', async path => {
         if (path === discovery.userinfo_endpoint) return { data: { sub: state.subject, groups: state.groups } };
-        return { data: { redirect_uris: ['http://localhost/callback'] } };
+        return { data: { client_id: path, redirect_uris: ['http://localhost/callback'] } };
     });
     const code = async (scopes = ['offline_access']) => {
         await auth.writeState('test-state', { client_id: 'https://client.example.test/metadata',
-            redirect_uri: 'http://localhost/callback', code_challenge: sha256Base64Url('verifier'),
+            redirect_uri: 'http://localhost/callback', code_challenge: sha256Base64Url(VERIFIER), browserBinding: hashToken('test-binding'),
             scope: scopes.join(' '), resource: url + node.serverPath, endpointId: node.endpointId,
             nonce: 'initial-nonce', client_state: 'client-state' });
         const callback = response();
-        await completeAuthorization({ query: { code: 'provider-code', state: 'test-state' } }, callback, node);
+        await completeAuthorization({ headers: { cookie: bindingCookieName({ headers: {} }, node, 'test-state') + '=test-binding' },
+            query: { code: 'provider-code', state: 'test-state' } }, callback, node);
         assert.equal(callback.statusCode, 200);
         const token = response();
         await exchangeClientCode({ body: { grant_type: 'authorization_code',
             code: new URL(callback.location).searchParams.get('code'), client_id: 'https://client.example.test/metadata',
-            redirect_uri: 'http://localhost/callback', code_verifier: 'verifier' } }, token, node);
+            redirect_uri: 'http://localhost/callback', code_verifier: VERIFIER } }, token, node);
         return token;
     };
     const refresh = async (token, extra = {}) => {
@@ -155,7 +161,7 @@ describe('rotating refresh tokens', () => {
         for (const scope of ['openid', 'openid offline_access']) {
             const res = response();
             await beginAuthorization({ query: { response_type: 'code', client_id: 'https://client.example.test/metadata',
-                redirect_uri: 'http://localhost/callback', code_challenge_method: 'S256', code_challenge: 'challenge',
+                redirect_uri: 'http://localhost/callback', code_challenge_method: 'S256', code_challenge: sha256Base64Url(VERIFIER),
                 state: 'state', scope } }, res, context.node);
             const actual = new URL(res.location).searchParams.get('scope').split(' ');
             assert.equal(actual.includes('offline_access'), scope.includes('offline_access'));
@@ -166,7 +172,7 @@ describe('rotating refresh tokens', () => {
         const context = await setup(t);
         const res = response();
         await beginAuthorization({ query: { response_type: 'code', client_id: 'https://client.example.test/metadata',
-            redirect_uri: 'http://localhost/callback', code_challenge_method: 'S256', code_challenge: 'challenge',
+            redirect_uri: 'http://localhost/callback', code_challenge_method: 'S256', code_challenge: sha256Base64Url(VERIFIER),
             state: 'state', scope: 'custom:write' } }, res, context.node);
         assert.equal(res.statusCode, 400);
         assert.equal(res.body.error, 'invalid_scope');
@@ -227,7 +233,7 @@ describe('rotating refresh tokens', () => {
         const result = await validateRequest(context.node, { headers: { authorization: 'Bearer ' + next.body.access_token } });
         assert.equal(result.ok, false);
         assert.equal(context.state.posts.length, 2);
-        assert.ok(context.state.logs.includes('OAuth refresh: replay'));
+        assert.ok(refreshEvent(context.state.logs, 'replay'));
     });
 
     it('returns the same encrypted rotation result under concurrent calls', async t => {
@@ -238,7 +244,7 @@ describe('rotating refresh tokens', () => {
         assert.equal(results[1].statusCode, 200);
         assert.deepEqual(results[0].body, results[1].body);
         assert.equal(context.state.posts.length, 2);
-        assert.ok(context.state.logs.includes('OAuth refresh: grace_reuse'));
+        assert.ok(refreshEvent(context.state.logs, 'grace_reuse'));
         assert.ok(await context.auth.refreshStore.read(results[0].body.refresh_token));
         const stored = JSON.stringify([...context.auth.getStorage().items]);
         for (const token of Object.values(results[0].body).filter(value => typeof value === 'string' && value.length > 30))
@@ -291,7 +297,8 @@ describe('rotating refresh tokens', () => {
             context.state.fail = false;
             assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 200);
         }
-        assert.ok(context.state.logs.every(message => /^OAuth refresh: (transient|revoked|replay|grace_reuse)$/.test(message)));
+        assert.ok(context.state.logs.every(message => /^\{"event":"oauth\.(refresh|token|sign_in)"/.test(message)));
+        assert.ok(context.state.logs.every(message => !/upstream-refresh|upstream-access|provider-code|test-binding/.test(message)));
     });
 
     it('revokes for definitive provider authorization failures', async t => {
@@ -337,7 +344,7 @@ describe('rotating refresh tokens', () => {
             const failed = await context.refresh(initial.body.refresh_token);
             assert.equal(failed.statusCode, 503);
             assert.equal(failed.body.error, 'temporarily_unavailable');
-            assert.ok(context.state.logs.includes('OAuth refresh: provider_config'));
+            assert.ok(refreshEvent(context.state.logs, 'provider_config'));
             context.state.fail = false;
             assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 200);
         }

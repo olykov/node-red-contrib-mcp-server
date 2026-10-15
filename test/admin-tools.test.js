@@ -511,11 +511,12 @@ describe('lib/admin-tools', () => {
         });
     });
 
-    it('lists and inspects tab configs while redacting only the credential container', async () => {
+    it('lists and inspects tab configs while redacting credentials, private keys, URL userinfo and env values', async () => {
         const flow = {
             id: 'tab1', nodes: [], configs: [{
                 id: 'cfg1', type: 'service-config', name: 'Primary', host: 'example.test', port: 1234,
-                enabled: false, options: { retry: [1, 2] }, password: 'ordinary-property',
+                enabled: false, options: { retry: [1, 2], apiKey: 'nested-secret' }, password: 'ordinary-property',
+                url: 'redis://user:url-secret@example.test:6379/0', env: [{ name: 'API', type: 'str', value: 'env-secret' }],
                 credentials: { username: 'credential-text', password: 'credential-password' }
             }]
         };
@@ -526,10 +527,14 @@ describe('lib/admin-tools', () => {
         const response = await tools.callTool('get_flow', { mode: 'config', id: 'tab1', configId: 'cfg1' });
         assert.deepEqual({ ...response.structuredContent.config.properties }, {
             name: 'Primary', host: 'example.test', port: 1234, enabled: false,
-            options: { retry: [1, 2] }, password: 'ordinary-property'
+            options: { retry: [1, 2], apiKey: '[REDACTED]' }, password: '[REDACTED]',
+            url: 'redis://[REDACTED]@example.test:6379/0', env: [{ name: 'API', type: 'str', value: '[REDACTED]' }]
         });
+        assert.deepEqual([...response.structuredContent.config.redactedProperties].sort(), ['env', 'options.apiKey', 'password', 'url']);
+        for (const secret of ['nested-secret', 'ordinary-property', 'url-secret', 'env-secret'])
+            assert.ok(!JSON.stringify(response).includes(secret), secret);
         assert.equal(response.structuredContent.config.credentials, '[REDACTED]');
-        assert.equal(response.structuredContent.totalProperties, 6);
+        assert.equal(response.structuredContent.totalProperties, 8);
         assert.ok(!JSON.stringify(response).includes('credential-text'));
         assert.ok(!JSON.stringify(response).includes('credential-password'));
         assert.equal(response.content[0].text, JSON.stringify(response.structuredContent));

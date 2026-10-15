@@ -4,7 +4,7 @@
         "type": "tab",
         "label": "MCP flow server example",
         "disabled": false,
-        "info": "One MCP endpoint with one tool implemented as a flow.\n\nBefore deploying, open **MCP example auth** and set your identity provider (issuer, client ID, client secret) and Client Hosts, and register `https://<your-host>/oauth/example-login/callback` with the provider.\n\nStorage is in memory for this example: every restart signs users out. Use Redis for real use."
+        "info": "One MCP endpoint with one tool implemented as a flow.\n\nBefore deploying, set the Base URL in **MCP example runtime**, the Groups on **Example endpoint**, and open **MCP example auth** to set your identity provider (issuer, client ID, client secret) and Client Hosts, and register `https://<your-host>/oauth/example-login/callback` with the provider.\n\nStorage is in memory for this example: every restart signs users out. Use Redis for real use."
     },
     {
         "id": "mcp-example-note",
@@ -22,7 +22,7 @@
         "name": "MCP example runtime",
         "runtimeName": "mcp-example",
         "serverPort": 8001,
-        "publicBaseUrl": "",
+        "publicBaseUrl": "https://nodered.example.com",
         "adminPort": "",
         "adminEndpointPath": ""
     },
@@ -69,7 +69,7 @@
         "auth": "mcp-example-auth",
         "serverName": "example",
         "serverPath": "/mcp/example",
-        "allowedGroups": "",
+        "allowedGroups": "MCP.User",
         "x": 170,
         "y": 120,
         "wires": [

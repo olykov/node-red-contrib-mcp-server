@@ -22,7 +22,7 @@ module.exports = function (RED)
 
         if (!unsubscribe)
         {
-            node.status({ fill: 'red', shape: 'ring', text: 'duplicate metrics node' });
+            node.status({ fill: 'red', shape: 'ring', text: 'duplicate' });
             node.error('Only one MCP Server Metrics node is allowed per runtime');
             return;
         }

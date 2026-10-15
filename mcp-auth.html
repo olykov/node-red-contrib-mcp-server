@@ -1,4 +1,5 @@
 <script type="text/javascript">
+(function() {
     // properties.md: validators read the edit dialog first and fall back to the saved node.
     function mcpRedisMode(node) {
         var input = $('#node-config-input-mode');
@@ -110,6 +111,7 @@
             updateRedirectUrl();
         }
     });
+})();
 </script>
 
 <script type="text/html" data-template-name="mcp-redis">
@@ -138,11 +140,11 @@
     </div>
     <div class="form-row mcp-redis-manual-row">
         <label for="node-config-input-port"><i class="fa fa-plug"></i> Port</label>
-        <input type="number" id="node-config-input-port" min="1" max="65535" placeholder="6379">
+        <input type="text" id="node-config-input-port" placeholder="6379">
     </div>
     <div class="form-row mcp-redis-manual-row">
         <label for="node-config-input-db"><i class="fa fa-list-ol"></i> DB</label>
-        <input type="number" id="node-config-input-db" min="0" placeholder="0">
+        <input type="text" id="node-config-input-db" placeholder="0">
     </div>
     <div class="form-row mcp-redis-manual-row">
         <label for="node-config-input-tls"><i class="fa fa-lock"></i> TLS</label>
@@ -242,15 +244,15 @@
     </div>
     <div class="form-row">
         <label for="node-config-input-accessTokenTtl"><i class="fa fa-clock-o"></i> Access TTL</label>
-        <input type="number" id="node-config-input-accessTokenTtl" min="1" max="900" placeholder="900">
+        <input type="text" id="node-config-input-accessTokenTtl" placeholder="900">
     </div>
     <div class="form-row">
         <label for="node-config-input-refreshTokenTtl"><i class="fa fa-clock-o"></i> Refresh TTL</label>
-        <input type="number" id="node-config-input-refreshTokenTtl" min="1" max="604800" placeholder="604800">
+        <input type="text" id="node-config-input-refreshTokenTtl" placeholder="604800">
     </div>
     <div class="form-row">
         <label for="node-config-input-sessionTtl"><i class="fa fa-clock-o"></i> Session TTL</label>
-        <input type="number" id="node-config-input-sessionTtl" min="1" max="1814400" placeholder="1814400">
+        <input type="text" id="node-config-input-sessionTtl" placeholder="1814400">
     </div>
 </script>
 
@@ -296,7 +298,8 @@
         <dd>64 hex characters (<code>openssl rand -hex 32</code>) that encrypt stored provider
         refresh tokens. Without it no refresh tokens are issued.</dd>
         <dt>Client Hosts</dt>
-        <dd>Hosts allowed to serve MCP client metadata documents, for example <code>claude.ai</code>.</dd>
+        <dd>Hosts allowed to serve MCP client metadata documents, matched exactly, for example
+        <code>claude.ai</code>; use <code>*.example.com</code> to allow subdomains.</dd>
         <dt>Storage</dt>
         <dd>MCP auth storage; use Redis for sessions that must survive restarts.</dd>
         <dt>Access TTL, Refresh TTL, Session TTL</dt>

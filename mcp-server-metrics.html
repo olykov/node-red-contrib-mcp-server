@@ -43,6 +43,10 @@
         <dd>Tool name, or <code>unknown</code>.</dd>
         <dt>payload.mode <span class="property-type">string</span></dt>
         <dd><code>flow</code>, an admin-tool mode, or <code>unknown</code>.</dd>
+        <dt>payload.user <span class="property-type">string</span></dt>
+        <dd>Caller e-mail (or subject), or <code>unknown</code> when the call was not authenticated.</dd>
+        <dt>payload.client <span class="property-type">string</span></dt>
+        <dd>MCP client: <code>claude</code>, <code>codex</code>, <code>chatgpt</code>, another client host, or <code>unknown</code>.</dd>
         <dt>payload.status <span class="property-type">string</span></dt>
         <dd><code>success</code> or <code>failed</code>.</dd>
         <dt>payload.durationMs <span class="property-type">number</span></dt>
@@ -56,6 +60,7 @@
     </dl>
     <h3>Details</h3>
     <p>Use one metrics node per runtime. The payload never contains tool arguments, results,
-    credentials or flow content. Connect the output to metric writer nodes; this node does not
+    credentials or flow content. <code>user</code> is personal data: use it as a metric label only
+    while the set of users is small, and keep the metrics store access-controlled. Connect the output to metric writer nodes; this node does not
     expose a metrics endpoint.</p>
 </script>

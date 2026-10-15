@@ -7,7 +7,7 @@
             serverPort: { value: 8001, required: true, validate: function(v) {
                 return RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536;
             } },
-            publicBaseUrl: { value: '' },
+            publicBaseUrl: { value: '', required: true, validate: RED.validators.regex(/^https?:\/\/[^\/]+/) },
             adminPort: { value: 1880, required: false, validate: function(v) {
                 return v === '' || (RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536);
             } },
@@ -31,7 +31,7 @@
             auth: { value: '', type: 'mcp-auth', required: true },
             serverName: { value: 'node-red-mcp-server', required: true },
             serverPath: { value: '/mcp', required: true },
-            allowedGroups: { value: '' }
+            allowedGroups: { value: '', required: true }
         },
         inputs: 1,
         outputs: 1,
@@ -84,7 +84,7 @@
     </div>
     <div class="form-row">
         <label for="node-config-input-serverPort"><i class="fa fa-plug"></i> Port</label>
-        <input type="number" id="node-config-input-serverPort" min="1" max="65535" placeholder="8001">
+        <input type="text" id="node-config-input-serverPort" placeholder="8001">
     </div>
     <div class="form-row">
         <label for="node-config-input-publicBaseUrl"><i class="fa fa-link"></i> Base URL</label>
@@ -96,7 +96,7 @@
 
     <div class="form-row">
         <label for="node-config-input-adminPort"><i class="fa fa-plug"></i> Admin Port</label>
-        <input type="number" id="node-config-input-adminPort" min="1" max="65535" placeholder="1880">
+        <input type="text" id="node-config-input-adminPort" placeholder="1880">
     </div>
     <div class="form-row">
         <label for="node-config-input-adminToken"><i class="fa fa-key"></i> Admin Token</label>
@@ -139,7 +139,7 @@
     </div>
     <div class="form-row">
         <label for="node-input-allowedGroups"><i class="fa fa-users"></i> Groups</label>
-        <input type="text" id="node-input-allowedGroups" placeholder="Optional comma- or space-separated groups">
+        <input type="text" id="node-input-allowedGroups" placeholder="Required, comma- or space-separated">
     </div>
 
 
@@ -183,8 +183,8 @@
         <dt>Port</dt>
         <dd>Local HTTP port of the listener.</dd>
         <dt>Base URL</dt>
-        <dd>Client-facing base URL used in OAuth metadata and challenges, directly or through a proxy.
-        It may be reachable only over VPN. If empty, request headers are used.</dd>
+        <dd>Required. Client-facing base URL used in OAuth metadata and challenges, directly or through
+        a proxy. It may be reachable only over VPN. Endpoints do not start without it.</dd>
         <dt>Admin Port</dt>
         <dd>Local Node-RED Admin API port used by the read-only admin tools.</dd>
         <dt>Admin Token</dt>
@@ -209,12 +209,14 @@
         <dt>topic <span class="property-type">string</span></dt>
         <dd><code>mcp-tool-response</code> to answer a tool call, or a command:
         <code>start</code>, <code>stop</code> or <code>restart</code>. Commands produce no output.</dd>
+        <dt class="optional">payload.command <span class="property-type">string</span></dt>
+        <dd>Command used when <code>topic</code> is not set.</dd>
         <dt class="optional">payload.executionId <span class="property-type">string</span></dt>
         <dd>For <code>mcp-tool-response</code>: the id received in the tool call.</dd>
         <dt class="optional">payload.result <span class="property-type">any</span></dt>
         <dd>Tool result: an MCP result object, content array, string or JSON value.</dd>
-        <dt class="optional">payload.error <span class="property-type">string</span></dt>
-        <dd>Error text; the tool call fails with this message.</dd>
+        <dt class="optional">payload.error <span class="property-type">string | Error</span></dt>
+        <dd>Error text or object; the tool call fails with this message.</dd>
     </dl>
     <h3>Outputs</h3>
     <dl class="message-properties">
@@ -222,6 +224,8 @@
         <dd>Always <code>mcp-tool-execute</code>.</dd>
         <dt>payload <span class="property-type">object</span></dt>
         <dd><code>toolName</code>, <code>arguments</code> and <code>executionId</code>.</dd>
+        <dt>mcp <span class="property-type">object</span></dt>
+        <dd>Caller identity: <code>subject</code>, <code>email</code>, <code>groups</code>, <code>client</code>.</dd>
     </dl>
     <h3>Details</h3>
     <p>The output carries only tool calls. Endpoint state is shown in the node status; tool
@@ -238,7 +242,8 @@
         <dt>MCP Path</dt>
         <dd>HTTP JSON-RPC path, for example <code>/mcp/ops</code>. Only POST is served.</dd>
         <dt>Groups</dt>
-        <dd>Optional groups separated by commas or spaces. A user needs at least one of them.</dd>
+        <dd>Required groups separated by commas or spaces. A user needs at least one of them; an
+        endpoint without groups does not start.</dd>
     </dl>
     <h3>References</h3>
     <ul>

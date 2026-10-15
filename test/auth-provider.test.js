@@ -8,7 +8,10 @@ const vm = require('node:vm');
 const axios = require('axios');
 const { generateKeyPair, exportJWK, createLocalJWKSet, SignJWT } = require('jose');
 const { providerSettings, authRouteSlug } = require('../lib/auth-provider');
-const { beginAuthorization, completeAuthorization, exchangeClientCode, validateRequest, oidcDiscovery, sha256Base64Url, authorizeMetadata } = require('../lib/mcp-auth');
+const { beginAuthorization, completeAuthorization, exchangeClientCode, validateRequest, oidcDiscovery, sha256Base64Url, authorizeMetadata,
+    bindingCookieName, hashToken } = require('../lib/mcp-auth');
+const VERIFIER = 'test-verifier-0123456789abcdefghijklmnopqrstuvwxyz';
+
 
 const tenant = '00000000-0000-0000-0000-000000000001';
 const client = '00000000-0000-0000-0000-000000000002';
@@ -151,8 +154,8 @@ describe('Microsoft signed-token authorization', () => {
         const node = { endpointId: 'endpoint-test', authConfig: auth,
             publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test', allowedGroups: options.allowedGroups || 'MCP.Reader' };
         const state = { client_id: 'https://client.example.test/metadata.json', redirect_uri: 'https://client.example.test/callback',
-            client_state: 'client-state', code_challenge: sha256Base64Url('test-verifier'),
-            resource: 'https://mcp.example.test/mcp/test', nonce: 'test-nonce' };
+            client_state: 'client-state', code_challenge: sha256Base64Url(VERIFIER),
+            resource: 'https://mcp.example.test/mcp/test', nonce: 'test-nonce', browserBinding: hashToken('test-binding') };
         await auth.writeState('state', state);
         const token = await new SignJWT({ sub: 'test-subject', tid: tenant, nonce: 'test-nonce', ...claims })
             .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
@@ -180,7 +183,8 @@ describe('Microsoft signed-token authorization', () => {
         };
         const res = response();
         try {
-            await completeAuthorization({ headers: {}, query: { code: 'upstream-code', state: 'state' } }, res, node);
+            await completeAuthorization({ headers: { cookie: bindingCookieName({ headers: {} }, node, 'state') + '=test-binding' },
+                query: { code: 'upstream-code', state: 'state' } }, res, node);
             assert.equal(await auth.readState('state'), null);
             return { res, auth, node, state, calls };
         } finally { axios.get = get; axios.post = post; }
@@ -196,7 +200,7 @@ describe('Microsoft signed-token authorization', () => {
         assert.equal(record.email, '');
         const tokenRes = response();
         await exchangeClientCode({ body: { grant_type: 'authorization_code', code, client_id: state.client_id,
-            redirect_uri: state.redirect_uri, code_verifier: 'test-verifier' } }, tokenRes, node);
+            redirect_uri: state.redirect_uri, code_verifier: VERIFIER } }, tokenRes, node);
         assert.equal(tokenRes.statusCode, 200);
         assert.equal(await auth.readCode(code), null);
         const req = { headers: { authorization: 'Bearer ' + tokenRes.body.access_token } };
@@ -244,11 +248,11 @@ describe('Microsoft signed-token authorization', () => {
         const get = axios.get;
         const auth = runtime()({ ...microsoft, allowedClientHosts: 'client.example.test' });
         auth.discovery = { expiresAt: Date.now() + 10000, value: { authorization_endpoint: auth.issuerUrl + '/authorize' } };
-        axios.get = async () => ({ data: { redirect_uris: ['https://client.example.test/callback'] } });
+        axios.get = async () => ({ data: { client_id: 'https://client.example.test/metadata.json', redirect_uris: ['https://client.example.test/callback'] } });
         const res = response();
         try {
             await beginAuthorization({ headers: {}, query: { response_type: 'code', code_challenge_method: 'S256',
-                code_challenge: 'challenge', client_id: 'https://client.example.test/metadata.json',
+                code_challenge: sha256Base64Url(VERIFIER), client_id: 'https://client.example.test/metadata.json',
                 redirect_uri: 'https://client.example.test/callback', state: 'client-state', scope: 'openid profile email' }
             }, res, { endpointId: 'test', authConfig: auth, publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test' });
             const url = new URL(res.location);
@@ -264,11 +268,11 @@ describe('native loopback redirects', () => {
         const get = axios.get;
         const auth = runtime()({ ...microsoft, allowedClientHosts: 'client.example.test' });
         auth.discovery = { expiresAt: Date.now() + 10000, value: { authorization_endpoint: auth.issuerUrl + '/authorize' } };
-        axios.get = async () => ({ data: metadata });
+        axios.get = async () => ({ data: { client_id: 'https://client.example.test/metadata.json', ...metadata } });
         const res = response();
         try {
             await beginAuthorization({ headers: {}, query: {
-                response_type: 'code', code_challenge_method: 'S256', code_challenge: 'challenge',
+                response_type: 'code', code_challenge_method: 'S256', code_challenge: sha256Base64Url(VERIFIER),
                 client_id: 'https://client.example.test/metadata.json', redirect_uri: redirectUri,
                 state: 'client-state', ...overrides
             } }, res, { authConfig: auth, endpointId: 'test-endpoint', serverPath: '/mcp/test', publicBaseUrl: 'https://mcp.example.test' });
@@ -345,7 +349,7 @@ describe('native loopback redirects', () => {
         await auth.writeCode('test-code', state);
         const result = response();
         await exchangeClientCode({ body: { grant_type: 'authorization_code', code: 'test-code',
-            client_id: state.client_id, redirect_uri: 'http://127.0.0.1:56430/callback/client', code_verifier: 'verifier' } },
+            client_id: state.client_id, redirect_uri: 'http://127.0.0.1:56430/callback/client', code_verifier: VERIFIER } },
         result, { authConfig: auth });
         assert.equal(result.statusCode, 400);
         assert.equal(result.body.error, 'invalid_grant');

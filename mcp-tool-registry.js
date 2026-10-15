@@ -128,8 +128,8 @@ module.exports = function (RED)
             RED.events.emit('mcp-tool-register', toolDefinition);
 
             node.isRegistered = true;
-            node.status({ fill: 'green', shape: 'dot', text: binding.serverName ? `registered: ${binding.serverName}` : 'registered: all' });
-            node.log(`Tool "${node.toolName}" registered successfully`);
+            node.status({ fill: 'green', shape: 'dot', text: binding.endpointPath ? 'registered' : 'shared' });
+            node.debug(`Tool "${node.toolName}" registered`);
         };
 
         node.unregisterTool = function ()
@@ -145,7 +145,7 @@ module.exports = function (RED)
 
             node.isRegistered = false;
             node.status({ fill: 'grey', shape: 'ring', text: 'unregistered' });
-            node.log(`Tool "${node.toolName}" unregistered`);
+            node.debug(`Tool "${node.toolName}" unregistered`);
         };
 
         let closed = false;

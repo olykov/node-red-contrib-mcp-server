@@ -21,6 +21,7 @@ function buildRegistry(config = {}, nodes = {}) {
                 node.send = msg => node.sent.push(msg);
                 node.status = status => node.statuses.push(status);
                 node.log = message => node.logs.push(message);
+                node.debug = message => node.logs.push(message);
                 node.warn = message => node.warnings.push(message);
             },
             registerType(name, ctor) { types[name] = ctor; },

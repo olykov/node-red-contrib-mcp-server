@@ -13,14 +13,20 @@ const {
     isPrivateHost,
     protectedResourceMetadata,
     sha256Base64Url,
-    verifyIdToken
+    verifyIdToken,
+    hashToken,
+    bindingCookieName
 } = require('../lib/mcp-auth');
+const VERIFIER = 'test-verifier-0123456789abcdefghijklmnopqrstuvwxyz';
+const cookieOf = res => (res.cookies || []).map(cookie => cookie.split(';')[0]).join('; ');
 
 function mockRes() {
     return {
         statusCode: 200,
         body: undefined,
         location: '',
+        cookies: [],
+        append(name, value) { if (name === 'Set-Cookie') this.cookies.push(value); return this; },
         status(code) { this.statusCode = code; return this; },
         json(body) { this.body = body; return this; },
         redirect(location) { this.location = location; return this; }
@@ -132,7 +138,7 @@ describe('mcp auth token exchange', () => {
 
         axios.get = async url => {
             if (url === 'https://client.example.test/metadata.json') {
-                return { data: { redirect_uris: ['https://client.example.test/callback'] } };
+                return { data: { client_id: url, redirect_uris: ['https://client.example.test/callback'] } };
             }
             if (url === 'https://issuer.example.test/oidc/.well-known/openid-configuration') {
                 return { data: {
@@ -160,7 +166,7 @@ describe('mcp auth token exchange', () => {
                 query: {
                     response_type: 'code',
                     code_challenge_method: 'S256',
-                    code_challenge: 'challenge',
+                    code_challenge: sha256Base64Url(VERIFIER),
                     client_id: 'https://client.example.test/metadata.json',
                     redirect_uri: 'https://client.example.test/callback',
                     state: 'client-state',
@@ -177,7 +183,7 @@ describe('mcp auth token exchange', () => {
 
             const callbackRes = mockRes();
             await completeAuthorization({
-                headers: { host: 'mcp.example.test', 'x-forwarded-proto': 'https' },
+                headers: { host: 'mcp.example.test', 'x-forwarded-proto': 'https', cookie: cookieOf(authorizeRes) },
                 query: { code: 'upstream-code', state: store.state.state }
             }, callbackRes, node);
 
@@ -195,7 +201,7 @@ describe('mcp auth token exchange', () => {
             store.code = null;
             store.state.deleted = false;
             await assert.rejects(() => completeAuthorization({
-                headers: { host: 'mcp.example.test', 'x-forwarded-proto': 'https' },
+                headers: { host: 'mcp.example.test', 'x-forwarded-proto': 'https', cookie: cookieOf(authorizeRes) },
                 query: { code: 'upstream-code', state: store.state.state }
             }, mockRes(), node), /UserInfo subject mismatch/);
             assert.strictEqual(store.code, null);
@@ -231,7 +237,7 @@ describe('mcp auth token exchange', () => {
     });
 
     it('exchanges an authorization code with PKCE S256 into an opaque access token', async () => {
-        const verifier = 'correct horse battery staple';
+        const verifier = VERIFIER;
         const auth = authNodeWithCode({
             client_id: 'https://client.example.test/metadata.json',
             redirect_uri: 'https://client.example.test/callback',
@@ -293,12 +299,13 @@ describe('provider denial', () => {
     it('returns the provider error to the registered client redirect', async () => {
         let deleted = null;
         const auth = { readState: async state => state === 'server-state' ?
-            { redirect_uri: 'http://127.0.0.1:53682/callback', client_state: 'client-state' } : null,
+            { redirect_uri: 'http://127.0.0.1:53682/callback', client_state: 'client-state', browserBinding: hashToken('binding') } : null,
             deleteState: async state => { deleted = state; } };
         const redirectTo = async query => {
             const res = { status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; },
                 redirect(location) { this.location = location; return this; } };
-            await completeAuthorization({ query }, res, { authConfig: auth });
+            const node = { authConfig: auth, publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test' };
+            await completeAuthorization({ query, headers: { cookie: bindingCookieName({ headers: {} }, node, query.state) + '=binding' } }, res, node);
             return res;
         };
         const denied = await redirectTo({ error: 'access_denied', state: 'server-state', error_description: 'internal text' });

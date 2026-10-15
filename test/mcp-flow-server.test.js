@@ -10,7 +10,7 @@ function createRuntime(config = {}) {
     const nodeMap = config.__nodes || {};
     nodeMap['default-auth'] = { id: 'default-auth', oauthSlug: 'default-login',
         baseScopes: 'openid profile email', readAccessToken: async token => token === 'test-token' ?
-            { groups: [], scopes: ['openid', 'profile', 'email'] } : null };
+            { groups: ['test-group'], scopes: ['openid', 'profile', 'email'] } : null };
     const flowNodes = config.__flowNodes || [];
     const RED = {
         events,
@@ -29,10 +29,17 @@ function createRuntime(config = {}) {
                 node.send = msg => node.sent.push(msg);
                 node.status = s => node.statuses.push(s);
                 node.log = s => node.logs.push(s);
+                node.debug = () => {};
                 node.error = e => node.errors.push(e);
                 node.warn = w => node.warnings.push(w);
             },
-            registerType(name, ctor, options) { types[name] = ctor; types['options:' + name] = options; },
+            registerType(name, ctor, options) {
+                // Test defaults for settings that production requires (Base URL, endpoint groups).
+                const defaults = { 'mcp-runtime': { publicBaseUrl: 'https://mcp.example.test' },
+                    'mcp-flow-server': { allowedGroups: 'test-group' } }[name];
+                types[name] = defaults ? function (cfg) { return new ctor({ ...defaults, ...cfg }); } : ctor;
+                types['options:' + name] = options;
+            },
             getNode(id) { return nodeMap[id]; },
             eachNode(callback) { for (const node of flowNodes) callback(node); }
         },
@@ -44,7 +51,8 @@ function createRuntime(config = {}) {
     const runtimeConfig = Object.assign({
         id: 'runtime-1',
         runtimeName: 'test-runtime',
-        serverPort: 18001
+        serverPort: 18001,
+        publicBaseUrl: 'https://mcp.example.test'
     }, config.__runtime || {});
     const runtimeNode = new types['mcp-runtime'](runtimeConfig);
     nodeMap[runtimeConfig.id] = runtimeNode;
@@ -54,6 +62,7 @@ function createRuntime(config = {}) {
         auth: 'default-auth',
         serverName: 'test',
         serverPath: '/mcp/test',
+        allowedGroups: 'test-group',
     }, config);
     const server = new types['mcp-flow-server'](nodeConfig);
     return { RED, types, server, nodeMap, runtimeNode };
@@ -355,7 +364,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(metrics.sent.length, 1);
         assert.equal(metrics.sent[0].topic, 'mcp-tool-telemetry');
         assert.deepStrictEqual(Object.keys(metrics.sent[0].payload).sort(), [
-            'cached', 'durationMs', 'endpoint', 'mode', 'responseBytes', 'scannedNodes', 'status', 'tool'
+            'cached', 'client', 'durationMs', 'endpoint', 'mode', 'responseBytes', 'scannedNodes', 'status', 'tool', 'user'
         ]);
         assert.equal(metrics.sent[0].payload.endpoint, 'ops');
         assert.equal(metrics.sent[0].payload.tool, 'get_flow');
@@ -412,7 +421,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(metrics.sent.length, 1);
         assert.equal(metrics.sent[0].topic, 'mcp-tool-telemetry');
         assert.deepStrictEqual(Object.keys(metrics.sent[0].payload).sort(), [
-            'cached', 'durationMs', 'endpoint', 'mode', 'responseBytes', 'scannedNodes', 'status', 'tool'
+            'cached', 'client', 'durationMs', 'endpoint', 'mode', 'responseBytes', 'scannedNodes', 'status', 'tool', 'user'
         ]);
         assert.deepStrictEqual({
             endpoint: metrics.sent[0].payload.endpoint,
@@ -1341,7 +1350,7 @@ describe('Creating Nodes review fixes', () => {
             const unknown = await post('grant_type=refresh_token&refresh_token=missing');
             assert.strictEqual(unknown.status, 400);
             assert.strictEqual((await unknown.json()).error, 'invalid_grant');
-            assert.ok(server.logs.includes('OAuth refresh: unknown'));
+            assert.ok(server.logs.some(line => /"event":"oauth.refresh","outcome":"unknown"/.test(line)));
             const code = await post('grant_type=authorization_code&code=x');
             assert.strictEqual(code.status, 503);
         } finally { await new Promise(resolve => server.emit('close', resolve)); }
@@ -1403,5 +1412,115 @@ describe('3.0 configuration rules', () => {
             await pending;
         } finally { await new Promise(resolve => server.emit('close', resolve)); }
         assert.deepStrictEqual(server.sent.map(msg => msg.topic), ['mcp-tool-execute']);
+    });
+});
+
+describe('audit log and OAuth hardening', () => {
+    const events = (lines, name) => lines.map(line => { try { return JSON.parse(line); } catch (_) { return null; } })
+        .filter(entry => entry && entry.event === name);
+
+    it('audits tool calls with the caller and passes the identity to the flow, never the arguments', async () => {
+        const { RED, server, nodeMap } = createRuntime();
+        nodeMap['default-auth'].readAccessToken = async token => token === 'test-token' ? { groups: ['test-group'],
+            scopes: ['openid'], subject: 'user-1', email: 'user@example.test', client_id: 'https://claude.ai/meta', sessionId: 'session-1' } : null;
+        nodeMap['default-auth'].refreshStore = { readSession: async () => ({ expiresAt: Date.now() + 60000, idleExpiresAt: Date.now() + 60000 }) };
+        RED.events.emit('mcp-tool-register', { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
+        const res = mockRes();
+        const pending = server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+            params: { name: 'ping', arguments: { secret: 'argument-value' } } }, { authorization: 'Bearer test-token' }), res);
+        await new Promise(resolve => setImmediate(resolve));
+        const exec = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
+        assert.deepStrictEqual(exec.mcp, { subject: 'user-1', email: 'user@example.test', groups: ['test-group'], client: 'https://claude.ai/meta' });
+        server.emit('input', { topic: 'mcp-tool-response', payload: { executionId: exec.payload.executionId, result: 'ok' } }, () => {}, () => {});
+        await pending;
+        const [call] = events(server.logs, 'mcp.tool_call');
+        assert.strictEqual(call.outcome, 'success');
+        assert.strictEqual(call.subject, 'user-1');
+        assert.strictEqual(call.client, 'https://claude.ai/meta');
+        assert.match(call.session, /^[0-9a-f]{12}$/);
+        assert.ok(!server.logs.join('\n').includes('argument-value'));
+        assert.ok(!server.logs.join('\n').includes('session-1'));
+    });
+
+    it('audits rejected tokens but not the anonymous start of sign-in', async () => {
+        const { server } = createRuntime();
+        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x' } }), mockRes());
+        assert.strictEqual(events(server.logs, 'mcp.auth').length, 0);
+        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'x' } },
+            { authorization: 'Bearer stolen', 'x-forwarded-for': '203.0.113.5' }), mockRes());
+        const [denied] = events(server.logs, 'mcp.auth');
+        assert.strictEqual(denied.reason, 'invalid_token');
+        assert.strictEqual(denied.ip, '203.0.113.5');
+        assert.ok(!server.logs.join('\n').includes('stolen'));
+    });
+
+    it('audits start, stop and restart commands', async () => {
+        const { server } = createRuntime({ runtime: 'missing-runtime' });
+        await new Promise(resolve => server.emit('input', { topic: 'stop' }, () => {}, resolve));
+        assert.deepStrictEqual(events(server.logs, 'mcp.command').map(entry => entry.command), ['stop']);
+    });
+
+    it('refuses to start without a Base URL or without groups', () => {
+        assert.throws(() => createRuntime({ __runtime: { publicBaseUrl: '' } }).server.initializeServer(), /Base URL is required/);
+        assert.throws(() => createRuntime({ allowedGroups: '' }).server.initializeServer(), /Groups are required/);
+    });
+
+    it('normalizes empty, Buffer and object results and reports the package version', () => {
+        const { server } = createRuntime();
+        const res = mockRes();
+        server.handleInitialize({ id: 1 }, res);
+        assert.strictEqual(res.body.result.serverInfo.version, require('../package.json').version);
+    });
+
+    it('rejects oversized JSON bodies before routing', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18140 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            const res = await fetch('http://127.0.0.1:18140/mcp/test', { method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', pad: 'x'.repeat(300 * 1024) }) });
+            assert.strictEqual(res.status, 413);
+            await res.text();
+        } finally { await new Promise(resolve => server.emit('close', resolve)); }
+    });
+});
+
+describe('tool result tolerance', () => {
+    async function call(response) {
+        const { RED, server } = createRuntime();
+        RED.events.emit('mcp-tool-register', { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
+        const res = mockRes();
+        const pending = server.handleToolCall({ id: 1, params: { name: 'ping', arguments: {} } }, res);
+        const exec = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
+        server.emit('input', { topic: 'mcp-tool-response', payload: { executionId: exec.payload.executionId, ...response } }, () => {}, () => {});
+        await pending;
+        return res.body;
+    }
+
+    it('maps undefined to empty content, Buffers to text and error objects to their message', async () => {
+        assert.deepStrictEqual((await call({ result: undefined })).result, { content: [] });
+        assert.deepStrictEqual((await call({ result: Buffer.from('hello') })).result, { content: [{ type: 'text', text: 'hello' }] });
+        assert.strictEqual((await call({ error: { message: 'catch message' } })).error.message, 'catch message');
+    });
+});
+
+describe('telemetry identity', () => {
+    it('reports the caller e-mail and a bounded client label in tool telemetry', async () => {
+        const { RED, server, nodeMap, runtimeNode } = createRuntime();
+        nodeMap['default-auth'].readAccessToken = async () => ({ groups: ['test-group'], scopes: ['openid'],
+            subject: 'user-1', email: 'user@example.test', client_id: 'https://chatgpt.com/oauth/codex/abc/client.json' });
+        const events = [];
+        runtimeNode.subscribeToolTelemetry(event => events.push(event));
+        RED.events.emit('mcp-tool-register', { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
+        const pending = server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+            params: { name: 'ping', arguments: {} } }, { authorization: 'Bearer any' }), mockRes());
+        await new Promise(resolve => setImmediate(resolve));
+        const exec = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
+        server.emit('input', { topic: 'mcp-tool-response', payload: { executionId: exec.payload.executionId, result: 'ok' } }, () => {}, () => {});
+        await pending;
+        assert.strictEqual(events[0].user, 'user@example.test');
+        assert.strictEqual(events[0].client, 'codex');
+        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'ping' } }), mockRes());
+        assert.strictEqual(events[1].user, 'unknown');
+        assert.strictEqual(events[1].client, 'unknown');
     });
 });
