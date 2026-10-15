@@ -65,6 +65,11 @@ cd ~/.node-red
 npm link @olykov/node-red-mcp-server
 ```
 
+## Upgrading to 3.2
+
+`tools/list` now requires a token. Clients that listed tools anonymously must sign in first;
+Claude Code and Codex do this on the HTTP 401. To roll back, pin the 3.1.0 commit.
+
 ## Upgrading to 3.1
 
 1. Set the `mcp-runtime` **Base URL**. Endpoints no longer derive OAuth URLs from request
@@ -223,16 +228,15 @@ Config-node details retain ordinary property types and values. Node-RED's flow A
 
 `get_flow` never requests the full `/flows` export. The tab index walks Node-RED's in-memory configuration once and caches only compact tab metadata until the next runtime deploy; it does not serialize or transfer full flows. `meta.cached` indicates whether the index was reused. The index excludes undeployed editor changes. Tab detail modes read `/flow/:id`; subflow modes read `/flow/global` and optionally the specified tab. These endpoints still make Node-RED prepare the selected flow before the palette applies its response limits. Responses cap lists at 40 items and edges at 80; Admin API reads have a 15-second timeout and a 32 MiB response limit. Tab indexing stops above 100,000 configuration nodes; graph inspection stops above 20,000 nodes or 100,000 wire visits. `meta` reports the source, scan count, returned node count and truncation.
 
-`initialize`, `notifications/initialized` and `tools/list` allow anonymous discovery,
-even when supplied credentials have expired. Discovery exposes server information
-and tool names, descriptions, schemas, annotations and security metadata; it does
-not execute tools or return flow data. Protected tools advertise `securitySchemes`
-and the matching `_meta.securitySchemes`, including OAuth policies with empty scopes.
+Only the handshake (`initialize`, `notifications/initialized`) is anonymous. `tools/list`,
+`tools/call` and every other method require a valid token; without one the endpoint answers
+HTTP 401 with `WWW-Authenticate` pointing to the protected resource metadata, which starts
+sign-in in MCP clients (MCP authorization spec). Tools advertise `securitySchemes` and the
+matching `_meta.securitySchemes`.
 
-All protected tool calls validate credentials before flow or admin execution.
-Missing or invalid tokens return an MCP `result` with `isError: true` and
-`_meta["mcp/www_authenticate"]`.
-Endpoint role and resource failures remain HTTP 403. Unresolved required auth
+All tool calls validate credentials before flow or admin execution. Missing, invalid or
+expired tokens return HTTP 401 with `WWW-Authenticate`. Endpoint role and resource failures
+remain HTTP 403. Unresolved required auth
 configuration fails closed, and an invalid `mcp-auth` configuration is reported
 in the log and stops its endpoints from starting. GET on an MCP path requires
 authentication (HTTP 401 with `WWW-Authenticate`) and otherwise answers 405; the
@@ -360,6 +364,7 @@ deployment.
 Production pins the palette by commit. To roll back, pin the previous commit and redeploy,
 then undo the configuration that the newer version required:
 
+- 3.2 -> 3.1: no configuration change.
 - 3.1 -> 3.0: no configuration change is required; Base URL, Groups and exact Client Hosts
   remain valid. Users sign in again.
 - 3.0 -> 2.x: install `node-red-contrib-mcp-server` instead of `@olykov/node-red-mcp-server`,

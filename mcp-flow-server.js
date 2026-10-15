@@ -19,8 +19,7 @@ module.exports = function (RED)
         oauthScopes,
         protectedResourceMetadata,
         validateRequest,
-        writeAuthFailure,
-        writeToolAuthFailure
+        writeAuthFailure
     } = require('./lib/mcp-auth');
 
 
@@ -429,21 +428,19 @@ module.exports = function (RED)
             let handledToolCall = false;
             try
             {
-                // Discovery stays visible; authorization is enforced before tool execution.
+                // Only the handshake is anonymous; everything else needs a token (HTTP 401 starts sign-in).
                 if (request.method === 'initialize') return node.handleInitialize(request, res);
-                if (request.method === 'tools/list') return node.handleToolsList(request, res);
                 if (request.method === 'notifications/initialized' && request.id === undefined)
                     return res.status(202).end();
                 const authResult = await validateRequest(node, req);
                 if (!authResult.ok)
                 {
                     node.auditDenied(req, authResult);
-                    if (toolRequest && authResult.status === 401)
-                        return writeToolAuthFailure(req, res, node, request.id);
                     return writeAuthFailure(req, res, node, authResult);
                 }
                 switch (request.method)
                 {
+                    case 'tools/list': return node.handleToolsList(request, res);
                     case 'tools/call': handledToolCall = true; await node.handleToolCall(request, res, authResult.claims); break;
                     default:
                         node.rpcError(res, request.id, -32601, 'Method not found: ' + request.method);

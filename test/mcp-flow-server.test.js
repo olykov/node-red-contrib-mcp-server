@@ -157,7 +157,8 @@ describe('upstream mcp-flow-server local extensions', () => {
         registry.registerTool();
 
         const res = mockRes();
-        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/list' }), res);
+        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/list' },
+            { authorization: 'Bearer test-token' }), res);
 
         assert.strictEqual(res.statusCode, 200);
         assert.deepStrictEqual(res.body.result.tools.find(tool => tool.name === 'read_status').annotations, {
@@ -513,8 +514,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
         const unauthenticated = mockRes();
         await server.handleMcpHttpRequest(mockReq(request), unauthenticated);
-        assert.equal(unauthenticated.statusCode, 200);
-        assert.equal(unauthenticated.body.result.isError, true);
+        assert.equal(unauthenticated.statusCode, 401);
         assert.equal(metrics.sent[0].payload.tool, 'unknown');
         assert.equal(metrics.sent[0].payload.status, 'failed');
 
@@ -971,13 +971,21 @@ describe('tool-level OAuth discovery', () => {
         return { ...context, reads: () => reads, executions: () => executions };
     }
 
-    it('exposes only descriptors without validating credentials or executing tools', async () => {
+    it('requires a valid token for tools/list and answers 401 or 403 otherwise', async () => {
         const context = setup();
-        let first;
-        for (const token of [null, 'invalid', 'expired', 'wrong-role']) {
+        for (const [token, status] of [[null, 401], ['invalid', 401], ['expired', 401], ['wrong-role', 403]]) {
             const res = mockRes();
             await context.server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/list' },
                 token ? { authorization: 'Bearer ' + token } : {}), res);
+            assert.equal(res.statusCode, status);
+            assert.equal(res.body.result, undefined);
+            if (status === 401) assert.match(res.headers['www-authenticate'], /^Bearer resource_metadata=/);
+        }
+        let first;
+        for (const token of ['valid', 'valid']) {
+            const res = mockRes();
+            await context.server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/list' },
+                { authorization: 'Bearer ' + token }), res);
             assert.equal(res.statusCode, 200);
             assert.equal(res.body.result.tools.length, 2);
             for (const tool of res.body.result.tools) {
@@ -989,7 +997,6 @@ describe('tool-level OAuth discovery', () => {
             if (first) assert.deepStrictEqual(res.body.result, first);
             first = res.body.result;
         }
-        assert.equal(context.reads(), 0);
         assert.equal(context.executions(), 0);
     });
 
@@ -1001,14 +1008,9 @@ describe('tool-level OAuth discovery', () => {
                 const res = mockRes();
                 await context.server.handleMcpHttpRequest(mockReq(request,
                     token ? { authorization: 'Bearer ' + token } : {}), res);
-                assert.equal(res.statusCode, 200);
-                assert.equal(res.body.id, 7);
-                assert.equal(res.body.error, undefined);
-                assert.equal(res.body.result.isError, true);
-                const challenge = res.body.result._meta['mcp/www_authenticate'];
-                assert.equal(challenge.length, 1);
-                assert.match(challenge[0], /^Bearer resource_metadata="https:\/\/mcp\.example\.test\/\.well-known\/oauth-protected-resource\/mcp\/test"/);
-                assert.match(challenge[0], /error="invalid_token", error_description="Authentication required"/);
+                assert.equal(res.statusCode, 401);
+                assert.equal(res.body.error, 'invalid_token');
+                assert.match(res.headers['www-authenticate'], /^Bearer resource_metadata="https:\/\/mcp\.example\.test\/\.well-known\/oauth-protected-resource\/mcp\/test"/);
                 assert.equal(context.executions(), name === 'protected_tool' ? 0 : 1);
             }
             const valid = mockRes();
@@ -1051,12 +1053,12 @@ describe('tool-level OAuth discovery', () => {
         const res = mockRes();
         await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1,
             method: 'tools/call', params: { name: 'get_flow' } }), res);
-        assert.equal(res.body.result.isError, true);
-        assert.match(res.body.result._meta['mcp/www_authenticate'][0], /invalid_token/);
+        assert.equal(res.statusCode, 401);
+        assert.equal(res.body.error, 'invalid_token');
         assert.equal(server.sent.length, 0);
     });
 
-    it('serves anonymous HTTP discovery and challenges protected HTTP calls', async () => {
+    it('serves the anonymous handshake and challenges everything else over HTTP', async () => {
         const context = setup({ serverPort: 18114 });
         const server = context.server;
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
@@ -1078,13 +1080,13 @@ describe('tool-level OAuth discovery', () => {
             });
             assert.equal(initialized.status, 202);
             assert.equal(await initialized.text(), '');
-            const list = await post('tools/list', 'expired');
+            assert.equal((await post('tools/list', 'expired')).status, 401);
+            const list = await post('tools/list', 'valid');
             assert.equal(list.status, 200);
             assert.equal(list.body.result.tools.length, 2);
             const challenge = await post('tools/call');
-            assert.equal(challenge.status, 200);
-            assert.equal(challenge.body.result.isError, true);
-            assert.match(challenge.body.result._meta['mcp/www_authenticate'][0], /resource_metadata=/);
+            assert.equal(challenge.status, 401);
+            assert.equal(challenge.body.error, 'invalid_token');
             assert.equal(context.executions(), 0);
             assert.equal((await post('tools/call', 'wrong-resource')).status, 403);
             assert.equal(context.executions(), 0);
@@ -1123,7 +1125,8 @@ describe('automatic runtime startup without CORS', () => {
             for (const node of endpoints) {
                 assert.equal(node.isRunning, true);
                 const response = await fetch('http://127.0.0.1:18116' + node.serverPath, {
-                    method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://browser.example.test' },
+                    method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://browser.example.test',
+                        authorization: 'Bearer test-token' },
                     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
                 });
                 assert.equal(response.status, 200);

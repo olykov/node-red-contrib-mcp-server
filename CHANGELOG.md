@@ -4,6 +4,14 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
+## 3.2.0 - 2026-10-15
+
+Breaking for clients that listed tools anonymously.
+
+- Require a valid token for `tools/list`, `tools/call` and every method except the
+  `initialize` handshake; answer HTTP 401 with `WWW-Authenticate` instead of an MCP
+  `isError` result with `_meta["mcp/www_authenticate"]`.
+
 ## 3.1.0 - 2026-10-15
 
 Security and audit review. Breaking for configurations without Base URL or Groups; see
