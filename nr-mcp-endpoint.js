@@ -38,7 +38,6 @@ module.exports = function (RED)
 
     const serverInstances = new Map();
     const runtimes = new Set();
-    let legacyAdminTokenWarningShown = false;
 
     function origin(value)
     {
@@ -96,8 +95,7 @@ module.exports = function (RED)
     function runtimeAdminToken(runtime)
     {
         return runtime && runtime.adminToken ||
-            (runtime && runtime.adminTokenEnv && process.env[runtime.adminTokenEnv]) ||
-            process.env.NODE_RED_ADMIN_API_TOKEN || '';
+            (runtime && runtime.adminTokenEnv && process.env[runtime.adminTokenEnv]) || '';
     }
 
     function adminApiConfig(RED, runtime)
@@ -436,13 +434,6 @@ module.exports = function (RED)
             node.adminTokenEnv = '';
         }
         node.adminCa = typeof config.adminCa === 'string' ? config.adminCa.trim() : '';
-        if (!node.adminToken && !(node.adminTokenEnv && process.env[node.adminTokenEnv]) &&
-            process.env.NODE_RED_ADMIN_API_TOKEN &&
-            !legacyAdminTokenWarningShown)
-        {
-            legacyAdminTokenWarningShown = true;
-            node.warn('NODE_RED_ADMIN_API_TOKEN is deprecated; configure Admin Token or Admin Token Env');
-        }
         node.trustedProxies = [];
         try
         {

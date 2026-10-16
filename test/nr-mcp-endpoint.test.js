@@ -794,7 +794,6 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
     });
 
     it('does not expose admin tools without complete runtime admin config', () => {
-        delete process.env.NODE_RED_ADMIN_API_TOKEN;
         const { server } = buildServer({
             serverName: 'ops',
             serverPath: '/mcp/ops',
@@ -810,11 +809,12 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
         assert.ok(!res.body.result.tools.some(tool => tool.name === 'get_flow'));
     });
 
-    it('uses NODE_RED_ADMIN_API_TOKEN for admin tool gating', () => {
+    // MCP-NAME-2
+    it('ignores NODE_RED_ADMIN_API_TOKEN, so admin tools need the credential or Admin Token Env', () => {
         process.env.NODE_RED_ADMIN_API_TOKEN = 'configured-value';
         try
         {
-            const { server } = buildServer({
+            const { server, runtimeNode } = buildServer({
                 serverName: 'ops',
                 serverPath: '/mcp/ops',
                 __runtime: {
@@ -827,7 +827,8 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
 
             const res = mockRes();
             server.handleToolsList({ id: 1 }, res);
-            assert.ok(res.body.result.tools.some(tool => tool.name === 'get_flow'));
+            assert.ok(!res.body.result.tools.some(tool => tool.name === 'get_flow'));
+            assert.ok(!runtimeNode.warnings.some(message => message.includes('NODE_RED_ADMIN_API_TOKEN')));
         } finally
         {
             delete process.env.NODE_RED_ADMIN_API_TOKEN;
@@ -835,44 +836,31 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
     });
 
     // MCP-ADM-4
-    it('prioritizes the credential admin token, then Admin Token Env, then warns once for the legacy env var', () => {
-        process.env.NODE_RED_ADMIN_API_TOKEN = 'legacy-value';
+    it('prioritizes the credential admin token over Admin Token Env', () => {
         process.env.MCP_CUSTOM_ADMIN_TOKEN = 'env-value';
         try
         {
-            const { runtimeNode: withCredential } = createRuntime({ __runtime: {
-                id: 'runtime-credential', serverPort: 18008,
+            const { runtimeNode: withCredential, server: credentialServer } = createRuntime({ serverPath: '/mcp/ops', __runtime: {
+                id: 'runtime-credential', serverPort: 18008, adminPort: 1881, adminEndpointPath: '/mcp/ops',
                 credentials: { adminToken: 'credential-value' }, adminTokenEnv: 'MCP_CUSTOM_ADMIN_TOKEN'
             } });
             assert.equal(withCredential.adminToken, 'credential-value');
-            assert.ok(!withCredential.warnings.some(message => message.includes('NODE_RED_ADMIN_API_TOKEN')));
+            assert.equal(credentialServer.adminToken, 'credential-value');
 
-            const { runtimeNode: withEnvName } = createRuntime({ __runtime: {
-                id: 'runtime-env-name', serverPort: 18009,
+            const { runtimeNode: withEnvName, server: envServer } = createRuntime({ serverPath: '/mcp/ops', __runtime: {
+                id: 'runtime-env-name', serverPort: 18009, adminPort: 1881, adminEndpointPath: '/mcp/ops',
                 credentials: { adminToken: '' }, adminTokenEnv: 'MCP_CUSTOM_ADMIN_TOKEN'
             } });
             assert.equal(withEnvName.adminToken, '');
-            assert.equal(withEnvName.adminTokenEnv, 'MCP_CUSTOM_ADMIN_TOKEN');
-            assert.ok(!withEnvName.warnings.some(message => message.includes('NODE_RED_ADMIN_API_TOKEN')));
-
-            const { runtimeNode: legacyOnly } = createRuntime({ __runtime: {
-                id: 'runtime-legacy', serverPort: 18010, credentials: { adminToken: '' }
-            } });
-            assert.equal(legacyOnly.adminToken, '');
-            assert.ok(legacyOnly.warnings.some(message =>
-                message.includes('NODE_RED_ADMIN_API_TOKEN is deprecated')));
-            assert.equal(legacyOnly.warnings.filter(message =>
-                message.includes('NODE_RED_ADMIN_API_TOKEN is deprecated')).length, 1);
+            assert.equal(envServer.adminToken, 'env-value');
         } finally
         {
-            delete process.env.NODE_RED_ADMIN_API_TOKEN;
             delete process.env.MCP_CUSTOM_ADMIN_TOKEN;
         }
     });
 
     // MCP-ADM-1
     it('advertises and returns Function code only for configured groups', async () => {
-        delete process.env.NODE_RED_ADMIN_API_TOKEN;
         const { server, nodeMap } = buildServer({
             serverPath: '/mcp/ops',
             __runtime: { adminPort: 1881, adminEndpointPath: '/mcp/ops',

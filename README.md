@@ -476,7 +476,6 @@ endpoint; `terminationGracePeriodSeconds` must exceed the pause.
 | --- | --- | --- |
 | `MCP_REDIS_URL` (default name) | `mcp-redis` in env mode | Any `MCP_*` name can be configured. |
 | `MCP_*` | `mcp-redis` Password Env, `mcp-auth` Secret Env | Names outside `MCP_` are rejected. |
-| `NODE_RED_ADMIN_API_TOKEN` | `mcp-runtime` admin tools | Deprecated fallback, used only when neither the Admin Token credential nor Admin Token Env is set; logs a warning. Give it read-only Node-RED permissions; `get_flow` only issues GET requests. |
 
 ## Rollback
 

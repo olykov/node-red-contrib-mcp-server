@@ -504,7 +504,6 @@ describe('lib/admin-tools', () => {
 
     // MCP-KEEP-5
     it('sends only GET requests to loopback admin API with the configured token', async () => {
-        delete process.env.NODE_RED_ADMIN_API_TOKEN;
         const { tools, calls } = build({ 'GET /flow/tab1': () => ({ status: 200, body: tab }) });
         await tools.callTool('get_flow', { id: 'tab1' });
         assert.deepEqual(calls[0], {
