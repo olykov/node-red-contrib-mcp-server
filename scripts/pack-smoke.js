@@ -57,6 +57,11 @@ async function main() {
         tarball, 'node-red@' + requestedNodeRed
     ], { cwd: repository, stdio: 'inherit' });
 
+    const migrate = path.join(userDirectory, 'node_modules', '.bin', 'nr-mcp-migrate');
+    if (!execFileSync(migrate, ['--help'], { encoding: 'utf8' }).includes('--input <flows.json>')) {
+        throw new Error('The packed nr-mcp-migrate CLI did not print its usage.');
+    }
+
     const executable = path.join(userDirectory, 'node_modules', '.bin', 'node-red');
     const child = spawn(executable, ['--userDir', userDirectory, '--settings', path.join(userDirectory, 'settings.js')], {
         cwd: userDirectory, env: process.env, stdio: ['ignore', 'pipe', 'pipe']

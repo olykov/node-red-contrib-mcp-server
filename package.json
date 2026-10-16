@@ -55,6 +55,9 @@
     "ioredis": "^5.4.1",
     "jose": "^5.10.0"
   },
+  "bin": {
+    "nr-mcp-migrate": "bin/nr-mcp-migrate.js"
+  },
   "engines": {
     "node": ">=22.9"
   },
@@ -64,6 +67,7 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
+    "bin/",
     "lib/",
     "locales/",
     "examples/"

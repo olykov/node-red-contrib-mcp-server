@@ -45,6 +45,31 @@ describe('Node-RED runtime integration', () => {
         await helper.stopServer();
     });
 
+    // MCP-MIG-1
+    it('deploys a flow converted by nr-mcp-migrate and serves its tools', async () => {
+        const { migrateFlow } = require('../lib/migration');
+        const port = await unusedPort();
+        const flows = migrateFlow(require('./fixtures/flows-3x.json')).flow
+            .filter(node => node.type === 'tab' || node.type.startsWith('nr-mcp-'))
+            .map(node => node.type === 'nr-mcp-runtime' ? { ...node, serverPort: port, publicBaseUrl: 'http://127.0.0.1:' + port } :
+                node.type === 'nr-mcp-metrics' ? { ...node, wires: [[]] } : node);
+        try {
+            await helper.load(registerPackageNodes, flows);
+            helper.getNode('auth').readAccessToken = async () => ({ groups: ['Sales'], scopes: ['openid'] });
+            await waitFor(() => helper.getNode('endpoint-sales').isRunning);
+            assert.equal(helper.getNode('tool-list').isRegistered, true);
+            assert.equal(helper.getNode('tool-shared').isRegistered, true);
+            assert.equal(helper.getNode('tool-orphan').isRegistered, false);
+            const list = await mcpFetch('http://127.0.0.1:' + port + '/mcp/sales', {
+                method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer migrated' },
+                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+            });
+            assert.deepEqual((await list.json()).result.tools.map(tool => tool.name), ['list_items', 'ping']);
+        } finally {
+            await helper.unload();
+        }
+    });
+
     // MCP-NAME-1
     it('loads next to the upstream node-red-contrib-mcp-server node types', async () => {
         const upstreamTypes = ['mcp-server', 'mcp-client', 'mcp-tool', 'mcp-flow-server', 'mcp-tool-registry'];
