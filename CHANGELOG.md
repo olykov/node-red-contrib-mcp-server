@@ -4,6 +4,11 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
+## Unreleased
+
+- README: deploy guidance follows Node-RED's deploy modes (Modified Nodes by default) and lists
+  what restarts an endpoint.
+
 ## 3.3.0 - 2026-10-15
 
 - At most 32 concurrent tool calls per endpoint; further calls get JSON-RPC error `-32000` and

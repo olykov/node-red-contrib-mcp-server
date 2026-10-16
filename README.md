@@ -182,10 +182,15 @@ The authorization server issuer is the Base URL origin. Authorization responses 
 `/.well-known/oauth-authorization-server` document answers only while a single configuration
 serves the port.
 
-Deploy with **Modified Flows** and keep each MCP endpoint and its tool flows on their own tab.
-Stopping an endpoint fails its pending tool calls (the flow restarts with it); requests already
-being answered, such as `get_flow` or a token exchange, finish in the background, and the port
-stays open while any endpoint on it is running.
+Deploy with **Modified Nodes**: Node-RED restarts only the changed nodes, so endpoints keep
+running; a call that is inside a restarted node is lost and times out. **Modified Flows** also
+restarts every node wired to a changed node, and an endpoint is wired to its tool flows, so
+changing any node of a tool flow restarts that `mcp-flow-server`. Wider restarts follow a change
+to a shared configuration node (`mcp-runtime`, `mcp-auth`, `mcp-redis`: every endpoint that uses
+it), a subflow (all its instances), tab environment variables (the whole tab) and global
+environment variables (a full deploy). Stopping an endpoint fails its pending tool calls;
+requests already being answered, such as `get_flow` or a token exchange, finish in the
+background, and the port stays open while any endpoint on it is running.
 
 Each endpoint runs at most 32 tool calls at once; further calls get JSON-RPC error `-32000`
 until one finishes. Tool arguments are not validated against the Input Schema, so the flow must
