@@ -13,7 +13,9 @@ function createRuntime(config = {}) {
         baseScopes: 'openid profile email', readAccessToken: async token => token === 'test-token' ?
             { groups: ['test-group'], scopes: ['openid', 'profile', 'email'] } : null };
     const flowNodes = config.__flowNodes || [];
+    const configs = [];
     const RED = {
+        mcpRuntimes: [],
         events,
         log: { debug() {} },
         settings: config.__settings || {},
@@ -39,11 +41,17 @@ function createRuntime(config = {}) {
                 // Test defaults for settings that production requires (Base URL, endpoint groups).
                 const defaults = { 'mcp-runtime': { publicBaseUrl: 'https://mcp.example.test' },
                     'mcp-flow-server': { allowedGroups: 'test-group' } }[name];
-                types[name] = defaults ? function (cfg) { return new ctor({ ...defaults, ...cfg }); } : ctor;
+                types[name] = function (cfg) {
+                    const merged = defaults ? { ...defaults, ...cfg } : cfg;
+                    configs.push({ ...merged, type: name });
+                    const instance = new ctor(merged);
+                    if (name === 'mcp-runtime') RED.mcpRuntimes.push(instance);
+                    return instance;
+                };
                 types['options:' + name] = options;
             },
             getNode(id) { return nodeMap[id]; },
-            eachNode(callback) { for (const node of flowNodes) callback(node); }
+            eachNode(callback) { for (const node of [...configs, ...flowNodes]) callback(node); }
         },
         httpAdmin: { get() {} }
     };
@@ -91,6 +99,11 @@ function mockRes() {
     };
 }
 
+function registerTool(RED, tool) {
+    const registered = { registeredBy: tool.name + '@' + (tool.endpointPath || '*'), ...tool };
+    for (const runtime of RED.mcpRuntimes) runtime.registerTool(registered);
+}
+
 function toolResult(result) {
     const { resultType, _meta, ...rest } = result;
     assert.strictEqual(resultType, 'complete');
@@ -112,7 +125,7 @@ function mockReq(body, headers = {}, remoteAddress = '127.0.0.1') {
 describe('upstream mcp-flow-server local extensions', () => {
     it('keeps upstream registry tools and advertises _meta.securitySchemes', () => {
         const { RED, server } = buildServer();
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'sample_ping',
             description: 'Sample ping',
             inputSchema: { type: 'object', properties: { text: { type: 'string' } } }
@@ -125,7 +138,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('advertises registered tool output schemas', () => {
         const { RED, server } = buildServer();
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'sample_summary',
             description: 'Sample summary',
             inputSchema: { type: 'object', properties: { date: { type: 'string' } } },
@@ -140,7 +153,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('preserves registered tool annotations and security metadata', () => {
         const { RED, server } = buildServer();
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'read_status',
             description: 'Read status',
             inputSchema: { type: 'object', properties: {} },
@@ -183,7 +196,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     // MCP-REG-1
     it('omits duplicate endpoint tools and restores the remaining owner on unregister', () => {
-        const { RED, types, server } = buildServer();
+        const { RED, types, server, runtimeNode } = buildServer();
         require('../mcp-tool-registry')(RED);
         server.initializeServer();
         const first = new types['mcp-tool-registry']({ id: 'duplicate-a', toolName: 'same_tool',
@@ -196,7 +209,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.deepStrictEqual(server.registeredTools().map(tool => tool.name), []);
         assert.equal(first.statuses.at(-1).text, 'duplicate');
         assert.equal(second.statuses.at(-1).text, 'duplicate');
-        assert.equal(server.warnings.filter(message => message.includes('Duplicate MCP tool name')).length, 1);
+        assert.equal(runtimeNode.warnings.filter(message => message.includes('Duplicate MCP tool name')).length, 1);
 
         first.unregisterTool();
         assert.deepStrictEqual(server.registeredTools().map(tool => tool.registeredBy), ['duplicate-b']);
@@ -206,13 +219,13 @@ describe('upstream mcp-flow-server local extensions', () => {
     // MCP-REG-2, MCP-REG-3
     it('uses endpoint tools instead of same-name shared tools and sorts the list deterministically', () => {
         const { RED, server } = buildServer();
-        RED.events.emit('mcp-tool-register', { name: 'zeta', description: 'Z', registeredBy: 'z',
+        registerTool(RED, { name: 'zeta', description: 'Z', registeredBy: 'z',
             inputSchema: { type: 'object', properties: {} } });
-        RED.events.emit('mcp-tool-register', { name: 'same', description: 'Shared', registeredBy: 'shared',
+        registerTool(RED, { name: 'same', description: 'Shared', registeredBy: 'shared',
             inputSchema: { type: 'object', properties: {} } });
-        RED.events.emit('mcp-tool-register', { name: 'same', description: 'Bound', endpointPath: server.serverPath,
+        registerTool(RED, { name: 'same', description: 'Bound', endpointPath: server.serverPath,
             registeredBy: 'bound', inputSchema: { type: 'object', properties: {} } });
-        RED.events.emit('mcp-tool-register', { name: 'alpha', description: 'A', registeredBy: 'alpha',
+        registerTool(RED, { name: 'alpha', description: 'A', registeredBy: 'alpha',
             inputSchema: { type: 'object', properties: {} } });
 
         const response = mockRes();
@@ -245,7 +258,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
             __runtime: { serverPort: 18002 }
         });
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'read_status',
             description: 'Read status',
             endpointPath: '/mcp/ops',
@@ -263,18 +276,18 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('filters registered tools by endpoint path when a binding is configured', () => {
         const { RED, server } = buildServer({ id: 'alpha-endpoint', serverName: 'alpha' });
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'shared_tool',
             description: 'Shared',
             inputSchema: { type: 'object', properties: {} }
         });
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'alpha_tool',
             description: 'Alpha',
             endpointPath: '/mcp/test',
             inputSchema: { type: 'object', properties: {} }
         });
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'beta_tool',
             description: 'Beta',
             endpointPath: '/mcp/beta',
@@ -316,16 +329,18 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.ok(runtime.server.portState.routes.has('/mcp/b'));
     });
 
-    it('rejects different runtimes on the same port', () => {
+    // MCP-NODE-5
+    it('marks an endpoint red when a second runtime asks for a port in use', async () => {
         const runtime = createRuntime({
             id: 'endpoint-a',
             serverPath: '/mcp/a',
-            __runtime: { id: 'runtime-a', serverPort: 18006 }
+            __runtime: { id: 'runtime-a', serverPort: 18006, bindHost: '127.0.0.1' }
         });
         const runtimeB = new runtime.types['mcp-runtime']({
             id: 'runtime-b',
             runtimeName: 'runtime-b',
-            serverPort: 18006
+            serverPort: 18006,
+            bindHost: '127.0.0.1'
         });
         runtime.nodeMap['runtime-b'] = runtimeB;
         const serverB = new runtime.types['mcp-flow-server']({
@@ -335,10 +350,16 @@ describe('upstream mcp-flow-server local extensions', () => {
             serverName: 'b',
             serverPath: '/mcp/b'
         });
-
-        runtime.server.initializeServer();
-
-        assert.throws(() => serverB.initializeServer(), /port already registered by another runtime/);
+        await new Promise((resolve, reject) => runtime.server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            const failure = await new Promise(resolve => serverB.startServer(error => resolve(error)));
+            assert.equal(failure.code, 'EADDRINUSE');
+            assert.equal(serverB.isRunning, false);
+            assert.deepStrictEqual(serverB.statuses.at(-1), { fill: 'red', shape: 'dot', text: 'error' });
+        } finally {
+            await new Promise(resolve => serverB.emit('close', resolve));
+            await new Promise(resolve => runtime.server.emit('close', resolve));
+        }
     });
 
     it('exposes admin tools only on the runtime admin endpoint path', () => {
@@ -488,7 +509,7 @@ describe('upstream mcp-flow-server local extensions', () => {
     // MCP-KEEP-6
     it('emits one bounded runtime event for a flow tool call', async () => {
         const { RED, server, runtimeNode, types } = buildServer();
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'sample_ping',
             description: 'Sample',
             inputSchema: { type: 'object', properties: {} }
@@ -534,7 +555,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('rejects tool calls above the concurrency limit', async () => {
         const { RED, server } = buildServer();
-        RED.events.emit('mcp-tool-register', { name: 'slow_tool', description: 'Slow', inputSchema: { type: 'object', properties: {} } });
+        registerTool(RED, { name: 'slow_tool', description: 'Slow', inputSchema: { type: 'object', properties: {} } });
         let release;
         const gate = new Promise(resolve => { release = resolve; });
         server.executeToolFlow = async () => { await gate; return { ok: true }; };
@@ -550,7 +571,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('cancels a tool call when the client closes the connection and ignores the late flow response', async () => {
         const { RED, server } = buildServer();
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'sample_ping', description: 'Sample', inputSchema: { type: 'object', properties: {} }
         });
         const response = mockRes();
@@ -579,7 +600,7 @@ describe('upstream mcp-flow-server local extensions', () => {
     // MCP-PROTO-6
     it('tracks flow errors and rejects legacy direct calls', async () => {
         const { RED, server, runtimeNode, types } = buildServer();
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'sample_tool',
             description: 'Sample',
             inputSchema: { type: 'object', properties: {} }
@@ -638,7 +659,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
         });
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'write_tool',
             description: 'Write',
             inputSchema: { type: 'object', properties: {} }
@@ -664,7 +685,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('tracks a flow tool execution rejection without changing the RPC error', async () => {
         const { RED, server, runtimeNode, types } = buildServer();
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'sample_ping',
             description: 'Sample',
             inputSchema: { type: 'object', properties: {} }
@@ -692,7 +713,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             serverName: 'beta',
             serverPath: '/mcp/b'
         });
-        runtime.RED.events.emit('mcp-tool-register', {
+        registerTool(runtime.RED, {
             name: 'shared_ping',
             description: 'Shared',
             inputSchema: { type: 'object', properties: {} }
@@ -711,7 +732,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.deepStrictEqual(metrics.sent.map(msg => msg.payload.tool), ['shared_ping', 'shared_ping']);
     });
 
-    it('allows only one metrics source per runtime and releases its subscription on close', () => {
+    it('allows only one metrics source per runtime and releases its subscription on close', async () => {
         const { runtimeNode, types } = buildServer();
         const first = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         const duplicate = new types['mcp-server-metrics']({ id: 'metrics-2', runtime: runtimeNode.id });
@@ -727,7 +748,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(first.sent.length, 1);
         assert.equal(replacement.sent.length, 1);
 
-        runtimeNode.emit('close');
+        await new Promise(resolve => runtimeNode.emit('close', resolve));
         runtimeNode.publishToolTelemetry({ tool: 'get_flow' });
         assert.equal(replacement.sent.length, 1);
     });
@@ -754,7 +775,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         const response = mockRes();
         await server.handleToolCall({ id: 1, params: { name: 'get_flow', arguments: {} } }, response);
         await server.handleToolCall({ id: 2, params: { name: 'get_flow', arguments: {} } }, mockRes());
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'sample_ping',
             description: 'Sample',
             inputSchema: { type: 'object', properties: {} }
@@ -886,13 +907,13 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('keeps same tool name isolated across endpoint bindings', () => {
         const { RED, server } = buildServer({ id: 'alpha-endpoint', serverName: 'alpha' });
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'status_tool',
             description: 'Alpha status',
             endpointPath: '/mcp/test',
             inputSchema: { type: 'object', properties: { alpha: { type: 'boolean' } } }
         });
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'status_tool',
             description: 'Beta status',
             endpointPath: '/mcp/beta',
@@ -907,7 +928,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('executes a registered upstream flow tool through executionId response loop', async () => {
         const { RED, server } = buildServer();
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'sample_ping',
             description: 'Sample ping',
             inputSchema: { type: 'object', properties: {} }
@@ -931,7 +952,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             serverName: 'test-replacement',
             serverPath: '/mcp/a'
         });
-        runtime.RED.events.emit('mcp-tool-register', {
+        registerTool(runtime.RED, {
             name: 'sample_ping',
             description: 'Sample ping',
             endpointPath: '/mcp/a',
@@ -1096,12 +1117,12 @@ describe('upstream mcp-flow-server local extensions', () => {
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
         });
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'read_tool',
             description: 'Read',
             inputSchema: { type: 'object', properties: {} }
         });
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'write_tool',
             description: 'Write',
             inputSchema: { type: 'object', properties: {} }
@@ -1134,7 +1155,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             __nodes: { 'auth-1': authNode },
             __runtime: { publicBaseUrl: 'https://mcp.example.test' }
         });
-        RED.events.emit('mcp-tool-register', {
+        registerTool(RED, {
             name: 'write_tool',
             description: 'Write',
             inputSchema: { type: 'object', properties: {} }
@@ -1174,7 +1195,7 @@ describe('tool-level OAuth discovery', () => {
             __runtime: { publicBaseUrl: 'https://mcp.example.test', adminPort: 1880,
                 credentials: { adminToken: 'test-admin-token' }, adminEndpointPath: '/mcp/test', ...runtime }
         });
-        context.RED.events.emit('mcp-tool-register', {
+        registerTool(context.RED, {
             name: 'protected_tool', description: 'Protected test tool',
             inputSchema: { type: 'object', properties: {} },
             outputSchema: { type: 'object' }
@@ -1666,7 +1687,7 @@ describe('3.0 configuration rules', () => {
 
     it('emits only tool calls on the output and serves no /health route', async () => {
         const { RED, server } = buildServer({ __runtime: { serverPort: 18131 } });
-        RED.events.emit('mcp-tool-register', { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
+        registerTool(RED, { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
             const health = await mcpFetch('http://127.0.0.1:18131/health');
@@ -1747,7 +1768,7 @@ describe('audit log and OAuth hardening', () => {
         nodeMap['default-auth'].readAccessToken = async token => token === 'test-token' ? { groups: ['test-group'],
             scopes: ['openid'], subject: 'user-1', email: 'user@example.test', client_id: 'https://claude.ai/meta', sessionId: 'session-1' } : null;
         nodeMap['default-auth'].refreshStore = { readSession: async () => ({ expiresAt: Date.now() + 60000, idleExpiresAt: Date.now() + 60000 }) };
-        RED.events.emit('mcp-tool-register', { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
+        registerTool(RED, { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
         const res = mockRes();
         const pending = server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/call',
             params: { name: 'ping', arguments: { secret: 'argument-value' } } }, { authorization: 'Bearer test-token' }), res);
@@ -1906,7 +1927,7 @@ describe('audit log and OAuth hardening', () => {
 describe('tool result tolerance', () => {
     async function call(response) {
         const { RED, server } = createRuntime();
-        RED.events.emit('mcp-tool-register', { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
+        registerTool(RED, { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
         const res = mockRes();
         const pending = server.handleToolCall({ id: 1, params: { name: 'ping', arguments: {} } }, res);
         const exec = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
@@ -1931,7 +1952,7 @@ describe('telemetry identity', () => {
             subject: 'user-1', email: 'user@example.test', client_id: 'https://chatgpt.com/oauth/codex/abc/client.json' });
         const events = [];
         runtimeNode.subscribeToolTelemetry(event => events.push(event));
-        RED.events.emit('mcp-tool-register', { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
+        registerTool(RED, { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
         const pending = server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/call',
             params: { name: 'ping', arguments: {} } }, { authorization: 'Bearer any' }), mockRes());
         await new Promise(resolve => setImmediate(resolve));

@@ -75,6 +75,8 @@ module.exports = function (RED)
         let validateArguments;
         try
         {
+            if (!node.endpoint && config.endpoint !== '__shared__')
+                throw new Error('MCP endpoint is required: select an endpoint or Shared');
             if (!/^[a-z][a-z0-9_]{0,63}$/.test(node.toolName))
                 throw new Error('Tool name must start with a lowercase letter and contain at most 64 lowercase letters, digits or underscores');
             if (node.timeoutMs && (!Number.isInteger(node.timeoutMs) || node.timeoutMs < 1000 || node.timeoutMs > 600000))
@@ -97,6 +99,23 @@ module.exports = function (RED)
                 return { endpointPath: node.endpoint, serverName: endpointName(RED, node.endpoint) || node.endpoint };
             }
             return { endpointPath: '', serverName: '' };
+        };
+
+        node.runtimes = function (binding)
+        {
+            const ids = new Set();
+            if (RED.nodes && typeof RED.nodes.eachNode === 'function')
+            {
+                RED.nodes.eachNode(candidate =>
+                {
+                    if (binding.endpointPath)
+                    {
+                        if (candidate.type === 'mcp-flow-server' && candidate.runtime &&
+                            normalizePath(candidate.serverPath || '/mcp') === binding.endpointPath) ids.add(candidate.runtime);
+                    } else if (candidate.type === 'mcp-runtime') ids.add(candidate.id);
+                });
+            }
+            return Array.from(ids).map(id => RED.nodes.getNode(id)).filter(runtime => runtime && typeof runtime.registerTool === 'function');
         };
 
         node.registerTool = function ()
@@ -160,7 +179,8 @@ module.exports = function (RED)
             };
 
             node.status({ fill: 'green', shape: 'dot', text: statusText(node, binding.endpointPath ? 'registered' : 'shared') });
-            RED.events.emit('mcp-tool-register', toolDefinition);
+            node.registeredRuntimes = node.runtimes(binding);
+            node.registeredRuntimes.forEach(runtime => runtime.registerTool(toolDefinition));
 
             node.isRegistered = true;
             node.debug(`Tool "${node.toolName}" registered`);
@@ -174,11 +194,8 @@ module.exports = function (RED)
                 return;
             }
 
-            const binding = node.binding();
-            RED.events.emit('mcp-tool-unregister', {
-                name: node.toolName, endpointPath: binding.endpointPath, serverName: binding.serverName,
-                registeredBy: node.id
-            });
+            (node.registeredRuntimes || []).forEach(runtime => runtime.unregisterTool(node.id));
+            node.registeredRuntimes = [];
 
             node.isRegistered = false;
             node.hasDuplicate = false;
@@ -186,16 +203,10 @@ module.exports = function (RED)
             node.debug(`Tool "${node.toolName}" unregistered`);
         };
 
-        let closed = false;
-        const registerTimer = node.toolName && !node.validationError ? setTimeout(() =>
-        {
-            if (!closed) node.registerTool();
-        }, 500) : null;
+        if (node.toolName && !node.validationError) node.registerTool();
 
         node.on('close', function (done)
         {
-            closed = true;
-            clearTimeout(registerTimer);
             if (node.isRegistered) node.unregisterTool();
             done();
         });

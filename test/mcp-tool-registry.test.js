@@ -8,6 +8,13 @@ function buildRegistry(config = {}, nodes = {}) {
     const types = {};
     const events = new EventEmitter();
     const emitted = [];
+    const runtime = {
+        id: 'test-runtime', type: 'mcp-runtime',
+        registerTool: tool => emitted.push({ event: 'register', tool }),
+        unregisterTool: registeredBy => emitted.push({ event: 'unregister', tool: { registeredBy } })
+    };
+    const nodeList = (Array.isArray(nodes) ? nodes : Object.values(nodes))
+        .map(node => node.type === 'mcp-flow-server' && !node.runtime ? { ...node, runtime: runtime.id } : node);
     const RED = {
         events,
         nodes: {
@@ -25,15 +32,13 @@ function buildRegistry(config = {}, nodes = {}) {
                 node.warn = message => node.warnings.push(message);
             },
             registerType(name, ctor) { types[name] = ctor; },
-            getNode(id) { return nodes[id]; },
-            eachNode(callback) { for (const node of Array.isArray(nodes) ? nodes : Object.values(nodes)) callback(node); }
+            getNode(id) { return id === runtime.id ? runtime : nodeList.find(node => node.id === id); },
+            eachNode(callback) { for (const node of [runtime, ...nodeList]) callback(node); }
         }
     };
-    events.on('mcp-tool-register', tool => emitted.push({ event: 'register', tool }));
-    events.on('mcp-tool-unregister', tool => emitted.push({ event: 'unregister', tool }));
     delete require.cache[require.resolve('../mcp-tool-registry')];
     require('../mcp-tool-registry')(RED);
-    const registry = new types['mcp-tool-registry'](config);
+    const registry = new types['mcp-tool-registry']({ endpoint: '__shared__', ...config });
     return { registry, emitted };
 }
 
@@ -98,7 +103,7 @@ describe('mcp-tool-registry', () => {
         registry.emit('input', { topic: 'unregister' });
 
         assert.strictEqual(registry.listenerCount('input'), 0);
-        assert.deepStrictEqual(emitted, []);
+        assert.deepStrictEqual(emitted.map(entry => entry.event), ['register']);
     });
 
     // MCP-VAL-1
@@ -191,11 +196,20 @@ describe('mcp-tool-registry', () => {
 });
 
 describe('registry lifecycle', () => {
-    it('does not register a tool when closed before the delayed registration', async () => {
-        const { registry, emitted } = buildRegistry({ id: 'quick', toolName: 'quick_tool', endpoint: '__shared__' });
+    // MCP-NODE-4
+    it('registers in the runtime synchronously in the constructor and unregisters on close', async () => {
+        const { registry, emitted } = buildRegistry({ id: 'quick', toolName: 'quick_tool', endpoint: '__shared__',
+            toolSchema: '{"type":"object","properties":{}}' });
+        assert.strictEqual(registry.isRegistered, true);
+        assert.deepStrictEqual(emitted.map(entry => entry.event), ['register']);
         await new Promise(resolve => registry.emit('close', resolve));
-        await new Promise(resolve => setTimeout(resolve, 600));
-        assert.deepStrictEqual(emitted, []);
+        assert.deepStrictEqual(emitted.map(entry => entry.event), ['register', 'unregister']);
         assert.strictEqual(registry.isRegistered, false);
+    });
+
+    it('refuses a tool without an endpoint or Shared', () => {
+        const { registry, emitted } = buildRegistry({ toolName: 'orphan_tool', endpoint: '', toolSchema: '{"type":"object","properties":{}}' });
+        assert.deepStrictEqual(emitted, []);
+        assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
     });
 });

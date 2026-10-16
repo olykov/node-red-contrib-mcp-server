@@ -37,11 +37,9 @@ module.exports = function (RED)
     } = require('./lib/mcp-auth');
 
 
-    const toolRegistry = new Map();
     const serverInstances = new Map();
-    const portServers = new Map();
+    const runtimes = new Set();
     const pendingExecutions = new Map();
-    const loggedToolConflicts = new Set();
     let legacyAdminTokenWarningShown = false;
 
     function origin(value)
@@ -154,25 +152,14 @@ module.exports = function (RED)
         );
     }
 
-    // Tools bind to an endpoint by MCP path, which survives copy, import and node replacement.
-    function toolBelongsToEndpoint(tool, endpointPath)
+    function toolKey(tool)
     {
-        if (!tool) return false;
-        if (tool.endpointPath) return tool.endpointPath === endpointPath;
-        return true;
+        return tool.registeredBy || tool.name;
     }
 
-    function registryKey(tool)
-    {
-        if (tool.registeredBy) return 'node:' + tool.registeredBy;
-        return (tool.endpointPath || '*') + ':' + tool.name;
-    }
-
-    function getPortServer(port)
+    function createListener(port)
     {
         const key = Number(port);
-        if (portServers.has(key)) return portServers.get(key);
-
         const state = {
             port: key,
             bindHost: '',
@@ -348,7 +335,11 @@ module.exports = function (RED)
         state.httpServer = http.createServer(state.app);
         state.httpServer.on('error', error =>
         {
-            if (!state.isListening) return;
+            if (!state.isListening)
+            {
+                state.listenRequested = false;
+                return;
+            }
             state.isListening = false;
             for (const node of state.nodes)
             {
@@ -359,8 +350,24 @@ module.exports = function (RED)
                 if (instance) serverInstances.set(node.serverId, { ...instance, isRunning: false });
             }
         });
-        portServers.set(key, state);
         return state;
+    }
+
+    function closeListener(state, callback)
+    {
+        state.isListening = false;
+        const server = state.httpServer;
+        const close = () =>
+        {
+            server.close(() => callback());
+            if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
+        };
+        if (server.listening) return close();
+        if (!state.listenRequested) return callback();
+        const onListening = () => { server.removeListener('error', onError); close(); };
+        const onError = () => { server.removeListener('listening', onListening); callback(); };
+        server.once('listening', onListening);
+        server.once('error', onError);
     }
 
     function textResult(text, isError = false)
@@ -460,6 +467,106 @@ module.exports = function (RED)
             node.error('MCP runtime configuration is invalid: ' + node.configError);
         }
         node.adminEndpointPath = config.adminEndpointPath ? normalizePath(config.adminEndpointPath) : '';
+        node.listener = null;
+        node.tools = new Map();
+        node.endpoints = new Set();
+        const loggedToolConflicts = new Set();
+        runtimes.add(node);
+
+        node.acquireListener = function (endpoint)
+        {
+            if (!node.listener) node.listener = createListener(node.serverPort);
+            const state = node.listener;
+            const existingRoute = state.routes.get(endpoint.serverPath);
+            if (existingRoute && existingRoute !== endpoint)
+                throw new Error('MCP server path already registered on this port: ' + endpoint.serverPath);
+            state.runtimeId = node.id;
+            state.bindHost = node.bindHost || '';
+            state.routes.set(endpoint.serverPath, endpoint);
+            state.nodes.add(endpoint);
+            return state;
+        };
+
+        node.releaseListener = function (endpoint, callback)
+        {
+            const state = node.listener;
+            if (!state) return callback();
+            if (state.routes.get(endpoint.serverPath) === endpoint) state.routes.delete(endpoint.serverPath);
+            state.nodes.delete(endpoint);
+            if (state.nodes.size) return callback();
+            node.listener = null;
+            closeListener(state, callback);
+        };
+
+        node.addEndpoint = function (endpoint)
+        {
+            node.endpoints.add(endpoint);
+            node.refreshTools();
+        };
+
+        node.removeEndpoint = function (endpoint)
+        {
+            if (node.endpoints.delete(endpoint)) node.refreshTools();
+        };
+
+        node.toolsByPath = function ()
+        {
+            const tools = Array.from(node.tools.values());
+            const conflicted = new Set();
+            const active = new Set();
+            const selectedByPath = new Map();
+            for (const path of new Set(Array.from(node.endpoints, endpoint => endpoint.serverPath)))
+            {
+                const bound = tools.filter(tool => tool.endpointPath === path);
+                const shared = tools.filter(tool => !tool.endpointPath);
+                const selected = [];
+                for (const name of new Set([...bound, ...shared].map(tool => tool.name)))
+                {
+                    const endpointTools = bound.filter(tool => tool.name === name);
+                    const effective = endpointTools.length ? endpointTools : shared.filter(tool => tool.name === name);
+                    if (effective.length > 1)
+                    {
+                        effective.forEach(tool => conflicted.add(toolKey(tool)));
+                        const conflictKey = path + ':' + name;
+                        active.add(conflictKey);
+                        if (!loggedToolConflicts.has(conflictKey))
+                        {
+                            loggedToolConflicts.add(conflictKey);
+                            node.warn('Duplicate MCP tool name "' + name + '" on ' + path);
+                        }
+                    } else if (effective.length === 1) selected.push(effective[0]);
+                }
+                selectedByPath.set(path, selected.sort((a, b) => a.name.localeCompare(b.name)));
+            }
+            for (const key of loggedToolConflicts)
+                if (!active.has(key)) loggedToolConflicts.delete(key);
+            return { selectedByPath, conflicted, tools };
+        };
+
+        node.refreshTools = function ()
+        {
+            const { conflicted, tools } = node.toolsByPath();
+            for (const tool of tools)
+                if (typeof tool.setStatus === 'function') tool.setStatus(conflicted.has(toolKey(tool)));
+        };
+
+        node.publishedTools = function (path)
+        {
+            return node.toolsByPath().selectedByPath.get(path) || [];
+        };
+
+        node.registerTool = function (tool)
+        {
+            node.tools.set(toolKey(tool), tool);
+            node.refreshTools();
+        };
+
+        node.unregisterTool = function (registeredBy)
+        {
+            if (!node.tools.delete(registeredBy)) return;
+            node.refreshTools();
+        };
+
         let toolTelemetryListener = null;
         let telemetryWarningShown = false;
 
@@ -489,9 +596,16 @@ module.exports = function (RED)
             }
         };
 
-        node.on('close', function ()
+        node.on('close', function (done)
         {
             toolTelemetryListener = null;
+            runtimes.delete(node);
+            node.tools.clear();
+            node.endpoints.clear();
+            const state = node.listener;
+            node.listener = null;
+            if (state) closeListener(state, () => done());
+            else done();
         });
     }
 
@@ -580,31 +694,22 @@ module.exports = function (RED)
             // Deny by default: an endpoint without groups would admit every user of the identity provider.
             if (!node.allowedGroups.length)
                 throw new Error('MCP endpoint Groups are required');
-            const portState = getPortServer(node.serverPort);
-            if (portState.runtimeId && portState.runtimeId !== node.runtimeId)
-            {
-                throw new Error('MCP runtime port already registered by another runtime: ' + node.serverPort);
-            }
-            const existingRoute = portState.routes.get(node.serverPath);
-            if (existingRoute && existingRoute !== node) throw new Error('MCP server path already registered on this port: ' + node.serverPath);
             const slug = authRouteSlug(node.authConfig);
             const base = String(node.publicBaseUrl || '').replace(/\/+$/, '');
-            for (const registered of portServers.values())
+            for (const runtime of runtimes)
             {
-                for (const candidate of registered.routes.values())
+                if (!runtime.listener) continue;
+                for (const candidate of runtime.listener.routes.values())
                 {
                     if (candidate.authConfig === node.authConfig) continue;
                     const sameBase = base && base === String(candidate.publicBaseUrl || '').replace(/\/+$/, '');
-                    if ((registered.port === portState.port || sameBase) && candidate.authConfig.oauthSlug === slug)
+                    if ((runtime === node.runtime || sameBase) && candidate.authConfig.oauthSlug === slug)
                     {
                         throw new Error('OAuth slug already registered by another auth configuration: ' + slug);
                     }
                 }
             }
-            portState.runtimeId = node.runtimeId;
-            portState.bindHost = node.runtime.bindHost || '';
-            portState.routes.set(node.serverPath, node);
-            portState.nodes.add(node);
+            const portState = node.runtime.acquireListener(node);
             node.portState = portState;
             node.app = portState.app;
             node.httpServer = portState.httpServer;
@@ -704,46 +809,7 @@ module.exports = function (RED)
 
         node.registeredTools = function ()
         {
-            const tools = Array.from(toolRegistry.keys())
-                .map(key => toolRegistry.get(key))
-                .filter(Boolean);
-            const paths = new Set([node.serverPath]);
-            for (const state of portServers.values())
-                for (const path of state.routes.keys()) paths.add(path);
-
-            const conflictedOwners = new Set();
-            const activeConflicts = new Set();
-            const selectedByPath = new Map();
-            for (const path of paths)
-            {
-                const bound = tools.filter(tool => tool.endpointPath === path);
-                const shared = tools.filter(tool => !tool.endpointPath);
-                const names = new Set([...bound, ...shared].map(tool => tool.name));
-                const selected = [];
-                for (const name of names)
-                {
-                    const endpointTools = bound.filter(tool => tool.name === name);
-                    const effective = endpointTools.length ? endpointTools : shared.filter(tool => tool.name === name);
-                    if (effective.length > 1)
-                    {
-                        effective.forEach(tool => conflictedOwners.add(tool.registeredBy || tool.name));
-                        const conflictKey = path + ':' + name;
-                        activeConflicts.add(conflictKey);
-                        if (!loggedToolConflicts.has(conflictKey))
-                        {
-                            loggedToolConflicts.add(conflictKey);
-                            node.warn('Duplicate MCP tool name "' + name + '" on ' + path);
-                        }
-                    } else if (effective.length === 1) selected.push(effective[0]);
-                }
-                selectedByPath.set(path, selected);
-            }
-            for (const key of loggedToolConflicts)
-                if (!activeConflicts.has(key)) loggedToolConflicts.delete(key);
-            for (const tool of tools)
-                if (typeof tool.setStatus === 'function')
-                    tool.setStatus(conflictedOwners.has(tool.registeredBy || tool.name));
-            return (selectedByPath.get(node.serverPath) || []).sort((a, b) => a.name.localeCompare(b.name));
+            return node.runtime ? node.runtime.publishedTools(node.serverPath) : [];
         };
 
         node.toolDescriptor = function (tool)
@@ -966,8 +1032,9 @@ module.exports = function (RED)
 
                 portState.httpServer.once('error', startError);
                 portState.httpServer.once('listening', startListening);
-                if (!portState.httpServer.listening)
+                if (!portState.httpServer.listening && !portState.listenRequested)
                 {
+                    portState.listenRequested = true;
                     if (portState.bindHost) portState.httpServer.listen(portState.port, portState.bindHost);
                     else portState.httpServer.listen(portState.port);
                 }
@@ -990,11 +1057,6 @@ module.exports = function (RED)
 
             const portState = node.portState;
             node.portState = null;
-            if (portState)
-            {
-                portState.routes.delete(node.serverPath);
-                portState.nodes.delete(node);
-            }
 
             const finish = () =>
             {
@@ -1004,18 +1066,8 @@ module.exports = function (RED)
                 callback(null, { success: true, message: 'Server stopped' });
             };
 
-            if (portState && portState.nodes.size === 0 && portState.httpServer)
-            {
-                // Detach synchronously: a replacement node must get a fresh listener, not this closing one.
-                portState.isListening = false;
-                if (portServers.get(portState.port) === portState) portServers.delete(portState.port);
-                portState.httpServer.close(() => finish());
-                if (typeof portState.httpServer.closeIdleConnections === 'function')
-                    portState.httpServer.closeIdleConnections();
-            } else
-            {
-                finish();
-            }
+            if (portState && node.runtime) node.runtime.releaseListener(node, finish);
+            else finish();
         };
 
         let restartTimer = null;
@@ -1064,6 +1116,8 @@ module.exports = function (RED)
             }
         });
 
+        if (node.runtime && typeof node.runtime.addEndpoint === 'function') node.runtime.addEndpoint(node);
+
         const startOnDeploy = () => node.startServer();
         RED.events.on('flows:started', startOnDeploy);
 
@@ -1079,6 +1133,7 @@ module.exports = function (RED)
                 restartDone();
             }
             RED.events.removeListener('flows:started', startOnDeploy);
+            if (node.runtime && typeof node.runtime.removeEndpoint === 'function') node.runtime.removeEndpoint(node);
             node.adminTools.dispose();
             for (const [executionId, pending] of pendingExecutions.entries())
             {
@@ -1099,36 +1154,6 @@ module.exports = function (RED)
     });
     RED.nodes.registerType('mcp-flow-server', MCPFlowServerNode);
 
-    RED.events.on('mcp-tool-register', (toolDef) =>
-    {
-        if (!toolDef || !toolDef.name) return;
-        toolRegistry.set(registryKey(toolDef), toolDef);
-        for (const state of portServers.values())
-            for (const node of state.routes.values()) node.registeredTools();
-    });
-    RED.events.on('mcp-tool-unregister', (toolDef) =>
-    {
-        if (typeof toolDef === 'string')
-        {
-            for (const key of toolRegistry.keys())
-            {
-                const tool = toolRegistry.get(key);
-                if (tool && tool.name === toolDef && !tool.endpointPath) toolRegistry.delete(key);
-            }
-            return;
-        }
-        if (!toolDef || !toolDef.name) return;
-        if (toolDef.registeredBy)
-        {
-            toolRegistry.delete('node:' + toolDef.registeredBy);
-        } else
-        {
-            toolRegistry.delete(registryKey(toolDef));
-        }
-        for (const state of portServers.values())
-            for (const node of state.routes.values()) node.registeredTools();
-    });
-
     const readPermission = RED.auth && typeof RED.auth.needsPermission === 'function' ?
         [RED.auth.needsPermission('mcp-flow-server.read')] : [];
     RED.httpAdmin.get('/mcp-flow-servers', ...readPermission, function (req, res)
@@ -1139,9 +1164,9 @@ module.exports = function (RED)
             const server = serverInstances.get(key);
             if (server)
             {
-                const toolCount = Array.from(toolRegistry.keys())
-                    .map(toolKey => toolRegistry.get(toolKey))
-                    .filter(tool => toolBelongsToEndpoint(tool, server.path)).length;
+                const runtime = configNode(RED, server.runtimeId);
+                const toolCount = runtime && typeof runtime.publishedTools === 'function' ?
+                    runtime.publishedTools(server.path).length : 0;
                 servers.push({ serverId: key, runtimeId: server.runtimeId, endpointId: server.endpointId, serverName: server.serverName, path: server.path, isRunning: server.isRunning, port: server.port, startTime: server.startTime, toolCount });
             }
         }

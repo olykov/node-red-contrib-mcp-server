@@ -45,6 +45,56 @@ describe('Node-RED runtime integration', () => {
         await helper.stopServer();
     });
 
+    // MCP-NODE-4, MCP-NODE-5
+    it('lists tools right after deploy and reopens the runtime port exactly once on redeploy', async () => {
+        const http = require('node:http');
+        const port = await unusedPort();
+        const flows = [
+            { id: 'rt-tab', type: 'tab', label: 'Runtime' },
+            { id: 'rt-runtime', type: 'mcp-runtime', name: 'Runtime', runtimeName: 'runtime', serverPort: port,
+                bindHost: '127.0.0.1', publicBaseUrl: 'http://127.0.0.1:' + port },
+            { id: 'rt-storage', type: 'mcp-redis', mode: 'memory' },
+            { id: 'rt-auth', type: 'mcp-auth', oauthSlug: 'runtime-login', provider: 'oidc', issuerUrl: 'https://idp.example.test',
+                clientId: 'client', allowedClientHosts: 'client.example.test', redis: 'rt-storage' },
+            { id: 'rt-endpoint', type: 'mcp-flow-server', z: 'rt-tab', runtime: 'rt-runtime', auth: 'rt-auth',
+                serverName: 'runtime', serverPath: '/mcp/runtime', allowedGroups: 'runtime-users', wires: [] },
+            ...['alpha', 'beta'].map(name => ({ id: 'rt-' + name, type: 'mcp-tool-registry', z: 'rt-tab', toolName: name,
+                endpoint: '/mcp/runtime', toolSchema: '{"type":"object","properties":{}}', wires: [] }))
+        ];
+        const listen = http.Server.prototype.listen;
+        const close = http.Server.prototype.close;
+        const calls = [];
+        http.Server.prototype.listen = function (...args) {
+            if (args[0] === port) calls.push('listen');
+            return listen.apply(this, args);
+        };
+        http.Server.prototype.close = function (...args) {
+            const address = this.address();
+            if (address && address.port === port) calls.push('close');
+            return close.apply(this, args);
+        };
+        try {
+            await helper.load(registerPackageNodes, flows);
+            const auth = helper.getNode('rt-auth');
+            auth.readAccessToken = async token => token === 'runtime-token' ? { groups: ['runtime-users'], scopes: ['openid'] } : null;
+            await waitFor(() => helper.getNode('rt-endpoint').isRunning);
+            const list = await mcpFetch('http://127.0.0.1:' + port + '/mcp/runtime', {
+                method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer runtime-token' },
+                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+            });
+            assert.deepEqual((await list.json()).result.tools.map(tool => tool.name), ['alpha', 'beta']);
+            assert.deepEqual(calls, ['listen']);
+
+            await helper.setFlows(flows.map(node => node.id === 'rt-runtime' ? { ...node, name: 'Runtime renamed' } : node), 'full');
+            await waitFor(() => helper.getNode('rt-endpoint').isRunning);
+            assert.deepEqual(calls, ['listen', 'close', 'listen']);
+        } finally {
+            http.Server.prototype.listen = listen;
+            http.Server.prototype.close = close;
+            await helper.unload();
+        }
+    });
+
     it('deploys runtime, config and tool nodes; handles auth, admin listing, modified nodes and close', async () => {
         const port = await unusedPort();
         const flows = [
