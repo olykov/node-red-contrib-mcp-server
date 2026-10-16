@@ -1034,12 +1034,18 @@ describe('upstream mcp-flow-server local extensions', () => {
         const res = mockRes();
 
         await server.handleMcpHttpRequest(mockReq(
-            { jsonrpc: '2.0', id: 1, method: 'initialize' },
+            { jsonrpc: '2.0', id: 1, method: 'tools/list' },
             { authorization: 'Bearer configured-value' }
         ), res);
-
         assert.strictEqual(res.statusCode, 200);
-        assert.strictEqual(res.body.result.serverInfo.name, 'test');
+
+        authNode.readAccessToken = async () => ({ resource: 'https://mcp.example.test/mcp/test', scopes: ['openid'], groups: ['Team C'] });
+        const partial = mockRes();
+        await server.handleMcpHttpRequest(mockReq(
+            { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+            { authorization: 'Bearer configured-value' }
+        ), partial);
+        assert.strictEqual(partial.statusCode, 403);
     });
 
     it('allows initialize with a valid endpoint-scoped access token', async () => {
@@ -1524,9 +1530,9 @@ describe('Creating Nodes review fixes', () => {
         assert.strictEqual(runtime.adminToken, 'from-editor');
     });
 
-    it('accepts comma- and whitespace-separated endpoint groups', () => {
+    it('splits endpoint groups on commas and new lines and keeps spaces inside names', () => {
         const { server } = createRuntime({ allowedGroups: 'ops admins,  auditors\nreaders' });
-        assert.deepStrictEqual(server.allowedGroups, ['ops', 'admins', 'auditors', 'readers']);
+        assert.deepStrictEqual(server.allowedGroups, ['ops admins', 'auditors', 'readers']);
     });
 
     it('protects the editor server listing with a read permission', () => {

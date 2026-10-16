@@ -187,7 +187,7 @@ its base scopes are fixed to `openid profile email groups`.
 Microsoft uses a tenant GUID and application client GUID; its tenant-specific v2 issuer,
 `openid profile email` scopes and `roles` claim are fixed. Microsoft permissions come only
 from the verified ID token; at least one assigned app role is required. Endpoint Groups
-(separated by commas or spaces) must match the role values used for that endpoint. No Graph directory permissions are needed.
+(separated by commas; names may contain spaces) must match the role values used for that endpoint. No Graph directory permissions are needed.
 
 Authorization state, codes and access tokens are isolated by auth node, provider, issuer,
 client ID, claim settings and OAuth slug, even when storage is shared. Switching provider/configuration

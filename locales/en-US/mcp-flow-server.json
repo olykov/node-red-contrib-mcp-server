@@ -47,7 +47,7 @@
             "serverPath": "MCP Path",
             "serverPathPlaceholder": "/mcp",
             "allowedGroups": "Groups",
-            "allowedGroupsPlaceholder": "Required, comma- or space-separated",
+            "allowedGroupsPlaceholder": "Required, comma-separated",
             "toolTimeoutMs": "Tool Timeout (ms)",
             "maxConcurrentCalls": "Max Concurrent Calls",
             "refreshStatusButton": "Refresh Status",

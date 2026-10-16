@@ -21,6 +21,7 @@ module.exports = function (RED)
         exchangeClientCode,
         oauthScopes,
         protectedResourceMetadata,
+        parseGroupNames,
         validateRequest,
         writeAuthFailure
     } = require('./lib/mcp-auth');
@@ -435,7 +436,7 @@ module.exports = function (RED)
             node.allowedOrigins = [];
         }
         node.allowFunctionCode = config.allowFunctionCode === true || config.allowFunctionCode === 'true';
-        node.codeGroups = parseGroupList(config.codeGroups || '');
+        node.codeGroups = parseGroupNames(config.codeGroups || '');
         node.adminPort = Number(config.adminPort || 1880);
         node.adminToken = (node.credentials && node.credentials.adminToken) || '';
         try
@@ -535,7 +536,7 @@ module.exports = function (RED)
         node.serverPath = normalizePath(config.serverPath);
         node.serverPort = runtime ? runtime.serverPort : 0;
         node.publicBaseUrl = runtime ? runtime.publicBaseUrl : '';
-        node.allowedGroups = parseGroupList(config.allowedGroups || '');
+        node.allowedGroups = parseGroupNames(config.allowedGroups || '');
         node.adminToolsEnabled = hasAdminTools(runtime, node.serverPath);
         node.adminPort = runtime ? runtime.adminPort : 0;
         node.adminToken = runtimeAdminToken(runtime);
