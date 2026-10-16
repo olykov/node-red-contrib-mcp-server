@@ -426,32 +426,49 @@ deployment.
 
 ## Kubernetes
 
-Set **Bind Host** to the pod IP or `0.0.0.0` (not `127.0.0.1`) so the Service can reach the
-container, and set **Trusted Proxies** to the cluster's ingress/load-balancer CIDR so audit and
-metrics `client` IPs reflect the real caller instead of the proxy address. Set **Allowed Origins**
-to the public hostnames of any browser-based MCP client; the **Base URL** origin is always
-allowed.
+The MCP listener runs inside the Node-RED pod on the `mcp-runtime` port, separate from the
+editor port. Expose it through a Service port and route only the MCP and OAuth paths to it:
 
-Use a `preStop` hook that sleeps at least as long as the endpoint's **Tool Timeout**
-(`toolTimeoutMs`, default 30000 ms) before Node-RED receives `SIGTERM`, so in-flight tool calls
-have time to finish instead of being cut off mid-response:
+- each MCP endpoint path (POST);
+- `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/*`;
+- `/.well-known/oauth-authorization-server` and `/.well-known/oauth-authorization-server/*`;
+- `/oauth/*/authorize`, `/oauth/*/callback` (GET) and `/oauth/*/token` (POST).
+
+| Setting | Value |
+|---|---|
+| **Bind Host** | The pod IP or `0.0.0.0`, not `127.0.0.1`: traffic from the Service arrives on the pod address |
+| **Base URL** | The public origin that clients use |
+| **Trusted Proxies** | CIDR ranges of the ingress, load balancer and mesh proxies, so the audit log and metrics record the real client address |
+| **Allowed Origins** | Origins of browser-based MCP clients other than the Base URL origin, if any |
+| `mcp-redis` | Redis mode. Memory mode keeps authorization state and opaque access tokens in process memory, so a second pod, a restarted pod or a rolling update loses sessions and tokens issued by another pod |
+| Retries on `/oauth/*/token` | Off in the ingress and mesh, or only on connect failures: a retried authorization code or refresh token counts as reuse, and reuse revokes the session |
+| Route timeout | Longer than **Tool Timeout** |
+
+Probes and shutdown, with the example endpoint `/mcp/example` on port 8001:
 
 ```yaml
+ports:
+  - containerPort: 1880
+  - containerPort: 8001
+readinessProbe:
+  httpGet:
+    path: /.well-known/oauth-protected-resource/mcp/example
+    port: 8001
+livenessProbe:
+  tcpSocket:
+    port: 1880
 lifecycle:
   preStop:
     exec:
       command: ["sh", "-c", "sleep 30"]
+terminationGracePeriodSeconds: 60
 ```
 
-Readiness and liveness probes can both be a TCP socket check on the runtime port (or an HTTP
-check against any registered endpoint path, which returns 401 without a token but proves the
-port accepts connections); liveness should have a longer timeout than readiness so a slow
-identity-provider round trip does not restart the pod.
-
-Running more than one pod requires `mcp-redis` in Redis mode: Memory mode keeps authorization
-state and opaque access tokens in process memory, so a second pod or a restarted pod cannot see
-sessions or tokens issued by another pod, and sign-ins and refreshes fail unpredictably behind a
-load balancer.
+The readiness path returns 200 only while that endpoint runs with a valid auth configuration.
+Do not probe the endpoint path itself: it answers 401 without a token, and an HTTP probe treats
+only 200 to 399 as success. The `preStop` pause must be at least the endpoint **Tool Timeout**
+(`toolTimeoutMs`, default 30000 ms) so that calls in flight finish before Node-RED closes the
+endpoint; `terminationGracePeriodSeconds` must exceed the pause.
 
 ## Environment Variables
 
