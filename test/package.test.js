@@ -65,9 +65,11 @@ it('ships an example flow whose nodes satisfy the current editor contracts', () 
     assert.strictEqual(byId.get(server.auth).type, 'mcp-auth');
     assert.strictEqual(byId.get(byId.get(server.auth).redis).type, 'mcp-redis');
     assert.strictEqual(server.serverPort, undefined);
-    assert.deepStrictEqual(server.wires, []);
+    assert.strictEqual(server.wires, undefined);
+    assert.strictEqual(server.z, undefined);
     for (const tool of flow.filter(node => node.type === 'mcp-tool-registry')) {
-        assert.strictEqual(tool.endpoint, server.serverPath);
+        assert.strictEqual(tool.scope, 'endpoint');
+        assert.strictEqual(tool.endpoint, server.id);
         let next = byId.get(tool.wires[0][0]);
         while (next.type !== 'mcp-tool-response') next = byId.get(next.wires[0][0]);
         assert.match(tool.toolName, /^[a-z][a-z0-9_]*$/);

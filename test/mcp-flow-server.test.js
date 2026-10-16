@@ -46,6 +46,7 @@ function createRuntime(config = {}) {
                     configs.push({ ...merged, type: name });
                     const instance = new ctor(merged);
                     if (name === 'mcp-runtime') RED.mcpRuntimes.push(instance);
+                    if ((name === 'mcp-runtime' || name === 'mcp-flow-server') && merged.id) nodeMap[merged.id] = instance;
                     return instance;
                 };
                 types['options:' + name] = options;
@@ -105,7 +106,7 @@ function mockRes() {
 }
 
 function registerTool(RED, tool) {
-    const registered = { registeredBy: tool.name + '@' + (tool.endpointPath || '*'),
+    const registered = { registeredBy: tool.name + '@' + (tool.endpointId || '*'),
         deliver: msg => RED.delivered.push(msg), cancel: mcp => RED.cancelled.push(mcp), ...tool };
     for (const runtime of RED.mcpRuntimes) runtime.registerTool(registered);
 }
@@ -181,17 +182,16 @@ describe('upstream mcp-flow-server local extensions', () => {
     });
 
     it('serves registry annotations through the MCP tools/list request', async () => {
-        const { RED, types, server } = buildServer();
-        require('../mcp-tool-registry')(RED);
-        const registry = new types['mcp-tool-registry']({
+        const { types, server } = buildServer();
+        new types['mcp-tool-registry']({
             id: 'registry-1',
             toolName: 'read_status',
-            endpoint: server.serverPath,
+            scope: 'endpoint',
+            endpoint: server.id,
             toolSchema: '{"type":"object","properties":{}}',
             toolBehavior: 'read',
             worldAccess: 'closed'
         });
-        registry.registerTool();
 
         const res = mockRes();
         await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/list' },
@@ -206,23 +206,20 @@ describe('upstream mcp-flow-server local extensions', () => {
     });
 
     // MCP-REG-1
-    it('omits duplicate endpoint tools and restores the remaining owner on unregister', () => {
-        const { RED, types, server, runtimeNode } = buildServer();
-        require('../mcp-tool-registry')(RED);
+    it('omits duplicate endpoint tools and restores the remaining owner on unregister', async () => {
+        const { types, server, runtimeNode } = buildServer();
         server.initializeServer();
         const first = new types['mcp-tool-registry']({ id: 'duplicate-a', toolName: 'same_tool',
-            endpoint: server.serverPath, toolSchema: '{"type":"object","properties":{}}' });
+            scope: 'endpoint', endpoint: server.id, toolSchema: '{"type":"object","properties":{}}' });
         const second = new types['mcp-tool-registry']({ id: 'duplicate-b', toolName: 'same_tool',
-            endpoint: server.serverPath, toolSchema: '{"type":"object","properties":{}}' });
-        first.registerTool();
-        second.registerTool();
+            scope: 'endpoint', endpoint: server.id, toolSchema: '{"type":"object","properties":{}}' });
 
         assert.deepStrictEqual(server.registeredTools().map(tool => tool.name), []);
         assert.equal(first.statuses.at(-1).text, 'duplicate');
         assert.equal(second.statuses.at(-1).text, 'duplicate');
         assert.equal(runtimeNode.warnings.filter(message => message.includes('Duplicate MCP tool name')).length, 1);
 
-        first.unregisterTool();
+        await new Promise(resolve => first.emit('close', resolve));
         assert.deepStrictEqual(server.registeredTools().map(tool => tool.registeredBy), ['duplicate-b']);
         assert.equal(second.statuses.at(-1).text, 'registered');
     });
@@ -234,7 +231,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             inputSchema: { type: 'object', properties: {} } });
         registerTool(RED, { name: 'same', description: 'Shared', registeredBy: 'shared',
             inputSchema: { type: 'object', properties: {} } });
-        registerTool(RED, { name: 'same', description: 'Bound', endpointPath: server.serverPath,
+        registerTool(RED, { name: 'same', description: 'Bound', endpointId: server.id,
             registeredBy: 'bound', inputSchema: { type: 'object', properties: {} } });
         registerTool(RED, { name: 'alpha', description: 'A', registeredBy: 'alpha',
             inputSchema: { type: 'object', properties: {} } });
@@ -272,7 +269,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         registerTool(RED, {
             name: 'read_status',
             description: 'Read status',
-            endpointPath: '/mcp/ops',
+            endpointId: server.id,
             inputSchema: { type: 'object', properties: {} }
         });
 
@@ -295,13 +292,13 @@ describe('upstream mcp-flow-server local extensions', () => {
         registerTool(RED, {
             name: 'alpha_tool',
             description: 'Alpha',
-            endpointPath: '/mcp/test',
+            endpointId: 'alpha-endpoint',
             inputSchema: { type: 'object', properties: {} }
         });
         registerTool(RED, {
             name: 'beta_tool',
             description: 'Beta',
-            endpointPath: '/mcp/beta',
+            endpointId: 'beta-endpoint',
             inputSchema: { type: 'object', properties: {} }
         });
 
@@ -341,7 +338,7 @@ describe('upstream mcp-flow-server local extensions', () => {
     });
 
     // MCP-NODE-5
-    it('marks an endpoint red when a second runtime asks for a port in use', async () => {
+    it('marks the tools of an endpoint red when a second runtime asks for a port in use', async () => {
         const runtime = createRuntime({
             id: 'endpoint-a',
             serverPath: '/mcp/a',
@@ -361,12 +358,15 @@ describe('upstream mcp-flow-server local extensions', () => {
             serverName: 'b',
             serverPath: '/mcp/b'
         });
+        const tool = new runtime.types['mcp-tool-registry']({ id: 'tool-b', toolName: 'tool_b', scope: 'endpoint',
+            endpoint: 'endpoint-b', toolSchema: '{"type":"object","properties":{}}' });
         await new Promise((resolve, reject) => runtime.server.startServer(error => error ? reject(error) : resolve()));
         try {
             const failure = await new Promise(resolve => serverB.startServer(error => resolve(error)));
             assert.equal(failure.code, 'EADDRINUSE');
             assert.equal(serverB.isRunning, false);
-            assert.deepStrictEqual(serverB.statuses.at(-1), { fill: 'red', shape: 'dot', text: 'error' });
+            assert.equal(serverB.state, 'error');
+            assert.deepStrictEqual(tool.statuses.at(-1), { fill: 'red', shape: 'ring', text: 'endpoint error' });
         } finally {
             await new Promise(resolve => serverB.emit('close', resolve));
             await new Promise(resolve => runtime.server.emit('close', resolve));
@@ -914,13 +914,13 @@ describe('upstream mcp-flow-server local extensions', () => {
         registerTool(RED, {
             name: 'status_tool',
             description: 'Alpha status',
-            endpointPath: '/mcp/test',
+            endpointId: 'alpha-endpoint',
             inputSchema: { type: 'object', properties: { alpha: { type: 'boolean' } } }
         });
         registerTool(RED, {
             name: 'status_tool',
             description: 'Beta status',
-            endpointPath: '/mcp/beta',
+            endpointId: 'beta-endpoint',
             inputSchema: { type: 'object', properties: { beta: { type: 'boolean' } } }
         });
 
@@ -1401,7 +1401,7 @@ describe('automatic runtime startup without CORS', () => {
             await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
             server.httpServer.emit('error', new Error('simulated socket failure'));
             assert.equal(server.isRunning, false);
-            assert.deepStrictEqual(server.statuses.at(-1), { fill: 'red', shape: 'dot', text: 'error' });
+            assert.equal(server.state, 'error');
             assert.ok(server.errors.some(message => message.includes('simulated socket failure')));
         } finally {
             await new Promise(resolve => server.emit('close', resolve));
@@ -1545,50 +1545,19 @@ describe('Creating Nodes review fixes', () => {
         assert.strictEqual(chain[0].permission, 'mcp-flow-server.read');
     });
 
-    it('uses done for commands, sends nothing for them and reports start failures', async () => {
-        const { server } = createRuntime({ runtime: 'missing-runtime' });
-        const sent = [];
-        await new Promise(resolve => server.emit('input', { topic: 'status' }, msg => sent.push(msg), resolve));
-        assert.strictEqual(sent.length, 0);
-        const failure = await new Promise(resolve => server.emit('input', { topic: 'start' }, () => {}, resolve));
-        assert.match(failure.message, /MCP runtime is required/);
-        const ignored = await new Promise(resolve => server.emit('input', { topic: 'unknown' }, () => {}, resolve));
-        assert.strictEqual(ignored, undefined);
+    // MCP-NODE-3
+    it('takes no input messages, so start, stop and restart commands do not exist', () => {
+        const { server } = createRuntime();
+        assert.strictEqual(server.listenerCount('input'), 0);
     });
 
-    it('cancels a pending restart and sends nothing after close', async () => {
-        const { server } = createRuntime({ __runtime: { serverPort: 18118 } });
-        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
-        server.emit('input', { topic: 'restart' }, () => {}, () => {});
-        await new Promise(resolve => setTimeout(resolve, 50));
-        const sentBefore = server.sent.length;
-        await new Promise(resolve => server.emit('close', resolve));
-        await new Promise(resolve => setTimeout(resolve, 1200));
-        assert.strictEqual(server.isRunning, false);
-        assert.ok(!server.sent.slice(sentBefore).some(msg => msg.topic === 'mcp-server-started'));
-    });
-
-    // MCP-LIFE-1
-    it('calls the deferred restart done exactly once when close happens during the 1s timer', async () => {
-        const { server } = createRuntime({ __runtime: { serverPort: 18130 } });
-        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
-        let restartDoneCalls = 0;
-        server.emit('input', { topic: 'restart' }, () => {}, () => { restartDoneCalls++; });
-        await new Promise(resolve => setTimeout(resolve, 50));
-        assert.strictEqual(restartDoneCalls, 0);
-        await new Promise(resolve => server.emit('close', resolve));
-        await new Promise(resolve => setTimeout(resolve, 1200));
-        assert.strictEqual(restartDoneCalls, 1);
-    });
-
-    it('does not send stopped events or status while closing', async () => {
+    it('sends nothing and sets no node status while starting and closing', async () => {
         const { server } = createRuntime({ __runtime: { serverPort: 18119 } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
-        const sent = server.sent.length;
-        const statuses = server.statuses.length;
+        assert.equal(server.state, 'running');
         await new Promise(resolve => server.emit('close', resolve));
-        assert.strictEqual(server.sent.length, sent);
-        assert.strictEqual(server.statuses.length, statuses);
+        assert.deepStrictEqual(server.sent, []);
+        assert.deepStrictEqual(server.statuses, []);
     });
 
     it('reports token storage failures as 503 and logs unknown refresh tokens', async () => {
@@ -1641,16 +1610,15 @@ describe('Creating Nodes review fixes', () => {
 });
 
 describe('3.0 configuration rules', () => {
-    it('binds registry tools to the endpoint MCP path so a replacement endpoint keeps them', () => {
-        const { RED, types, server, runtimeNode } = buildServer({ id: 'old-endpoint', serverPath: '/mcp/stable' });
-        require('../mcp-tool-registry')(RED);
-        const registry = new types['mcp-tool-registry']({ id: 'tool-1', toolName: 'stable_tool', endpoint: '/mcp/stable',
+    it('binds Endpoint tools to the endpoint node id so a redeployed endpoint keeps them', () => {
+        const { RED, types, server, runtimeNode } = buildServer({ id: 'stable-endpoint', serverPath: '/mcp/stable' });
+        new types['mcp-tool-registry']({ id: 'tool-1', toolName: 'stable_tool', scope: 'endpoint', endpoint: 'stable-endpoint',
             toolSchema: '{"type":"object","properties":{}}' });
-        registry.registerTool();
-        const replacement = new types['mcp-flow-server']({ id: 'new-endpoint', runtime: runtimeNode.id,
-            auth: 'default-auth', serverPath: '/mcp/stable' });
+        const replacement = new types['mcp-flow-server']({ id: 'stable-endpoint', runtime: runtimeNode.id,
+            auth: 'default-auth', serverPath: '/mcp/renamed' });
         const other = new types['mcp-flow-server']({ id: 'other-endpoint', runtime: runtimeNode.id,
-            auth: 'default-auth', serverPath: '/mcp/other' });
+            auth: 'default-auth', serverPath: '/mcp/stable' });
+        assert.ok(RED.types['mcp-tool-response']);
         assert.deepStrictEqual(server.registeredTools().map(tool => tool.name), ['stable_tool']);
         assert.deepStrictEqual(replacement.registeredTools().map(tool => tool.name), ['stable_tool']);
         assert.deepStrictEqual(other.registeredTools(), []);
@@ -1788,12 +1756,6 @@ describe('audit log and OAuth hardening', () => {
             { authorization: 'Bearer invalid-test-token', 'x-forwarded-for': '203.0.113.5, 10.0.0.2' }), mockRes());
         const [denied] = events(server.logs, 'mcp.auth');
         assert.strictEqual(denied.ip, '203.0.113.5');
-    });
-
-    it('audits start, stop and restart commands', async () => {
-        const { server } = createRuntime({ runtime: 'missing-runtime' });
-        await new Promise(resolve => server.emit('input', { topic: 'stop' }, () => {}, resolve));
-        assert.deepStrictEqual(events(server.logs, 'mcp.command').map(entry => entry.command), ['stop']);
     });
 
     // MCP-KEEP-1

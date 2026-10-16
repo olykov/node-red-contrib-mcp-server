@@ -46,8 +46,7 @@
     });
 
     RED.nodes.registerType('mcp-flow-server', {
-        category: 'mcp',
-        color: '#3FADB5',
+        category: 'config',
         defaults: {
             name: { value: '' },
             runtime: { value: '', type: 'mcp-runtime', required: true },
@@ -62,16 +61,9 @@
                 return RED.validators.number()(v) && Number.isInteger(Number(v)) && v >= 1 && v <= 1024;
             } }
         },
-        inputs: 1,
-        outputs: 0,
         paletteLabel: 'MCP Server',
-        inputLabels: 'command',
-        icon: 'font-awesome/fa-cogs',
         label: function() {
-            return this.name || this._('mcp-flow-server.label.paletteLabel');
-        },
-        labelStyle: function() {
-            return this.name ? 'node_label_italic' : '';
+            return this.name || this.serverPath || this._('mcp-flow-server.label.paletteLabel');
         },
         oneditprepare: function() {
             var node = this;
@@ -173,41 +165,41 @@
 
 <script type="text/html" data-template-name="mcp-flow-server">
     <div class="form-row">
-        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-flow-server.label.name"></span></label>
-        <input type="text" id="node-input-name" data-i18n="[placeholder]mcp-flow-server.label.namePlaceholder">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-flow-server.label.name"></span></label>
+        <input type="text" id="node-config-input-name" data-i18n="[placeholder]mcp-flow-server.label.namePlaceholder">
     </div>
 
     <div class="form-row">
-        <label for="node-input-runtime"><i class="fa fa-sitemap"></i> <span data-i18n="mcp-flow-server.label.runtime"></span></label>
-        <input type="text" id="node-input-runtime">
+        <label for="node-config-input-runtime"><i class="fa fa-sitemap"></i> <span data-i18n="mcp-flow-server.label.runtime"></span></label>
+        <input type="text" id="node-config-input-runtime">
     </div>
     <div class="form-row">
-        <label for="node-input-auth"><i class="fa fa-lock"></i> <span data-i18n="mcp-flow-server.label.auth"></span></label>
-        <input type="text" id="node-input-auth">
+        <label for="node-config-input-auth"><i class="fa fa-lock"></i> <span data-i18n="mcp-flow-server.label.auth"></span></label>
+        <input type="text" id="node-config-input-auth">
     </div>
 
     <hr>
     <h4 data-i18n="mcp-flow-server.label.endpointHeading"></h4>
 
     <div class="form-row">
-        <label for="node-input-serverName"><i class="fa fa-server"></i> <span data-i18n="mcp-flow-server.label.serverName"></span></label>
-        <input type="text" id="node-input-serverName" data-i18n="[placeholder]mcp-flow-server.label.serverNamePlaceholder">
+        <label for="node-config-input-serverName"><i class="fa fa-server"></i> <span data-i18n="mcp-flow-server.label.serverName"></span></label>
+        <input type="text" id="node-config-input-serverName" data-i18n="[placeholder]mcp-flow-server.label.serverNamePlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-input-serverPath"><i class="fa fa-link"></i> <span data-i18n="mcp-flow-server.label.serverPath"></span></label>
-        <input type="text" id="node-input-serverPath" data-i18n="[placeholder]mcp-flow-server.label.serverPathPlaceholder">
+        <label for="node-config-input-serverPath"><i class="fa fa-link"></i> <span data-i18n="mcp-flow-server.label.serverPath"></span></label>
+        <input type="text" id="node-config-input-serverPath" data-i18n="[placeholder]mcp-flow-server.label.serverPathPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-input-allowedGroups"><i class="fa fa-users"></i> <span data-i18n="mcp-flow-server.label.allowedGroups"></span></label>
-        <input type="text" id="node-input-allowedGroups" data-i18n="[placeholder]mcp-flow-server.label.allowedGroupsPlaceholder">
+        <label for="node-config-input-allowedGroups"><i class="fa fa-users"></i> <span data-i18n="mcp-flow-server.label.allowedGroups"></span></label>
+        <input type="text" id="node-config-input-allowedGroups" data-i18n="[placeholder]mcp-flow-server.label.allowedGroupsPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-input-toolTimeoutMs"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-flow-server.label.toolTimeoutMs"></span></label>
-        <input type="number" id="node-input-toolTimeoutMs" min="1000" max="600000" step="1">
+        <label for="node-config-input-toolTimeoutMs"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-flow-server.label.toolTimeoutMs"></span></label>
+        <input type="number" id="node-config-input-toolTimeoutMs" min="1000" max="600000" step="1">
     </div>
     <div class="form-row">
-        <label for="node-input-maxConcurrentCalls"><i class="fa fa-tasks"></i> <span data-i18n="mcp-flow-server.label.maxConcurrentCalls"></span></label>
-        <input type="number" id="node-input-maxConcurrentCalls" min="1" max="1024" step="1">
+        <label for="node-config-input-maxConcurrentCalls"><i class="fa fa-tasks"></i> <span data-i18n="mcp-flow-server.label.maxConcurrentCalls"></span></label>
+        <input type="number" id="node-config-input-maxConcurrentCalls" min="1" max="1024" step="1">
     </div>
 
 

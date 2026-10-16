@@ -17,3 +17,4 @@ missing, a `superseded` entry names the decision that replaced the requirement.
 | MCP-PROTO-1 | superseded | 4.0 targets MCP 2026-07-28 only: no `initialize` negotiation and no 2025-06-18 or 2025-11-25 support; `server/discover` reports `supportedVersions: ["2026-07-28"]`. |
 | MCP-PROTO-2 | superseded | 2026-07-28 requires `MCP-Protocol-Version` on every request; a missing header is no longer accepted. Unsupported versions still get 400, now with `-32022` and the supported versions. |
 | MCP-PROTO-7 | superseded | 2026-07-28 Streamable HTTP has no client `notifications/cancelled`; closing the connection cancels the call and frees its concurrency slot. |
+| MCP-LIFE-1 | superseded | 4.0 removes the `start`, `stop` and `restart` commands (MCP-NODE-3); the endpoint is a config node without input, so there is no deferred `restart` to finish. |

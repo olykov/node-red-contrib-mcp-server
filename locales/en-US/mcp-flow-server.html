@@ -47,20 +47,15 @@
 </script>
 
 <script type="text/html" data-help-name="mcp-flow-server">
-    <p>One MCP endpoint on a selected runtime. Tool calls start the flows of its MCP Tool nodes.</p>
-    <h3>Inputs</h3>
-    <dl class="message-properties">
-        <dt>topic <span class="property-type">string</span></dt>
-        <dd>Command: <code>start</code>, <code>stop</code> or <code>restart</code>. Commands produce no output.</dd>
-        <dt class="optional">payload.command <span class="property-type">string</span></dt>
-        <dd>Command used when <code>topic</code> is not set.</dd>
-    </dl>
+    <p>Configuration of one MCP endpoint on a selected runtime. MCP Tool nodes select it and their
+    flows answer its tool calls.</p>
     <h3>Details</h3>
-    <p>Endpoint state is shown in the node status; tool
-    telemetry comes from the MCP metrics node. The endpoint speaks MCP 2026-07-28 only, without an
-    <code>initialize</code> handshake; every request, <code>server/discover</code> included, requires
-    OAuth. Notifications return HTTP 202 without a body, and closing the connection cancels a
-    running tool call.</p>
+    <p>The endpoint starts when flows start and has no wires or commands; deploy or disable its
+    tools to change what it serves. A configuration error or an unavailable port is logged and shown
+    as <code>endpoint error</code> on its tools. Tool telemetry comes from the MCP metrics node. The
+    endpoint speaks MCP 2026-07-28 only, without an <code>initialize</code> handshake; every request,
+    <code>server/discover</code> included, requires OAuth. Notifications return HTTP 202 without a
+    body, and closing the connection cancels a running tool call.</p>
     <dl>
         <dt>Runtime</dt>
         <dd>MCP runtime that listens on a port and hosts this endpoint path.</dd>

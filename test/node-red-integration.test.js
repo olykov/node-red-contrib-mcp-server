@@ -56,10 +56,10 @@ describe('Node-RED runtime integration', () => {
             { id: 'rt-storage', type: 'mcp-redis', mode: 'memory' },
             { id: 'rt-auth', type: 'mcp-auth', oauthSlug: 'runtime-login', provider: 'oidc', issuerUrl: 'https://idp.example.test',
                 clientId: 'client', allowedClientHosts: 'client.example.test', redis: 'rt-storage' },
-            { id: 'rt-endpoint', type: 'mcp-flow-server', z: 'rt-tab', runtime: 'rt-runtime', auth: 'rt-auth',
-                serverName: 'runtime', serverPath: '/mcp/runtime', allowedGroups: 'runtime-users', wires: [] },
+            { id: 'rt-endpoint', type: 'mcp-flow-server', runtime: 'rt-runtime', auth: 'rt-auth',
+                serverName: 'runtime', serverPath: '/mcp/runtime', allowedGroups: 'runtime-users' },
             ...['alpha', 'beta'].map(name => ({ id: 'rt-' + name, type: 'mcp-tool-registry', z: 'rt-tab', toolName: name,
-                endpoint: '/mcp/runtime', toolSchema: '{"type":"object","properties":{}}', wires: [] }))
+                scope: 'endpoint', endpoint: 'rt-endpoint', toolSchema: '{"type":"object","properties":{}}', wires: [[]] }))
         ];
         const listen = http.Server.prototype.listen;
         const close = http.Server.prototype.close;
@@ -111,11 +111,11 @@ describe('Node-RED runtime integration', () => {
                 clientSecretEnv: '', microsoftTenantId: '', microsoftClientId: '', microsoftClientSecretEnv: '',
                 allowedClientHosts: 'client.example.test', groupClaim: 'groups', userClaim: 'email',
                 redis: 'it-storage', accessTokenTtl: 900, refreshTokenTtl: 604800, sessionTtl: 1814400 },
-            { id: 'it-endpoint', type: 'mcp-flow-server', z: 'it-tab', name: 'Integration endpoint',
+            { id: 'it-endpoint', type: 'mcp-flow-server', name: 'Integration endpoint',
                 runtime: 'it-runtime', auth: 'it-auth', serverName: 'integration',
-                serverPath: '/mcp/integration', allowedGroups: 'integration-users', wires: [] },
+                serverPath: '/mcp/integration', allowedGroups: 'integration-users' },
             { id: 'it-tool', type: 'mcp-tool-registry', z: 'it-tab', name: 'Integration tool',
-                toolName: 'integration_tool', toolDescription: 'A test tool', endpoint: '/mcp/integration',
+                toolName: 'integration_tool', toolDescription: 'A test tool', scope: 'endpoint', endpoint: 'it-endpoint',
                 toolBehavior: 'read', worldAccess: 'closed',
                 toolSchema: '{"type":"object","properties":{}}', outputSchema: '', timeoutMs: 1000,
                 cancelOutput: true, outputs: 2, wires: [['it-output'], ['it-cancel']] },
@@ -187,16 +187,25 @@ describe('Node-RED runtime integration', () => {
         assert.equal(helper.getNode('it-endpoint').httpServer, originalServer);
         assert.equal(helper.getNode('it-endpoint').isRunning, true);
 
+        // MCP-NODE-3
+        await helper.setFlows(modifiedFlows.map(node => node.id === 'it-tool' ? { ...node, toolDescription: 'Flows deploy' } : node), 'flows');
+        await waitFor(() => helper.getNode('it-tool').isRegistered);
+        assert.equal(helper.getNode('it-endpoint'), endpoint);
+        assert.equal(helper.getNode('it-endpoint').httpServer, originalServer);
+        assert.equal(helper.getNode('it-endpoint').isRunning, true);
+        assert.equal(helper.getNode('it-tool').toolDescription, 'Flows deploy');
+
         const callTool = (id, signal) => mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
             method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer integration-token' },
             body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'integration_tool', arguments: { q: 1 } } }),
             signal
         });
         const nextMessage = node => new Promise(resolve => node.once('input', resolve));
+        const callOutput = helper.getNode('it-output');
         const cancelOutput = helper.getNode('it-cancel');
 
         // MCP-NODE-1, MCP-NODE-2
-        let delivered = nextMessage(output);
+        let delivered = nextMessage(callOutput);
         const answered = callTool(4);
         const call = await delivered;
         assert.deepEqual(call.payload, { q: 1 });
@@ -207,7 +216,7 @@ describe('Node-RED runtime integration', () => {
         assert.equal((await (await answered).json()).result.content[0].text, 'done');
 
         // MCP-NODE-6
-        delivered = nextMessage(output);
+        delivered = nextMessage(callOutput);
         let cancelled = nextMessage(cancelOutput);
         const abort = new AbortController();
         const aborted = callTool(5, abort.signal).catch(error => error);
@@ -216,14 +225,14 @@ describe('Node-RED runtime integration', () => {
         await aborted;
         assert.deepEqual((await cancelled).mcp, { executionId: started.mcp.executionId, toolName: 'integration_tool', reason: 'cancelled' });
 
-        delivered = nextMessage(output);
+        delivered = nextMessage(callOutput);
         cancelled = nextMessage(cancelOutput);
         const timedOut = callTool(6);
         const slow = await delivered;
         assert.deepEqual((await cancelled).mcp, { executionId: slow.mcp.executionId, toolName: 'integration_tool', reason: 'timeout' });
         assert.equal((await (await timedOut).json()).result.content[0].text, 'Tool execution timeout');
 
-        delivered = nextMessage(output);
+        delivered = nextMessage(callOutput);
         const pendingCall = callTool(7);
         await delivered;
         await helper.unload();

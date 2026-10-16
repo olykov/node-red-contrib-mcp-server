@@ -63,16 +63,14 @@
     {
         "id": "mcp-example-server",
         "type": "mcp-flow-server",
-        "z": "mcp-example-tab",
         "name": "Example endpoint",
         "runtime": "mcp-example-runtime",
         "auth": "mcp-example-auth",
         "serverName": "example",
         "serverPath": "/mcp/example",
         "allowedGroups": "MCP.User",
-        "x": 170,
-        "y": 120,
-        "wires": []
+        "toolTimeoutMs": 30000,
+        "maxConcurrentCalls": 32
     },
     {
         "id": "mcp-example-tool",
@@ -81,7 +79,9 @@
         "name": "Add numbers",
         "toolName": "add_numbers",
         "toolDescription": "Adds two numbers.",
-        "endpoint": "/mcp/example",
+        "scope": "endpoint",
+        "endpoint": "mcp-example-server",
+        "runtime": "",
         "toolBehavior": "read",
         "worldAccess": "closed",
         "toolSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"a\": { \"type\": \"number\" },\n    \"b\": { \"type\": \"number\" }\n  },\n  \"required\": [\"a\", \"b\"]\n}",

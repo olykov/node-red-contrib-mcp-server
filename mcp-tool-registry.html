@@ -6,19 +6,15 @@
             name: { value: '' },
             toolName: { value: '', required: true, validate: RED.validators.regex(/^[a-z][a-z0-9_]{0,63}$/) },
             toolDescription: { value: '' },
-            endpoint: {
-                value: '',
-                required: true,
-                validate: function(value) {
-                    if (value === '__shared__') return true;
-                    if (!value || value.charAt(0) !== '/') return false;
-                    var found = false;
-                    RED.nodes.eachNode(function(node) {
-                        if (node.type === 'mcp-flow-server' && (node.serverPath || '/mcp') === value) found = true;
-                    });
-                    return found;
-                }
-            },
+            scope: { value: '', required: true, validate: function(v) { return v === 'endpoint' || v === 'shared'; } },
+            endpoint: { value: '', type: 'mcp-flow-server', required: false, validate: function(v) {
+                var scope = $('#node-input-scope').length ? $('#node-input-scope').val() : this.scope;
+                return scope !== 'endpoint' || (!!v && v !== '_ADD_');
+            } },
+            runtime: { value: '', type: 'mcp-runtime', required: false, validate: function(v) {
+                var scope = $('#node-input-scope').length ? $('#node-input-scope').val() : this.scope;
+                return scope !== 'shared' || (!!v && v !== '_ADD_');
+            } },
             toolBehavior: { value: '' },
             worldAccess: { value: '' },
             toolSchema: { value: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}', validate: function(v) {
@@ -52,20 +48,11 @@
         },
         oneditprepare: function() {
             var node = this;
-            var endpointSelect = $('#node-input-endpoint');
-            var currentEndpoint = this.endpoint || '';
-            endpointSelect.empty();
-            endpointSelect.append($('<option></option>').attr('value', '').text(node._('mcp-tool-registry.label.endpointSelectPrompt')));
-            endpointSelect.append($('<option></option>').attr('value', '__shared__').text(node._('mcp-tool-registry.label.endpointShared')));
-            if (RED.nodes && typeof RED.nodes.eachNode === 'function') {
-                RED.nodes.eachNode(function(node) {
-                    if (node.type !== 'mcp-flow-server') return;
-                    var path = node.serverPath || '/mcp';
-                    var label = (node.name || node.serverName || path) + ' (' + path + ')';
-                    endpointSelect.append($('<option></option>').attr('value', path).text(label));
-                });
-            }
-            endpointSelect.val(currentEndpoint);
+            $('#node-input-scope').on('change', function() {
+                var scope = $(this).val();
+                $('.mcp-tool-scope-endpoint').toggle(scope === 'endpoint');
+                $('.mcp-tool-scope-shared').toggle(scope === 'shared');
+            }).trigger('change');
 
             $('#node-input-name').on('input', function() {
                 var name = $(this).val();
@@ -77,7 +64,6 @@
                 }
             });
 
-            var node = this;
             node.schemaEditors = {
                 toolSchema: RED.editor.createEditor({ id: 'node-input-toolSchema-editor', mode: 'ace/mode/json', value: $('#node-input-toolSchema').val() }),
                 outputSchema: RED.editor.createEditor({ id: 'node-input-outputSchema-editor', mode: 'ace/mode/json', value: $('#node-input-outputSchema').val() })
@@ -114,6 +100,9 @@
             });
         },
         oneditsave: function() {
+            var scope = $('#node-input-scope').val();
+            if (scope !== 'endpoint') $('#node-input-endpoint').val('_ADD_');
+            if (scope !== 'shared') $('#node-input-runtime').val('_ADD_');
             this.outputs = $('#node-input-cancelOutput').prop('checked') ? 2 : 1;
             $('#node-input-toolSchema').val(this.schemaEditors.toolSchema.getValue());
             $('#node-input-outputSchema').val(this.schemaEditors.outputSchema.getValue());
@@ -172,8 +161,20 @@
     </div>
 
     <div class="form-row">
-        <label for="node-input-endpoint"><i class="fa fa-sitemap"></i> <span data-i18n="mcp-tool-registry.label.endpoint"></span></label>
-        <select id="node-input-endpoint" style="width: 70%;"></select>
+        <label for="node-input-scope"><i class="fa fa-sitemap"></i> <span data-i18n="mcp-tool-registry.label.scope"></span></label>
+        <select id="node-input-scope" style="width: 70%;">
+            <option value="" data-i18n="mcp-tool-registry.label.scopeSelect"></option>
+            <option value="endpoint" data-i18n="mcp-tool-registry.label.scopeEndpoint"></option>
+            <option value="shared" data-i18n="mcp-tool-registry.label.scopeShared"></option>
+        </select>
+    </div>
+    <div class="form-row mcp-tool-scope-endpoint">
+        <label for="node-input-endpoint"><i class="fa fa-server"></i> <span data-i18n="mcp-tool-registry.label.endpoint"></span></label>
+        <input type="text" id="node-input-endpoint">
+    </div>
+    <div class="form-row mcp-tool-scope-shared">
+        <label for="node-input-runtime"><i class="fa fa-cogs"></i> <span data-i18n="mcp-tool-registry.label.runtime"></span></label>
+        <input type="text" id="node-input-runtime">
     </div>
     <div class="form-row">
         <label for="node-input-timeoutMs"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-tool-registry.label.timeoutMs"></span></label>

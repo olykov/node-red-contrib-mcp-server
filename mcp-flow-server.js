@@ -9,8 +9,6 @@ module.exports = function (RED)
     const { createAdminTools } = require('./lib/admin-tools');
     const { auditLog } = require('./lib/audit');
     const executions = require('./lib/executions');
-    const { message } = require('./lib/messages');
-    const statusText = (node, key, vars) => message(node, 'mcp-flow-server', 'mcp-flow-server.status.' + key, vars);
     const PACKAGE_VERSION = require('./package.json').version;
     const PROTOCOL_VERSION = '2026-07-28';
     const SUPPORTED_PROTOCOL_VERSIONS = [PROTOCOL_VERSION];
@@ -344,7 +342,7 @@ module.exports = function (RED)
             for (const node of state.nodes)
             {
                 node.isRunning = false;
-                node.status({ fill: 'red', shape: 'dot', text: statusText(node, 'error') });
+                node.setState('error');
                 node.error('MCP HTTP server error: ' + error.message);
                 const instance = serverInstances.get(node.serverId);
                 if (instance) serverInstances.set(node.serverId, { ...instance, isRunning: false });
@@ -502,16 +500,16 @@ module.exports = function (RED)
             if (node.endpoints.delete(endpoint)) node.refreshTools();
         };
 
-        node.toolsByPath = function ()
+        node.toolsByEndpoint = function ()
         {
             const tools = Array.from(node.tools.values());
             const conflicted = new Set();
             const active = new Set();
-            const selectedByPath = new Map();
-            for (const path of new Set(Array.from(node.endpoints, endpoint => endpoint.serverPath)))
+            const selectedByEndpoint = new Map();
+            for (const endpoint of node.endpoints)
             {
-                const bound = tools.filter(tool => tool.endpointPath === path);
-                const shared = tools.filter(tool => !tool.endpointPath);
+                const bound = tools.filter(tool => tool.endpointId === endpoint.id);
+                const shared = tools.filter(tool => !tool.endpointId);
                 const selected = [];
                 for (const name of new Set([...bound, ...shared].map(tool => tool.name)))
                 {
@@ -520,32 +518,38 @@ module.exports = function (RED)
                     if (effective.length > 1)
                     {
                         effective.forEach(tool => conflicted.add(toolKey(tool)));
-                        const conflictKey = path + ':' + name;
+                        const conflictKey = endpoint.id + ':' + name;
                         active.add(conflictKey);
                         if (!loggedToolConflicts.has(conflictKey))
                         {
                             loggedToolConflicts.add(conflictKey);
-                            node.warn('Duplicate MCP tool name "' + name + '" on ' + path);
+                            node.warn('Duplicate MCP tool name "' + name + '" on ' + endpoint.serverPath);
                         }
                     } else if (effective.length === 1) selected.push(effective[0]);
                 }
-                selectedByPath.set(path, selected.sort((a, b) => a.name.localeCompare(b.name)));
+                selectedByEndpoint.set(endpoint.id, selected.sort((a, b) => a.name.localeCompare(b.name)));
             }
             for (const key of loggedToolConflicts)
                 if (!active.has(key)) loggedToolConflicts.delete(key);
-            return { selectedByPath, conflicted, tools };
+            return { selectedByEndpoint, conflicted, tools };
         };
 
+        // Endpoints are config nodes without a status of their own; their tools show endpoint failures.
         node.refreshTools = function ()
         {
-            const { conflicted, tools } = node.toolsByPath();
+            const { conflicted, tools } = node.toolsByEndpoint();
             for (const tool of tools)
-                if (typeof tool.setStatus === 'function') tool.setStatus(conflicted.has(toolKey(tool)));
+            {
+                if (typeof tool.setStatus !== 'function') continue;
+                const failed = Array.from(node.endpoints).some(endpoint =>
+                    endpoint.state === 'error' && (!tool.endpointId || tool.endpointId === endpoint.id));
+                tool.setStatus(conflicted.has(toolKey(tool)) ? 'duplicate' : failed ? 'error' : 'ok');
+            }
         };
 
-        node.publishedTools = function (path)
+        node.publishedTools = function (endpointId)
         {
-            return node.toolsByPath().selectedByPath.get(path) || [];
+            return node.toolsByEndpoint().selectedByEndpoint.get(endpointId) || [];
         };
 
         node.registerTool = function (tool)
@@ -657,7 +661,12 @@ module.exports = function (RED)
                 runtime.codeGroups.some(group => groups.includes(group)));
         };
 
-        node.status({ fill: "grey", shape: "ring", text: statusText(node, 'stopped') });
+        node.state = 'stopped';
+        node.setState = function (state)
+        {
+            node.state = state;
+            if (node.runtime && typeof node.runtime.refreshTools === 'function') node.runtime.refreshTools();
+        };
 
         node.publishToolTelemetry = function (event)
         {
@@ -802,7 +811,7 @@ module.exports = function (RED)
 
         node.registeredTools = function ()
         {
-            return node.runtime ? node.runtime.publishedTools(node.serverPath) : [];
+            return node.runtime ? node.runtime.publishedTools(node.id) : [];
         };
 
         node.toolDescriptor = function (tool)
@@ -974,7 +983,7 @@ module.exports = function (RED)
                 callback(null, { success: false, message: 'Server already running' });
                 return;
             }
-            node.status({ fill: 'yellow', shape: 'ring', text: statusText(node, 'starting') });
+            node.setState('starting');
             try
             {
                 node.initializeServer();
@@ -984,7 +993,7 @@ module.exports = function (RED)
                     portState.httpServer.removeListener('error', startError);
                     if (closed) return;
                     node.isRunning = true;
-                    node.status({ fill: 'green', shape: 'dot', text: statusText(node, 'running', { port: node.serverPort }) });
+                    node.setState('running');
                     serverInstances.set(node.serverId, {
                         nodeId: String(node.id),
                         runtimeId: String(node.runtimeId || ''),
@@ -1003,7 +1012,7 @@ module.exports = function (RED)
                     portState.httpServer.removeListener('listening', startListening);
                     if (closed) return;
                     node.error('Server error: ' + error.message);
-                    node.status({ fill: 'red', shape: 'dot', text: statusText(node, 'error') });
+                    node.setState('error');
                     callback(error);
                 };
                 const startListening = () =>
@@ -1029,7 +1038,7 @@ module.exports = function (RED)
             } catch (error)
             {
                 node.error('Failed to start server: ' + error.message);
-                node.status({ fill: 'red', shape: 'dot', text: statusText(node, 'error') });
+                node.setState('error');
                 callback(error);
             }
         };
@@ -1041,7 +1050,7 @@ module.exports = function (RED)
                 callback(null, { success: true, message: 'Server already stopped' });
                 return;
             }
-            if (!closed) node.status({ fill: 'yellow', shape: 'ring', text: statusText(node, 'stopping') });
+            if (!closed) node.setState('stopping');
 
             const portState = node.portState;
             node.portState = null;
@@ -1050,43 +1059,13 @@ module.exports = function (RED)
             {
                 node.isRunning = false;
                 serverInstances.delete(node.serverId);
-                if (!closed) node.status({ fill: 'grey', shape: 'ring', text: statusText(node, 'stopped') });
+                if (!closed) node.setState('stopped');
                 callback(null, { success: true, message: 'Server stopped' });
             };
 
             if (portState && node.runtime) node.runtime.releaseListener(node, finish);
             else finish();
         };
-
-        let restartTimer = null;
-        let pendingRestartDone = null;
-        node.on('input', function (msg, send, done)
-        {
-            const finished = error => done(error || undefined);
-
-            const command = msg.topic || (msg.payload && msg.payload.command);
-            if (['start', 'stop', 'restart'].includes(command)) auditLog(node, 'mcp.command', { command, endpoint: node.serverName });
-            switch (command)
-            {
-                case 'start': return node.startServer(finished);
-                case 'stop': return node.stopServer(finished);
-                case 'restart':
-                    return node.stopServer(error =>
-                    {
-                        if (error) return done(error);
-                        clearTimeout(restartTimer);
-                        pendingRestartDone = finished;
-                        restartTimer = setTimeout(() =>
-                        {
-                            restartTimer = null;
-                            pendingRestartDone = null;
-                            node.startServer(finished);
-                        }, 1000);
-                    });
-                default:
-                    return done();
-            }
-        });
 
         if (node.runtime && typeof node.runtime.addEndpoint === 'function') node.runtime.addEndpoint(node);
 
@@ -1096,14 +1075,6 @@ module.exports = function (RED)
         node.on('close', function (done)
         {
             closed = true;
-            clearTimeout(restartTimer);
-            restartTimer = null;
-            if (pendingRestartDone)
-            {
-                const restartDone = pendingRestartDone;
-                pendingRestartDone = null;
-                restartDone();
-            }
             RED.events.removeListener('flows:started', startOnDeploy);
             if (node.runtime && typeof node.runtime.removeEndpoint === 'function') node.runtime.removeEndpoint(node);
             node.adminTools.dispose();
@@ -1139,7 +1110,7 @@ module.exports = function (RED)
             {
                 const runtime = configNode(RED, server.runtimeId);
                 const toolCount = runtime && typeof runtime.publishedTools === 'function' ?
-                    runtime.publishedTools(server.path).length : 0;
+                    runtime.publishedTools(server.endpointId).length : 0;
                 servers.push({ serverId: key, runtimeId: server.runtimeId, endpointId: server.endpointId, serverName: server.serverName, path: server.path, isRunning: server.isRunning, port: server.port, startTime: server.startTime, toolCount });
             }
         }

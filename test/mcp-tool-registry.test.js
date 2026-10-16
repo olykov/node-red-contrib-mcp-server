@@ -14,7 +14,7 @@ function buildRegistry(config = {}, nodes = {}) {
         unregisterTool: registeredBy => emitted.push({ event: 'unregister', tool: { registeredBy } })
     };
     const nodeList = (Array.isArray(nodes) ? nodes : Object.values(nodes))
-        .map(node => node.type === 'mcp-flow-server' && !node.runtime ? { ...node, runtime: runtime.id } : node);
+        .map(node => node.type === 'mcp-flow-server' && node.runtime === undefined ? { ...node, runtime } : node);
     const RED = {
         events,
         nodes: {
@@ -38,37 +38,57 @@ function buildRegistry(config = {}, nodes = {}) {
     };
     delete require.cache[require.resolve('../mcp-tool-registry')];
     require('../mcp-tool-registry')(RED);
-    const registry = new types['mcp-tool-registry']({ endpoint: '__shared__', ...config });
+    const registry = new types['mcp-tool-registry']({ scope: 'shared', runtime: runtime.id, ...config });
     return { registry, emitted };
 }
 
 describe('mcp-tool-registry', () => {
-    it('registers tools against selected endpoints', () => {
+    it('registers an Endpoint tool in the runtime of the selected endpoint', () => {
         const { registry, emitted } = buildRegistry({
             toolName: 'read_status',
             toolDescription: 'Read status',
-            endpoint: '/mcp/ops',
-
+            scope: 'endpoint',
+            endpoint: 'endpoint-1',
             toolSchema: '{"type":"object","properties":{}}'
         }, [{ type: 'mcp-flow-server', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops' }]);
 
-        registry.registerTool();
-
+        assert.strictEqual(registry.isRegistered, true);
         assert.strictEqual(emitted[0].event, 'register');
-        assert.strictEqual(emitted[0].tool.endpointPath, '/mcp/ops');
-        assert.strictEqual(emitted[0].tool.serverName, 'ops');
+        assert.strictEqual(emitted[0].tool.endpointId, 'endpoint-1');
         assert.strictEqual(emitted[0].tool.annotations, undefined);
     });
 
+    it('registers a Shared tool for every endpoint of the selected runtime', () => {
+        const { emitted } = buildRegistry({ toolName: 'read_status', toolSchema: '{"type":"object","properties":{}}' });
+        assert.strictEqual(emitted[0].tool.endpointId, '');
+    });
+
+    it('sends calls on the first output and cancellations on the second only when enabled', () => {
+        const plain = buildRegistry({ toolName: 'read_status', toolSchema: '{"type":"object","properties":{}}' });
+        plain.emitted[0].tool.deliver({ payload: {} });
+        plain.emitted[0].tool.cancel({ executionId: 'e1', reason: 'timeout' });
+        assert.deepStrictEqual(plain.registry.sent, [{ payload: {} }]);
+        const withCancel = buildRegistry({ toolName: 'read_status', cancelOutput: true, toolSchema: '{"type":"object","properties":{}}' });
+        withCancel.emitted[0].tool.cancel({ executionId: 'e1', reason: 'timeout' });
+        assert.deepStrictEqual(withCancel.registry.sent, [[null, { mcp: { executionId: 'e1', reason: 'timeout' } }]]);
+    });
+
+    it('shows duplicate and endpoint errors reported by the runtime', () => {
+        const { registry, emitted } = buildRegistry({ toolName: 'read_status', toolSchema: '{"type":"object","properties":{}}' });
+        assert.strictEqual(registry.statuses.at(-1).text, 'shared');
+        emitted[0].tool.setStatus('duplicate');
+        assert.strictEqual(registry.statuses.at(-1).text, 'duplicate');
+        emitted[0].tool.setStatus('error');
+        assert.strictEqual(registry.statuses.at(-1).text, 'endpoint error');
+    });
+
     it('advertises explicitly configured safety annotations', () => {
-        const { registry, emitted } = buildRegistry({
+        const { emitted } = buildRegistry({
             toolName: 'read_status',
             toolSchema: '{"type":"object","properties":{}}',
             toolBehavior: 'read',
             worldAccess: 'closed'
         });
-
-        registry.registerTool();
         assert.deepStrictEqual(emitted[0].tool.annotations, {
             readOnlyHint: true,
             destructiveHint: false,
@@ -79,13 +99,11 @@ describe('mcp-tool-registry', () => {
 
 
     it('registers optional output schemas', () => {
-        const { registry, emitted } = buildRegistry({
+        const { emitted } = buildRegistry({
             toolName: 'read_status',
             toolSchema: '{"type":"object","properties":{}}',
             outputSchema: '{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}'
         });
-
-        registry.registerTool();
 
         assert.deepStrictEqual(emitted[0].tool.outputSchema, {
             type: 'object',
@@ -112,7 +130,6 @@ describe('mcp-tool-registry', () => {
             toolName: 'Read-Status',
             toolSchema: '{"type":"object","properties":{}}'
         });
-        registry.registerTool();
         assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
         assert.match(registry.warnings[0], /lowercase/);
         assert.deepStrictEqual(emitted, []);
@@ -124,7 +141,6 @@ describe('mcp-tool-registry', () => {
             toolName: 'read_status',
             toolSchema: '{"type":"array"}'
         });
-        registry.registerTool();
         assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
         assert.match(registry.warnings[0], /type "object"/);
         assert.deepStrictEqual(emitted, []);
@@ -137,7 +153,6 @@ describe('mcp-tool-registry', () => {
             toolSchema: '{"type":"object","properties":{}}',
             outputSchema: 'not json'
         });
-        registry.registerTool();
         assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
         assert.match(registry.warnings[0], /valid JSON/);
         assert.deepStrictEqual(emitted, []);
@@ -150,7 +165,6 @@ describe('mcp-tool-registry', () => {
             toolSchema: '{"type":"object","properties":{}}',
             timeoutMs: 999
         });
-        registry.registerTool();
         assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
         assert.match(registry.warnings[0], /between 1000 and 600000/);
         assert.deepStrictEqual(emitted, []);
@@ -161,33 +175,32 @@ describe('mcp-tool-registry', () => {
         const { registry, emitted } = buildRegistry({
             toolName: 'read_status',
             toolSchema: '{"type":"object","properties":{}}',
-            endpoint: '/mcp/ops',
+            scope: 'endpoint',
+            endpoint: 'endpoint-1',
             timeoutMs: 60000
         }, [{ type: 'mcp-flow-server', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops', toolTimeoutMs: 30000 }]);
-        registry.registerTool();
         assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
         assert.match(registry.warnings.at(-1), /cannot exceed its MCP endpoint timeout/);
         assert.deepStrictEqual(emitted, []);
     });
 
     it('accepts a tool timeout within its endpoint timeout and exposes it on the tool definition', () => {
-        const { registry, emitted } = buildRegistry({
+        const { emitted } = buildRegistry({
             toolName: 'read_status',
             toolSchema: '{"type":"object","properties":{}}',
-            endpoint: '/mcp/ops',
+            scope: 'endpoint',
+            endpoint: 'endpoint-1',
             timeoutMs: 5000
         }, [{ type: 'mcp-flow-server', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops', toolTimeoutMs: 30000 }]);
-        registry.registerTool();
         assert.strictEqual(emitted[0].tool.timeoutMs, 5000);
     });
 
     // MCP-VAL-3
     it('validates tool call arguments against the compiled input schema', () => {
-        const { registry, emitted } = buildRegistry({
+        const { emitted } = buildRegistry({
             toolName: 'read_status',
             toolSchema: '{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}'
         });
-        registry.registerTool();
         const tool = emitted[0].tool;
         assert.doesNotThrow(() => tool.validateArguments({ id: 'a' }));
         assert.throws(() => tool.validateArguments({}), /Arguments do not match input schema/);
@@ -198,7 +211,7 @@ describe('mcp-tool-registry', () => {
 describe('registry lifecycle', () => {
     // MCP-NODE-4
     it('registers in the runtime synchronously in the constructor and unregisters on close', async () => {
-        const { registry, emitted } = buildRegistry({ id: 'quick', toolName: 'quick_tool', endpoint: '__shared__',
+        const { registry, emitted } = buildRegistry({ id: 'quick', toolName: 'quick_tool',
             toolSchema: '{"type":"object","properties":{}}' });
         assert.strictEqual(registry.isRegistered, true);
         assert.deepStrictEqual(emitted.map(entry => entry.event), ['register']);
@@ -207,9 +220,13 @@ describe('registry lifecycle', () => {
         assert.strictEqual(registry.isRegistered, false);
     });
 
-    it('refuses a tool without an endpoint or Shared', () => {
-        const { registry, emitted } = buildRegistry({ toolName: 'orphan_tool', endpoint: '', toolSchema: '{"type":"object","properties":{}}' });
-        assert.deepStrictEqual(emitted, []);
-        assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
+    it('refuses a tool without a Scope or without the reference its Scope requires', () => {
+        for (const config of [{ scope: '' }, { scope: 'endpoint', endpoint: '' }, { scope: 'endpoint', endpoint: 'missing' },
+            { scope: 'shared', runtime: '' }, { scope: 'endpoint', endpoint: 'orphan-endpoint' }]) {
+            const { registry, emitted } = buildRegistry({ toolName: 'orphan_tool', toolSchema: '{"type":"object","properties":{}}', ...config },
+                [{ type: 'mcp-flow-server', id: 'orphan-endpoint', runtime: null }]);
+            assert.deepStrictEqual(emitted, [], JSON.stringify(config));
+            assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
+        }
     });
 });

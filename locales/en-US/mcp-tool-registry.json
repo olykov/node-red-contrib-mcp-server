@@ -9,8 +9,6 @@
             "toolDescription": "Description",
             "toolDescriptionPlaceholder": "Describe what this tool does",
             "endpoint": "Endpoint",
-            "endpointSelectPrompt": "Select MCP endpoint...",
-            "endpointShared": "Shared (All MCPs)",
             "timeoutMs": "Tool Timeout (ms)",
             "timeoutTip": "Leave at 0 to use the endpoint timeout. A custom timeout cannot exceed the endpoint timeout.",
             "annotationsHeading": "Annotations",
@@ -19,7 +17,7 @@
             "behaviorRead": "Read only",
             "behaviorWrite": "Add only",
             "behaviorDestructive": "Change / Delete / Send",
-            "worldAccess": "Scope",
+            "worldAccess": "World Access",
             "worldAccessUnspecified": "Unspecified",
             "worldAccessClosed": "Fixed target",
             "worldAccessOpen": "Open-ended",
@@ -32,14 +30,20 @@
             "formatSuccess": "JSON fields formatted",
             "cancelOutput": "Cancel Output",
             "callOutputLabel": "Tool call",
-            "cancelOutputLabel": "Cancellation or timeout"
+            "cancelOutputLabel": "Cancellation or timeout",
+            "scope": "Scope",
+            "scopeSelect": "Select scope...",
+            "scopeEndpoint": "Endpoint",
+            "scopeShared": "Shared",
+            "runtime": "Runtime"
         },
         "status": {
             "unregistered": "unregistered",
             "invalid": "invalid",
             "duplicate": "duplicate",
             "registered": "registered",
-            "shared": "shared"
+            "shared": "shared",
+            "endpointError": "endpoint error"
         }
     },
     "mcp-tool-response": {

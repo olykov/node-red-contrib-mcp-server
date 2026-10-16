@@ -57,13 +57,6 @@
             "statusFetchFailed": "Failed to load flow server status",
             "statusRunning": "running",
             "statusStopped": "stopped"
-        },
-        "status": {
-            "error": "error",
-            "stopped": "stopped",
-            "starting": "starting...",
-            "stopping": "stopping...",
-            "running": "running :{{port}}"
         }
     }
 }

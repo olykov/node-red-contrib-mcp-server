@@ -1,5 +1,5 @@
 <script type="text/html" data-help-name="mcp-tool-registry">
-    <p>Registers one MCP tool for one endpoint or for every endpoint and starts its flow on each call.</p>
+    <p>Registers one MCP tool for one endpoint or for every endpoint of a runtime and starts its flow on each call.</p>
     <h3>Outputs</h3>
     <ol class="node-ports">
         <li>Tool call
@@ -38,16 +38,18 @@
     <dl>
         <dt>Tool Name</dt>
         <dd>MCP tool name: lowercase letters, digits and underscores, starting with a letter.</dd>
-        <dt>Endpoint</dt>
-        <dd>MCP path of the MCP Server that offers the tool, so the binding survives copy, import
-        and node replacement. <code>Shared (All MCPs)</code> exposes it on every endpoint.</dd>
+        <dt>Scope</dt>
+        <dd><code>Endpoint</code> offers the tool on the selected MCP Server only; <code>Shared</code>
+        offers it on every MCP Server of the selected runtime. An Endpoint tool replaces a Shared tool
+        with the same name on its endpoint. Without a Scope or the selected node the tool is
+        <code>invalid</code>.</dd>
         <dt>Tool Timeout</dt>
         <dd>Time limit for the flow; 0 uses the endpoint timeout.</dd>
         <dt>Cancel Output</dt>
         <dd>Adds the second output for cancellation and timeout messages.</dd>
         <dt>Behavior</dt>
         <dd>MCP safety annotation: read only, add only, or change, delete or send.</dd>
-        <dt>Scope</dt>
+        <dt>World Access</dt>
         <dd>MCP open-world annotation. Public internet and external recipients are open-ended.</dd>
         <dt>Input Schema</dt>
         <dd>JSON Schema object for the tool arguments.</dd>

@@ -197,7 +197,7 @@ its unexpired tokens; switching is not a token-revocation mechanism.
 
 Client metadata hosts must be allow-listed. Entries match the host exactly; `*.example.com` allows its subdomains. This prevents the authorization endpoint from fetching arbitrary user-provided URLs during client metadata validation. Private and loopback addresses (including bracketed IPv6 and IPv4-mapped forms) are rejected, documents are limited to 8 KiB, and the document's `client_id` must equal its URL. Host names are not resolved, so allow only hosts you trust.
 
-`mcp-flow-server` defines one logical MCP endpoint: MCP name, HTTP path and allowed groups. Both runtime and OAuth auth configurations are required. There is no public or inherited authorization mode.
+`mcp-flow-server` is a configuration node that defines one logical MCP endpoint: MCP name, HTTP path and allowed groups. It has no wires and no commands; it starts when flows start. Both runtime and OAuth auth configurations are required. There is no public or inherited authorization mode.
 
 One runtime owns one local port. Multiple endpoints may share that runtime port when their MCP paths differ.
 
@@ -212,7 +212,7 @@ The flow puts the result in `msg.payload` and ends with an `mcp-tool-response` (
 
 With **Cancel Output** enabled, the MCP Tool node gets a second output that receives `msg.mcp = { executionId, toolName, reason }` when the client closes the request (`cancelled`) or the tool timeout expires (`timeout`).
 
-The `mcp-flow-server` input accepts `start`, `stop` and `restart` commands, which produce no output; endpoint state is shown in the node status and tool telemetry comes from `mcp-server-metrics`.
+Configuration nodes have no status of their own: an endpoint that cannot start logs the error and its tools show `endpoint error`. Tool telemetry comes from `mcp-server-metrics`.
 
 `mcp-server-metrics` is a source node with no input and one output. Select the same `mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits one `mcp-tool-telemetry` message for each `tools/call` request across those endpoints, including failed calls and authentication failures. Its payload contains `endpoint`, `tool`, `user`, `client`, `mode`, `status`, `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. `user` is the caller's e-mail (subject when no e-mail is known) and `client` the MCP client (`claude`, `codex`, `chatgpt` or the client host); unauthenticated calls report `unknown`. Unknown and unauthenticated tool names are reported as `unknown` to bound metric cardinality. `user` is personal data: use it as a metric label only while the set of users is small and the metrics store is access-controlled. It does not poll Node-RED or expose a metrics route.
 
@@ -220,7 +220,7 @@ The `mcp-flow-server` input accepts `start`, `stop` and `restart` commands, whic
 
 Tool execution always requires OAuth and checks endpoint roles/groups. Provider scopes are advertised automatically in `securitySchemes` and `_meta.securitySchemes`; custom endpoint/tool scope policies are not supported. `offline_access` is advertised only when refresh is configured.
 
-`mcp-tool-registry` requires an explicit endpoint choice. A specific endpoint is stored as its MCP path, so the binding survives copy, import and node replacement; endpoints with the same path on different runtimes share the tool. Select `Shared (All MCPs)` only for tools intentionally exposed on every endpoint in the same Node-RED runtime.
+`mcp-tool-registry` requires a Scope. **Endpoint** offers the tool on the selected `mcp-flow-server` only. **Shared** offers it on every endpoint of the selected `mcp-runtime`. A tool without a Scope or without the selected node is shown as `invalid` and not registered. An Endpoint tool replaces a Shared tool with the same name on its endpoint; two tools with the same name on one level are both shown as `duplicate` and neither is offered.
 
 Editor-supplied environment variable names (`URL Env`, `Password Env`, `Secret Env`) must start with `MCP_`, so a flow editor cannot point a configuration at other process secrets such as `NODE_RED_CREDENTIAL_SECRET`.
 
@@ -230,10 +230,9 @@ The authorization server issuer is the Base URL origin. Authorization responses 
 `/.well-known/oauth-authorization-server` document answers only while a single configuration
 serves the port.
 
-Deploy with **Modified Nodes**: Node-RED restarts only the changed nodes, so endpoints keep
-running; a call that is inside a restarted node is lost and times out. **Modified Flows** also
-restarts every node wired to a changed node, and an endpoint is wired to its tool flows, so
-changing any node of a tool flow restarts that `mcp-flow-server`. Wider restarts follow a change
+Deploy with **Modified Nodes** or **Modified Flows**: endpoints are configuration nodes without
+wires, so changing a tool flow never restarts its endpoint; a call that is inside a restarted node
+is lost and times out. Wider restarts follow a change
 to a shared configuration node (`mcp-runtime`, `mcp-auth`, `mcp-redis`: every endpoint that uses
 it), a subflow (all its instances), tab environment variables (the whole tab) and global
 environment variables (a full deploy). Stopping an endpoint fails its pending tool calls;
@@ -416,7 +415,6 @@ sessions appear only as a 12-character hash.
 | `oauth.refresh` | refresh grant | `outcome`, `subject`, `client`, `session` |
 | `mcp.auth` | rejected token or insufficient access (missing tokens are not logged) | `reason`, `subject`, `client`, `ip` |
 | `mcp.tool_call` | every `tools/call` | `outcome`, `tool`, `subject`, `client`, `session`, `durationMs` |
-| `mcp.command` | `start`, `stop`, `restart` input | `command`, `endpoint` |
 
 The flow also receives the caller in `msg.mcp` (`subject`, `email`, `groups`, `client`) with
 each tool call. Retention and forwarding of the Node-RED log belong to the

@@ -246,10 +246,10 @@ describe('lib/admin-tools', () => {
             ['catch', { scope: ['database'], uncaught: false }],
             ['mongodb4', { mode: 'collection', collection: 'items', operation: 'find', output: 'toArray', maxTimeMS: '5000', handleDocId: false }],
             ['mcp-flow-server', { serverPath: '/mcp/items', allowedGroups: 'Readers' }],
-            ['mcp-tool-registry', { toolName: 'read_items', endpoint: 'items', toolDescription: 'Read items',
+            ['mcp-tool-registry', { toolName: 'read_items', scope: 'endpoint', endpoint: 'items-endpoint', toolDescription: 'Read items',
                 toolSchema: JSON.stringify({ type: 'object', properties: { count: { type: 'integer' } } }),
                 outputSchema: JSON.stringify({ type: 'array', items: { type: 'object' } }),
-                toolBehavior: 'read-only', worldAccess: 'closed' }]
+                toolBehavior: 'read-only', worldAccess: 'closed', timeoutMs: 5000, cancelOutput: true }]
         ];
         for (const [type, settings] of cases) {
             const target = { id: 'target', type, ...settings, wires: [], credentials: { password: 'private-value' },

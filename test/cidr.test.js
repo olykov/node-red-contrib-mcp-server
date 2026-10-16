@@ -28,8 +28,8 @@ describe('trusted proxy CIDR matching', () => {
 
 // MCP-PKG-4
 describe('message catalogs', () => {
-    it('resolves status texts from the shipped catalog and interpolates variables', () => {
-        assert.strictEqual(message(null, 'mcp-flow-server', 'mcp-flow-server.status.running', { port: 8001 }), 'running :8001');
+    it('resolves status texts from the shipped catalog', () => {
+        assert.strictEqual(message(null, 'mcp-tool-registry', 'mcp-tool-registry.status.endpointError'), 'endpoint error');
         assert.strictEqual(message(null, 'mcp-tool-registry', 'mcp-tool-registry.status.duplicate'), 'duplicate');
         assert.strictEqual(message(null, 'mcp-server-metrics', 'mcp-server-metrics.status.listening'), 'listening');
     });
