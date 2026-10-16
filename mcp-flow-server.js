@@ -622,8 +622,10 @@ module.exports = function (RED)
         node.handleMcpHttpRequest = async function (req, res)
         {
             const request = req.body || {};
-            if (!request || typeof request !== 'object' || Array.isArray(request) ||
-                typeof request.method !== 'string')
+            const isObject = request && typeof request === 'object' && !Array.isArray(request);
+            const isResponse = isObject && request.method === undefined && request.id !== undefined &&
+                ('result' in request || 'error' in request);
+            if (!isObject || (typeof request.method !== 'string' && !isResponse))
                 return node.rpcError(res, null, -32600, 'Invalid request', undefined, 400);
             const toolRequest = request.method === 'tools/call';
             const started = toolRequest ? process.hrtime.bigint() : null;
@@ -633,14 +635,8 @@ module.exports = function (RED)
                 // Only the handshake is anonymous; everything else needs a token (HTTP 401 starts sign-in).
                 if (request.method === 'initialize' && request.id !== undefined)
                     return node.handleInitialize(request, res);
-                // Notifications have no id and get no response channel for errors, so they are
-                // acknowledged with 202 unconditionally rather than challenged for auth.
-                if (request.id === undefined)
-                {
-                    if (request.method === 'notifications/cancelled')
-                        node.cancelToolExecution(request.params && request.params.requestId);
+                if (request.method === 'notifications/initialized' && request.id === undefined)
                     return res.status(202).end();
-                }
                 let authResult;
                 try
                 {
@@ -658,6 +654,12 @@ module.exports = function (RED)
                 {
                     node.auditDenied(req, authResult);
                     return writeAuthFailure(req, res, node, authResult);
+                }
+                if (request.id === undefined || isResponse)
+                {
+                    if (request.method === 'notifications/cancelled')
+                        node.cancelToolExecution(request.params && request.params.requestId, authResult.claims);
+                    return res.status(202).end();
                 }
                 const protocolVersion = req.headers['mcp-protocol-version'];
                 if (protocolVersion && !SUPPORTED_PROTOCOL_VERSIONS.includes(protocolVersion))
@@ -882,7 +884,8 @@ module.exports = function (RED)
                     reject,
                     timeout,
                     endpointId: node.endpointId,
-                    requestId
+                    requestId,
+                    subject: claims.subject || ''
                 });
                 try
                 {
@@ -896,12 +899,13 @@ module.exports = function (RED)
             });
         };
 
-        node.cancelToolExecution = function (requestId)
+        node.cancelToolExecution = function (requestId, claims = {})
         {
             if (requestId === undefined || requestId === null) return;
+            const subject = claims.subject || '';
             for (const [executionId, pending] of pendingExecutions)
             {
-                if (pending.endpointId !== node.endpointId || pending.requestId !== requestId) continue;
+                if (pending.endpointId !== node.endpointId || pending.requestId !== requestId || pending.subject !== subject) continue;
                 clearTimeout(pending.timeout);
                 pendingExecutions.delete(executionId);
                 pending.reject(new Error('Tool execution cancelled'));

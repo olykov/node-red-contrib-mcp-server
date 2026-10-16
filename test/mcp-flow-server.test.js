@@ -551,7 +551,8 @@ describe('upstream mcp-flow-server local extensions', () => {
         const execution = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
 
         await server.handleMcpHttpRequest(
-            mockReq({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 42 } }),
+            mockReq({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 42 } },
+                { authorization: 'Bearer test-token' }),
             mockRes()
         );
         await pending;
@@ -1970,5 +1971,51 @@ describe('notifications and endpoint limits', () => {
         const defaults = createRuntime().server;
         assert.strictEqual(defaults.toolTimeoutMs, 30000);
         assert.strictEqual(defaults.maxConcurrentCalls, 32);
+    });
+});
+
+describe('notification authentication and cancellation scope', () => {
+    // MCP-PROTO-4, MCP-PROTO-7
+    function withPendingCall(owner) {
+        const built = createRuntime();
+        built.nodeMap['default-auth'].readAccessToken = async token => ({
+            'owner-token': { subject: 'owner', groups: ['test-group'], scopes: ['openid'] },
+            'other-token': { subject: 'other', groups: ['test-group'], scopes: ['openid'] }
+        })[token] || null;
+        built.RED.events.emit('mcp-tool-register', { name: 'slow', description: 'Slow', inputSchema: { type: 'object', properties: {} } });
+        const response = mockRes();
+        const pending = built.server.handleToolCall({ id: 7, params: { name: 'slow', arguments: {} } }, response, { subject: owner });
+        return { ...built, response, pending };
+    }
+    const cancel = (server, headers) => {
+        const res = mockRes();
+        res.end = function () { this.ended = true; return this; };
+        return server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 7 } }, headers), res)
+            .then(() => res);
+    };
+
+    it('does not let an anonymous or different caller cancel a pending call', async () => {
+        const { server, pending } = withPendingCall('owner');
+        await new Promise(resolve => setImmediate(resolve));
+        assert.strictEqual((await cancel(server, {})).statusCode, 401);
+        assert.strictEqual(server.activeToolCalls, 1);
+        assert.strictEqual((await cancel(server, { authorization: 'Bearer other-token' })).statusCode, 202);
+        assert.strictEqual(server.activeToolCalls, 1);
+        assert.strictEqual((await cancel(server, { authorization: 'Bearer owner-token' })).statusCode, 202);
+        await pending;
+        assert.strictEqual(server.activeToolCalls, 0);
+    });
+
+    it('accepts an authenticated JSON-RPC response with 202 and rejects an anonymous one', async () => {
+        const { server } = createRuntime();
+        const send = headers => {
+            const res = mockRes();
+            res.end = function () { this.ended = true; return this; };
+            return server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 3, result: {} }, headers), res).then(() => res);
+        };
+        const accepted = await send({ authorization: 'Bearer test-token' });
+        assert.strictEqual(accepted.statusCode, 202);
+        assert.strictEqual(accepted.body, undefined);
+        assert.strictEqual((await send({})).statusCode, 401);
     });
 });
