@@ -117,10 +117,12 @@ describe('Node-RED runtime integration', () => {
             { id: 'it-tool', type: 'mcp-tool-registry', z: 'it-tab', name: 'Integration tool',
                 toolName: 'integration_tool', toolDescription: 'A test tool', endpoint: '/mcp/integration',
                 toolBehavior: 'read', worldAccess: 'closed',
-                toolSchema: '{"type":"object","properties":{}}', outputSchema: '', wires: [] },
-            { id: 'it-output', type: 'helper', z: 'it-tab', wires: [] }
+                toolSchema: '{"type":"object","properties":{}}', outputSchema: '', timeoutMs: 1000,
+                cancelOutput: true, outputs: 2, wires: [['it-output'], ['it-cancel']] },
+            { id: 'it-output', type: 'helper', z: 'it-tab', wires: [] },
+            { id: 'it-cancel', type: 'helper', z: 'it-tab', wires: [] },
+            { id: 'it-response', type: 'mcp-tool-response', z: 'it-tab', wires: [] }
         ];
-        flows.find(node => node.id === 'it-endpoint').wires = [['it-output']];
 
         await helper.load(registerPackageNodes, flows, {
             'it-runtime': { adminToken: 'credential-test-value' }
@@ -185,27 +187,45 @@ describe('Node-RED runtime integration', () => {
         assert.equal(helper.getNode('it-endpoint').httpServer, originalServer);
         assert.equal(helper.getNode('it-endpoint').isRunning, true);
 
-        const abort = new AbortController();
-        const started = new Promise(resolve => output.once('input', resolve));
-        const aborted = mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
+        const callTool = (id, signal) => mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
             method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer integration-token' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'integration_tool', arguments: {} } }),
-            signal: abort.signal
-        }).catch(error => error);
-        await started;
-        assert.equal(endpoint.activeToolCalls, 1);
+            body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'integration_tool', arguments: { q: 1 } } }),
+            signal
+        });
+        const nextMessage = node => new Promise(resolve => node.once('input', resolve));
+        const cancelOutput = helper.getNode('it-cancel');
+
+        // MCP-NODE-1, MCP-NODE-2
+        let delivered = nextMessage(output);
+        const answered = callTool(4);
+        const call = await delivered;
+        assert.deepEqual(call.payload, { q: 1 });
+        assert.deepEqual(Object.keys(call.mcp).sort(), ['client', 'email', 'executionId', 'groups', 'subject', 'toolName']);
+        assert.equal(call.mcp.toolName, 'integration_tool');
+        assert.equal(call.mcp.subject, 'integration-user');
+        helper.getNode('it-response').receive({ ...call, payload: 'done' });
+        assert.equal((await (await answered).json()).result.content[0].text, 'done');
+
+        // MCP-NODE-6
+        delivered = nextMessage(output);
+        let cancelled = nextMessage(cancelOutput);
+        const abort = new AbortController();
+        const aborted = callTool(5, abort.signal).catch(error => error);
+        const started = await delivered;
         abort.abort();
         await aborted;
-        await waitFor(() => endpoint.activeToolCalls === 0);
+        assert.deepEqual((await cancelled).mcp, { executionId: started.mcp.executionId, toolName: 'integration_tool', reason: 'cancelled' });
 
-        const executeMessage = new Promise(resolve => output.once('input', resolve));
-        const pendingCall = mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
-            method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer integration-token' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call',
-                params: { name: 'integration_tool', arguments: {} } })
-        });
-        const message = await executeMessage;
-        assert.equal(message.topic, 'mcp-tool-execute');
+        delivered = nextMessage(output);
+        cancelled = nextMessage(cancelOutput);
+        const timedOut = callTool(6);
+        const slow = await delivered;
+        assert.deepEqual((await cancelled).mcp, { executionId: slow.mcp.executionId, toolName: 'integration_tool', reason: 'timeout' });
+        assert.equal((await (await timedOut).json()).result.content[0].text, 'Tool execution timeout');
+
+        delivered = nextMessage(output);
+        const pendingCall = callTool(7);
+        await delivered;
         await helper.unload();
         const closedResponse = await pendingCall;
         assert.equal(closedResponse.status, 200);

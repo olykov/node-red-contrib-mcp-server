@@ -201,23 +201,18 @@ Client metadata hosts must be allow-listed. Entries match the host exactly; `*.e
 
 One runtime owns one local port. Multiple endpoints may share that runtime port when their MCP paths differ.
 
-Tool execution request emitted by the flow server:
+Each `mcp-tool-registry` (MCP Tool) node starts the flow of its tool. A call leaves the node with:
 
 ```js
-msg.topic = 'mcp-tool-execute';
-msg.payload = { toolName, arguments, executionId };
+msg.payload = arguments;
+msg.mcp = { executionId, toolName, subject, email, groups, client };
 ```
 
-Tool response returned to the same flow server node:
+The flow puts the result in `msg.payload` and ends with an `mcp-tool-response` (MCP Tool Response) node, keeping `msg.mcp`. Set `msg.mcp.error` (string or Error) to return an error result. `msg.payload` can be a standard MCP result object; strings and other values are normalized into text responses. A message without `msg.mcp.executionId` or with an unknown one fails the response node for a Catch node; a response after cancellation or timeout is ignored.
 
-```js
-msg.topic = 'mcp-tool-response';
-msg.payload = { executionId, result };
-```
+With **Cancel Output** enabled, the MCP Tool node gets a second output that receives `msg.mcp = { executionId, toolName, reason }` when the client closes the request (`cancelled`) or the tool timeout expires (`timeout`).
 
-`result` can be a standard MCP result object. Plain strings and plain objects are normalized into text responses.
-
-The `mcp-flow-server` output emits only `mcp-tool-execute` messages. Return matching `mcp-tool-response` messages to the node input. The input also accepts `start`, `stop` and `restart` commands, which produce no output; endpoint state is shown in the node status and tool telemetry comes from `mcp-server-metrics`.
+The `mcp-flow-server` input accepts `start`, `stop` and `restart` commands, which produce no output; endpoint state is shown in the node status and tool telemetry comes from `mcp-server-metrics`.
 
 `mcp-server-metrics` is a source node with no input and one output. Select the same `mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits one `mcp-tool-telemetry` message for each `tools/call` request across those endpoints, including failed calls and authentication failures. Its payload contains `endpoint`, `tool`, `user`, `client`, `mode`, `status`, `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. `user` is the caller's e-mail (subject when no e-mail is known) and `client` the MCP client (`claude`, `codex`, `chatgpt` or the client host); unauthenticated calls report `unknown`. Unknown and unauthenticated tool names are reported as `unknown` to bound metric cardinality. `user` is personal data: use it as a metric label only while the set of users is small and the metrics store is access-controlled. It does not poll Node-RED or expose a metrics route.
 
@@ -424,7 +419,7 @@ sessions appear only as a 12-character hash.
 | `mcp.command` | `start`, `stop`, `restart` input | `command`, `endpoint` |
 
 The flow also receives the caller in `msg.mcp` (`subject`, `email`, `groups`, `client`) with
-each `mcp-tool-execute` message. Retention and forwarding of the Node-RED log belong to the
+each tool call. Retention and forwarding of the Node-RED log belong to the
 deployment.
 
 ## Kubernetes

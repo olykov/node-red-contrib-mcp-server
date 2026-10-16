@@ -11,7 +11,7 @@
         "type": "comment",
         "z": "mcp-example-tab",
         "name": "Configure MCP example auth before deploying",
-        "info": "The endpoint refuses to start until the auth configuration is valid.\nTool calls arrive as `mcp-tool-execute`; the flow answers with `mcp-tool-response` and the same `executionId`.",
+        "info": "The endpoint refuses to start until the auth configuration is valid.\nEach call leaves the MCP Tool node with the arguments in `msg.payload`; the flow puts the result in `msg.payload` and ends with MCP Tool Response.",
         "x": 220,
         "y": 40,
         "wires": []
@@ -72,11 +72,7 @@
         "allowedGroups": "MCP.User",
         "x": 170,
         "y": 120,
-        "wires": [
-            [
-                "mcp-example-route"
-            ]
-        ]
+        "wires": []
     },
     {
         "id": "mcp-example-tool",
@@ -92,51 +88,42 @@
         "outputSchema": "",
         "x": 150,
         "y": 200,
-        "wires": []
-    },
-    {
-        "id": "mcp-example-route",
-        "type": "switch",
-        "z": "mcp-example-tab",
-        "name": "add_numbers call?",
-        "property": "payload.toolName",
-        "propertyType": "msg",
-        "rules": [
-            {
-                "t": "eq",
-                "v": "add_numbers",
-                "vt": "str"
-            }
-        ],
-        "checkall": "true",
-        "repair": false,
-        "outputs": 1,
-        "x": 390,
-        "y": 120,
         "wires": [
             [
                 "mcp-example-add"
             ]
-        ]
+        ],
+        "outputs": 1,
+        "cancelOutput": false,
+        "timeoutMs": 0
     },
     {
         "id": "mcp-example-add",
         "type": "function",
         "z": "mcp-example-tab",
         "name": "Add",
-        "func": "const args = msg.payload.arguments || {};\nconst result = Number(args.a) + Number(args.b);\nmsg.topic = 'mcp-tool-response';\nmsg.payload = Number.isFinite(result) ?\n    { executionId: msg.payload.executionId, result: String(result) } :\n    { executionId: msg.payload.executionId, error: 'a and b must be numbers' };\nreturn msg;",
+        "func": "const result = Number(msg.payload.a) + Number(msg.payload.b);\nif (Number.isFinite(result)) msg.payload = String(result);\nelse msg.mcp.error = 'a and b must be numbers';\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 570,
-        "y": 120,
+        "x": 390,
+        "y": 200,
         "wires": [
             [
-                "mcp-example-server"
+                "mcp-example-response"
             ]
         ]
+    },
+    {
+        "id": "mcp-example-response",
+        "type": "mcp-tool-response",
+        "z": "mcp-example-tab",
+        "name": "",
+        "x": 600,
+        "y": 200,
+        "wires": []
     }
 ]

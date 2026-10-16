@@ -22,7 +22,7 @@ it('loads only the supported flow-serving palette nodes', () => {
         require('../' + file)(RED);
     }
     assert.deepEqual(registered.sort(), ['mcp-auth', 'mcp-flow-server', 'mcp-redis',
-        'mcp-runtime', 'mcp-server-metrics', 'mcp-tool-registry']);
+        'mcp-runtime', 'mcp-server-metrics', 'mcp-tool-registry', 'mcp-tool-response']);
     for (const name of ['mcp-client', 'mcp-server']) {
         for (const extension of ['js', 'html']) {
             assert.equal(existsSync(resolve(__dirname, '..', name + '.' + extension)), false);
@@ -65,9 +65,11 @@ it('ships an example flow whose nodes satisfy the current editor contracts', () 
     assert.strictEqual(byId.get(server.auth).type, 'mcp-auth');
     assert.strictEqual(byId.get(byId.get(server.auth).redis).type, 'mcp-redis');
     assert.strictEqual(server.serverPort, undefined);
+    assert.deepStrictEqual(server.wires, []);
     for (const tool of flow.filter(node => node.type === 'mcp-tool-registry')) {
         assert.strictEqual(tool.endpoint, server.serverPath);
-        assert.deepStrictEqual(tool.wires, []);
+        let next = byId.get(tool.wires[0][0]);
+        while (next.type !== 'mcp-tool-response') next = byId.get(next.wires[0][0]);
         assert.match(tool.toolName, /^[a-z][a-z0-9_]*$/);
         JSON.parse(tool.toolSchema);
     }

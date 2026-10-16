@@ -47,33 +47,16 @@
 </script>
 
 <script type="text/html" data-help-name="mcp-flow-server">
-    <p>One MCP endpoint on a selected runtime. Tool calls are passed into the flow and answered
-    from the flow.</p>
+    <p>One MCP endpoint on a selected runtime. Tool calls start the flows of its MCP Tool nodes.</p>
     <h3>Inputs</h3>
     <dl class="message-properties">
         <dt>topic <span class="property-type">string</span></dt>
-        <dd><code>mcp-tool-response</code> to answer a tool call, or a command:
-        <code>start</code>, <code>stop</code> or <code>restart</code>. Commands produce no output.</dd>
+        <dd>Command: <code>start</code>, <code>stop</code> or <code>restart</code>. Commands produce no output.</dd>
         <dt class="optional">payload.command <span class="property-type">string</span></dt>
         <dd>Command used when <code>topic</code> is not set.</dd>
-        <dt class="optional">payload.executionId <span class="property-type">string</span></dt>
-        <dd>For <code>mcp-tool-response</code>: the id received in the tool call.</dd>
-        <dt class="optional">payload.result <span class="property-type">any</span></dt>
-        <dd>Tool result: an MCP result object, content array, string or JSON value.</dd>
-        <dt class="optional">payload.error <span class="property-type">string | Error</span></dt>
-        <dd>Error text or object; the call returns an MCP result with <code>isError: true</code>.</dd>
-    </dl>
-    <h3>Outputs</h3>
-    <dl class="message-properties">
-        <dt>topic <span class="property-type">string</span></dt>
-        <dd>Always <code>mcp-tool-execute</code>.</dd>
-        <dt>payload <span class="property-type">object</span></dt>
-        <dd><code>toolName</code>, <code>arguments</code> and <code>executionId</code>.</dd>
-        <dt>mcp <span class="property-type">object</span></dt>
-        <dd>Caller identity: <code>subject</code>, <code>email</code>, <code>groups</code>, <code>client</code>.</dd>
     </dl>
     <h3>Details</h3>
-    <p>The output carries only tool calls. Endpoint state is shown in the node status; tool
+    <p>Endpoint state is shown in the node status; tool
     telemetry comes from the MCP metrics node. The endpoint speaks MCP 2026-07-28 only, without an
     <code>initialize</code> handshake; every request, <code>server/discover</code> included, requires
     OAuth. Notifications return HTTP 202 without a body, and closing the connection cancels a

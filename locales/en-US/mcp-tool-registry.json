@@ -29,7 +29,10 @@
             "toolNameValidation": "Tool name must be 1-64 lowercase letters, numbers, or underscores and start with a letter.",
             "inputSchemaInvalid": "Input schema invalid JSON",
             "outputSchemaInvalid": "Output schema invalid JSON",
-            "formatSuccess": "JSON fields formatted"
+            "formatSuccess": "JSON fields formatted",
+            "cancelOutput": "Cancel Output",
+            "callOutputLabel": "Tool call",
+            "cancelOutputLabel": "Cancellation or timeout"
         },
         "status": {
             "unregistered": "unregistered",
@@ -37,6 +40,12 @@
             "duplicate": "duplicate",
             "registered": "registered",
             "shared": "shared"
+        }
+    },
+    "mcp-tool-response": {
+        "label": {
+            "paletteLabel": "MCP Tool Response",
+            "name": "Name"
         }
     }
 }

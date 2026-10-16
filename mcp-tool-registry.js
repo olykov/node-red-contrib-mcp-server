@@ -3,6 +3,7 @@ module.exports = function (RED)
     "use strict";
     const { compileInputSchema, compileOutputSchema } = require('./lib/tool-validation');
     const { message } = require('./lib/messages');
+    const executions = require('./lib/executions');
     const statusText = (node, key) => message(node, 'mcp-tool-registry', 'mcp-tool-registry.status.' + key);
 
     function normalizePath(value)
@@ -65,6 +66,7 @@ module.exports = function (RED)
         node.toolSchema = config.toolSchema || '{"type":"object"}';
         node.outputSchema = config.outputSchema || '';
         node.timeoutMs = config.timeoutMs === undefined || config.timeoutMs === '' ? 0 : Number(config.timeoutMs);
+        node.cancelOutput = config.cancelOutput === true;
         node.isRegistered = false;
         node.hasDuplicate = false;
 
@@ -163,6 +165,11 @@ module.exports = function (RED)
                 endpointPath: binding.endpointPath,
                 serverName: binding.serverName,
                 registeredBy: node.id,
+                deliver: msg => node.send(msg),
+                cancel(mcp)
+                {
+                    if (node.cancelOutput) node.send([null, { mcp }]);
+                },
                 setStatus(duplicate)
                 {
                     if (node.hasDuplicate === duplicate) return;
@@ -212,5 +219,32 @@ module.exports = function (RED)
         });
     }
 
+    function MCPToolResponseNode(config)
+    {
+        RED.nodes.createNode(this, config);
+        const node = this;
+
+        node.on('input', function (msg, send, done)
+        {
+            const executionId = msg.mcp && msg.mcp.executionId;
+            if (!executionId) return done(new Error('msg.mcp.executionId is required'));
+            const pending = executions.take(executionId);
+            if (!pending)
+            {
+                if (executions.isRetired(executionId))
+                {
+                    node.debug('Ignoring late MCP tool response for executionId: ' + executionId);
+                    return done();
+                }
+                return done(new Error('Unknown MCP executionId: ' + executionId));
+            }
+            clearTimeout(pending.timeout);
+            if (msg.mcp.error) pending.reject(new Error(executions.errorText(msg.mcp.error)));
+            else pending.resolve(msg.payload);
+            done();
+        });
+    }
+
     RED.nodes.registerType('mcp-tool-registry', MCPToolRegistryNode);
+    RED.nodes.registerType('mcp-tool-response', MCPToolResponseNode);
 };

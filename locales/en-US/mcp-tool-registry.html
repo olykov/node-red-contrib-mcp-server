@@ -1,15 +1,50 @@
 <script type="text/html" data-help-name="mcp-tool-registry">
-    <p>Registers one MCP tool for one endpoint or for every endpoint.</p>
+    <p>Registers one MCP tool for one endpoint or for every endpoint and starts its flow on each call.</p>
+    <h3>Outputs</h3>
+    <ol class="node-ports">
+        <li>Tool call
+            <dl class="message-properties">
+                <dt>payload <span class="property-type">object</span></dt>
+                <dd>tool arguments, validated against the Input Schema.</dd>
+                <dt>mcp.executionId <span class="property-type">string</span></dt>
+                <dd>identifier of this call; MCP Tool Response needs it to answer.</dd>
+                <dt>mcp.toolName <span class="property-type">string</span></dt>
+                <dd>name of the called tool.</dd>
+                <dt>mcp.subject <span class="property-type">string</span></dt>
+                <dd>user subject from the identity provider.</dd>
+                <dt>mcp.email <span class="property-type">string</span></dt>
+                <dd>user email, empty when the provider does not send one.</dd>
+                <dt>mcp.groups <span class="property-type">array</span></dt>
+                <dd>user groups from the identity provider.</dd>
+                <dt>mcp.client <span class="property-type">string</span></dt>
+                <dd>OAuth client identifier of the MCP client.</dd>
+            </dl>
+        </li>
+        <li>Cancellation or timeout, present when Cancel Output is enabled
+            <dl class="message-properties">
+                <dt>mcp.executionId <span class="property-type">string</span></dt>
+                <dd>identifier of the call that ended.</dd>
+                <dt>mcp.toolName <span class="property-type">string</span></dt>
+                <dd>name of the called tool.</dd>
+                <dt>mcp.reason <span class="property-type">string</span></dt>
+                <dd><code>cancelled</code> when the client closed the request, <code>timeout</code> when the tool timeout expired.</dd>
+            </dl>
+        </li>
+    </ol>
     <h3>Details</h3>
-    <p>The tool is advertised when the flow starts and removed when the node stops. Calls reach the
-    selected MCP Server output as <code>mcp-tool-execute</code>; the flow must answer with
-    <code>mcp-tool-response</code>.</p>
+    <p>The tool is advertised when the flow starts and removed when the node stops. The flow ends
+    with an MCP Tool Response node; keep <code>msg.mcp</code> along the flow. A response after
+    cancellation or timeout is ignored.</p>
     <dl>
         <dt>Tool Name</dt>
         <dd>MCP tool name: lowercase letters, digits and underscores, starting with a letter.</dd>
         <dt>Endpoint</dt>
         <dd>MCP path of the MCP Server that offers the tool, so the binding survives copy, import
         and node replacement. <code>Shared (All MCPs)</code> exposes it on every endpoint.</dd>
+        <dt>Tool Timeout</dt>
+        <dd>Time limit for the flow; 0 uses the endpoint timeout.</dd>
+        <dt>Cancel Output</dt>
+        <dd>Adds the second output for cancellation and timeout messages.</dd>
         <dt>Behavior</dt>
         <dd>MCP safety annotation: read only, add only, or change, delete or send.</dd>
         <dt>Scope</dt>
@@ -23,4 +58,21 @@
     <ul>
         <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>
     </ul>
+</script>
+<script type="text/html" data-help-name="mcp-tool-response">
+    <p>Returns the result of an MCP tool flow to the client.</p>
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>mcp.executionId <span class="property-type">string</span></dt>
+        <dd>identifier set by MCP Tool.</dd>
+        <dt>payload <span class="property-type">any</span></dt>
+        <dd>tool result. A string or buffer becomes text content, an array becomes the content
+        list, an MCP result with <code>content</code> is sent as is, any other value is sent as
+        JSON text.</dd>
+        <dt class="optional">mcp.error <span class="property-type">string | Error</span></dt>
+        <dd>when set, the client receives an error result with this text.</dd>
+    </dl>
+    <h3>Details</h3>
+    <p>A message without <code>msg.mcp.executionId</code> or with an unknown one fails the node, so
+    a Catch node can handle it. A response that arrives after cancellation or timeout is ignored.</p>
 </script>

@@ -58,6 +58,11 @@ function createRuntime(config = {}) {
     delete require.cache[require.resolve('../mcp-flow-server')];
     require('../mcp-flow-server')(RED);
     require('../mcp-server-metrics')(RED);
+    delete require.cache[require.resolve('../mcp-tool-registry')];
+    require('../mcp-tool-registry')(RED);
+    RED.types = types;
+    RED.delivered = [];
+    RED.cancelled = [];
     const runtimeConfig = Object.assign({
         id: 'runtime-1',
         runtimeName: 'test-runtime',
@@ -100,8 +105,14 @@ function mockRes() {
 }
 
 function registerTool(RED, tool) {
-    const registered = { registeredBy: tool.name + '@' + (tool.endpointPath || '*'), ...tool };
+    const registered = { registeredBy: tool.name + '@' + (tool.endpointPath || '*'),
+        deliver: msg => RED.delivered.push(msg), cancel: mcp => RED.cancelled.push(mcp), ...tool };
     for (const runtime of RED.mcpRuntimes) runtime.registerTool(registered);
+}
+
+function respond(RED, msg) {
+    const node = new RED.types['mcp-tool-response']({ id: 'response-' + RED.delivered.length });
+    return new Promise(resolve => node.emit('input', msg, () => {}, resolve));
 }
 
 function toolResult(result) {
@@ -521,11 +532,8 @@ describe('upstream mcp-flow-server local extensions', () => {
             params: { name: 'sample_ping', arguments: { secret: 'private-argument' } }
         }, { authorization: 'Bearer test-token' }), response);
         await new Promise(resolve => setImmediate(resolve));
-        const execution = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
-        server.emit('input', {
-            topic: 'mcp-tool-response',
-            payload: { executionId: execution.payload.executionId, result: { secret: 'private-result' } }
-        }, () => {}, () => {});
+        const execution = RED.delivered[0];
+        await respond(RED, { payload: { secret: 'private-result' }, mcp: { executionId: execution.mcp.executionId } });
         await pending;
 
         assert.equal(response.body.result.content[0].text, JSON.stringify({ secret: 'private-result' }));
@@ -578,21 +586,18 @@ describe('upstream mcp-flow-server local extensions', () => {
         const pending = server.handleToolCall({ id: 42, params: { name: 'sample_ping', arguments: {} } }, response);
         await new Promise(resolve => setImmediate(resolve));
         assert.equal(server.activeToolCalls, 1);
-        const execution = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
+        const execution = RED.delivered[0];
 
         response.emit('close');
         await pending;
         assert.equal(response.body, undefined, 'no response is written for a closed connection');
         assert.equal(server.activeToolCalls, 0, 'concurrency slot must be released on cancellation');
 
-        const debugCalls = [];
-        server.debug = message => debugCalls.push(message);
-        server.emit('input', {
-            topic: 'mcp-tool-response',
-            payload: { executionId: execution.payload.executionId, result: 'late' }
-        }, () => {}, () => {});
-        assert.equal(debugCalls.length, 1);
-        assert.match(debugCalls[0], /late or cancelled/);
+        assert.deepStrictEqual(RED.cancelled, [{ executionId: execution.mcp.executionId, toolName: 'sample_ping', reason: 'cancelled' }]);
+        assert.equal(await respond(RED, { payload: 'late', mcp: { executionId: execution.mcp.executionId } }), undefined,
+            'a late response is ignored without an error');
+        assert.match((await respond(RED, { payload: 'x', mcp: { executionId: 'unknown-id' } })).message, /Unknown MCP executionId/);
+        assert.match((await respond(RED, { payload: 'x' })).message, /executionId is required/);
         assert.equal(server.warnings.length, 0, 'the late response must not raise an Orphan warning');
     });
 
@@ -933,43 +938,10 @@ describe('upstream mcp-flow-server local extensions', () => {
             inputSchema: { type: 'object', properties: {} }
         });
         const pending = server.handleToolCall({ id: 7, params: { name: 'sample_ping', arguments: { text: 'ok' } } }, mockRes());
-        const exec = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
-        assert.strictEqual(exec.payload.toolName, 'sample_ping');
-        server.emit('input', {
-            topic: 'mcp-tool-response',
-            payload: { executionId: exec.payload.executionId, result: { ok: true, received: exec.payload.arguments } }
-        }, () => {}, () => {});
+        const exec = RED.delivered[0];
+        assert.strictEqual(exec.mcp.toolName, 'sample_ping');
+        await respond(RED, { payload: { ok: true, received: exec.payload }, mcp: { executionId: exec.mcp.executionId } });
         await pending;
-    });
-
-    it('resolves a pending tool execution when the response reaches a replacement endpoint instance', async () => {
-        const runtime = createRuntime({ id: 'endpoint-shared', serverPath: '/mcp/a' });
-        const replacement = new runtime.types['mcp-flow-server']({
-            id: 'endpoint-shared',
-            runtime: 'runtime-1',
-            auth: 'default-auth',
-            serverName: 'test-replacement',
-            serverPath: '/mcp/a'
-        });
-        registerTool(runtime.RED, {
-            name: 'sample_ping',
-            description: 'Sample ping',
-            endpointPath: '/mcp/a',
-            inputSchema: { type: 'object', properties: {} }
-        });
-
-        const res = mockRes();
-        const pending = runtime.server.handleToolCall({ id: 8, params: { name: 'sample_ping', arguments: { text: 'ok' } } }, res);
-        const exec = runtime.server.sent.find(msg => msg.topic === 'mcp-tool-execute');
-        assert.strictEqual(exec.payload.toolName, 'sample_ping');
-
-        replacement.emit('input', {
-            topic: 'mcp-tool-response',
-            payload: { executionId: exec.payload.executionId, result: { ok: true, replacement: true } }
-        }, () => {}, () => {});
-
-        await pending;
-        assert.deepStrictEqual(toolResult(res.body.result), { content: [{ type: 'text', text: JSON.stringify({ ok: true, replacement: true }) }] });
     });
 
     it('challenges an anonymous server/discover on an OAuth endpoint', async () => {
@@ -1684,7 +1656,7 @@ describe('3.0 configuration rules', () => {
         assert.deepStrictEqual(other.registeredTools(), []);
     });
 
-    it('emits only tool calls on the output and serves no /health route', async () => {
+    it('delivers tool calls through the tool node and serves no /health route', async () => {
         const { RED, server } = buildServer({ __runtime: { serverPort: 18131 } });
         registerTool(RED, { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
@@ -1693,11 +1665,12 @@ describe('3.0 configuration rules', () => {
             assert.strictEqual(health.status, 404);
             await health.text();
             const pending = server.handleToolCall({ id: 1, params: { name: 'ping', arguments: {} } }, mockRes());
-            const exec = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
-            server.emit('input', { topic: 'mcp-tool-response', payload: { executionId: exec.payload.executionId, result: 'ok' } }, () => {}, () => {});
+            const exec = RED.delivered[0];
+            await respond(RED, { payload: 'ok', mcp: { executionId: exec.mcp.executionId } });
             await pending;
         } finally { await new Promise(resolve => server.emit('close', resolve)); }
-        assert.deepStrictEqual(server.sent.map(msg => msg.topic), ['mcp-tool-execute']);
+        assert.deepStrictEqual(server.sent, []);
+        assert.equal(RED.delivered.length, 1);
     });
 });
 
@@ -1772,9 +1745,11 @@ describe('audit log and OAuth hardening', () => {
         const pending = server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/call',
             params: { name: 'ping', arguments: { secret: 'argument-value' } } }, { authorization: 'Bearer test-token' }), res);
         await new Promise(resolve => setImmediate(resolve));
-        const exec = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
-        assert.deepStrictEqual(exec.mcp, { subject: 'user-1', email: 'user@example.test', groups: ['test-group'], client: 'https://claude.ai/meta' });
-        server.emit('input', { topic: 'mcp-tool-response', payload: { executionId: exec.payload.executionId, result: 'ok' } }, () => {}, () => {});
+        const exec = RED.delivered[0];
+        assert.deepStrictEqual(exec.mcp, { executionId: exec.mcp.executionId, toolName: 'ping', subject: 'user-1',
+            email: 'user@example.test', groups: ['test-group'], client: 'https://claude.ai/meta' });
+        assert.deepStrictEqual(exec.payload, { secret: 'argument-value' });
+        await respond(RED, { payload: 'ok', mcp: { executionId: exec.mcp.executionId } });
         await pending;
         const [call] = events(server.logs, 'mcp.tool_call');
         assert.strictEqual(call.outcome, 'success');
@@ -1929,8 +1904,8 @@ describe('tool result tolerance', () => {
         registerTool(RED, { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
         const res = mockRes();
         const pending = server.handleToolCall({ id: 1, params: { name: 'ping', arguments: {} } }, res);
-        const exec = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
-        server.emit('input', { topic: 'mcp-tool-response', payload: { executionId: exec.payload.executionId, ...response } }, () => {}, () => {});
+        const exec = RED.delivered[0];
+        await respond(RED, { payload: response.result, mcp: { executionId: exec.mcp.executionId, error: response.error } });
         await pending;
         return res.body;
     }
@@ -1955,8 +1930,8 @@ describe('telemetry identity', () => {
         const pending = server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/call',
             params: { name: 'ping', arguments: {} } }, { authorization: 'Bearer any' }), mockRes());
         await new Promise(resolve => setImmediate(resolve));
-        const exec = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
-        server.emit('input', { topic: 'mcp-tool-response', payload: { executionId: exec.payload.executionId, result: 'ok' } }, () => {}, () => {});
+        const exec = RED.delivered[0];
+        await respond(RED, { payload: 'ok', mcp: { executionId: exec.mcp.executionId } });
         await pending;
         assert.strictEqual(events[0].user, 'user@example.test');
         assert.strictEqual(events[0].client, 'codex');

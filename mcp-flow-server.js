@@ -8,6 +8,7 @@ module.exports = function (RED)
     const { normalizeIp, parseCidr, ipInCidr } = require('./lib/cidr');
     const { createAdminTools } = require('./lib/admin-tools');
     const { auditLog } = require('./lib/audit');
+    const executions = require('./lib/executions');
     const { message } = require('./lib/messages');
     const statusText = (node, key, vars) => message(node, 'mcp-flow-server', 'mcp-flow-server.status.' + key, vars);
     const PACKAGE_VERSION = require('./package.json').version;
@@ -39,7 +40,6 @@ module.exports = function (RED)
 
     const serverInstances = new Map();
     const runtimes = new Set();
-    const pendingExecutions = new Map();
     let legacyAdminTokenWarningShown = false;
 
     function origin(value)
@@ -390,13 +390,6 @@ module.exports = function (RED)
         if (Array.isArray(result)) return { content: result };
         if (typeof result === 'string') return textResult(result);
         return textResult(JSON.stringify(result));
-    }
-
-    function errorText(error)
-    {
-        if (typeof error === 'string') return error;
-        if (error && typeof error.message === 'string') return error.message;
-        return JSON.stringify(error);
     }
 
     // Bounded client label for metrics: the MCP client product, not its metadata URL.
@@ -946,33 +939,27 @@ module.exports = function (RED)
             return new Promise((resolve, reject) =>
             {
                 const executionId = uuidv4();
-                const executionMsg = { topic: 'mcp-tool-execute', payload: { toolName: tool.name, arguments: args, executionId },
-                    mcp: { subject: claims.subject || '', email: claims.email || '', groups: claims.groups || [], client: claims.client || '' } };
-                const timeout = setTimeout(() =>
+                const mcp = { executionId, toolName: tool.name, subject: claims.subject || '', email: claims.email || '',
+                    groups: claims.groups || [], client: claims.client || '' };
+                const end = (reason, error) =>
                 {
-                    pendingExecutions.delete(executionId);
-                    reject(new Error('Tool execution timeout'));
-                }, Math.min(tool.timeoutMs || node.toolTimeoutMs, node.toolTimeoutMs));
-                pendingExecutions.set(executionId, {
-                    resolve,
-                    reject,
-                    timeout,
-                    endpointId: node.endpointId
-                });
-                if (signal) signal.addEventListener('abort', () =>
-                {
-                    if (!pendingExecutions.has(executionId)) return;
+                    if (!executions.take(executionId)) return;
                     clearTimeout(timeout);
-                    pendingExecutions.delete(executionId);
-                    reject(new Error('Tool execution cancelled'));
-                }, { once: true });
+                    executions.retire(executionId);
+                    if (typeof tool.cancel === 'function') tool.cancel({ executionId, toolName: tool.name, reason });
+                    reject(error);
+                };
+                const timeout = setTimeout(() => end('timeout', new Error('Tool execution timeout')),
+                    Math.min(tool.timeoutMs || node.toolTimeoutMs, node.toolTimeoutMs));
+                executions.add(executionId, { resolve, reject, timeout, endpointId: node.endpointId });
+                if (signal) signal.addEventListener('abort', () => end('cancelled', new Error('Tool execution cancelled')), { once: true });
                 try
                 {
-                    node.send(executionMsg);
+                    tool.deliver({ payload: args, mcp });
                 } catch (error)
                 {
                     clearTimeout(timeout);
-                    pendingExecutions.delete(executionId);
+                    executions.take(executionId);
                     reject(error);
                 }
             });
@@ -1073,25 +1060,9 @@ module.exports = function (RED)
 
         let restartTimer = null;
         let pendingRestartDone = null;
-        // The output carries only tool calls; commands produce no messages.
         node.on('input', function (msg, send, done)
         {
             const finished = error => done(error || undefined);
-
-            if (msg.topic === 'mcp-tool-response' && msg.payload && msg.payload.executionId)
-            {
-                const pending = pendingExecutions.get(msg.payload.executionId);
-                if (!pending)
-                {
-                    node.debug('Ignoring late or cancelled MCP tool response for executionId: ' + msg.payload.executionId);
-                    return done();
-                }
-                clearTimeout(pending.timeout);
-                pendingExecutions.delete(msg.payload.executionId);
-                if (msg.payload.error) pending.reject(new Error(errorText(msg.payload.error)));
-                else pending.resolve(msg.payload.result);
-                return done();
-            }
 
             const command = msg.topic || (msg.payload && msg.payload.command);
             if (['start', 'stop', 'restart'].includes(command)) auditLog(node, 'mcp.command', { command, endpoint: node.serverName });
@@ -1136,11 +1107,12 @@ module.exports = function (RED)
             RED.events.removeListener('flows:started', startOnDeploy);
             if (node.runtime && typeof node.runtime.removeEndpoint === 'function') node.runtime.removeEndpoint(node);
             node.adminTools.dispose();
-            for (const [executionId, pending] of pendingExecutions.entries())
+            for (const [executionId, pending] of executions.entries())
             {
                 if (pending.endpointId !== node.endpointId) continue;
                 clearTimeout(pending.timeout);
-                pendingExecutions.delete(executionId);
+                executions.take(executionId);
+                executions.retire(executionId);
                 pending.reject(new Error('MCP server stopped before tool execution completed'));
             }
             if (node.portState) node.stopServer(() => done());

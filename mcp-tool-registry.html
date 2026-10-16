@@ -34,9 +34,14 @@
                 return v === '' || Number(v) === 0 ||
                     (RED.validators.number()(v) && Number.isInteger(Number(v)) && Number(v) >= 1000 && Number(v) <= 600000);
             } },
+            cancelOutput: { value: false },
+            outputs: { value: 1 }
         },
         inputs: 0,
-        outputs: 0,
+        outputs: 1,
+        outputLabels: function(index) {
+            return this._(index ? 'mcp-tool-registry.label.cancelOutputLabel' : 'mcp-tool-registry.label.callOutputLabel');
+        },
         paletteLabel: 'MCP Tool',
         icon: 'font-awesome/fa-wrench',
         label: function() {
@@ -109,6 +114,7 @@
             });
         },
         oneditsave: function() {
+            this.outputs = $('#node-input-cancelOutput').prop('checked') ? 2 : 1;
             $('#node-input-toolSchema').val(this.schemaEditors.toolSchema.getValue());
             $('#node-input-outputSchema').val(this.schemaEditors.outputSchema.getValue());
             this.schemaEditors.toolSchema.destroy();
@@ -121,6 +127,31 @@
             delete this.schemaEditors;
         }
     });
+    RED.nodes.registerType('mcp-tool-response', {
+        category: 'mcp',
+        color: '#E9967A',
+        defaults: {
+            name: { value: '' }
+        },
+        inputs: 1,
+        outputs: 0,
+        align: 'right',
+        paletteLabel: 'MCP Tool Response',
+        icon: 'font-awesome/fa-reply',
+        label: function() {
+            return this.name || this._('mcp-tool-response.label.paletteLabel');
+        },
+        labelStyle: function() {
+            return this.name ? 'node_label_italic' : '';
+        }
+    });
+</script>
+
+<script type="text/html" data-template-name="mcp-tool-response">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-tool-response.label.name"></span></label>
+        <input type="text" id="node-input-name">
+    </div>
 </script>
 
 <script type="text/html" data-template-name="mcp-tool-registry">
@@ -149,6 +180,10 @@
         <input type="number" id="node-input-timeoutMs" min="0" max="600000" step="1">
     </div>
     <div class="form-tips" data-i18n="mcp-tool-registry.label.timeoutTip"></div>
+    <div class="form-row">
+        <label for="node-input-cancelOutput" data-i18n="mcp-tool-registry.label.cancelOutput"></label>
+        <input type="checkbox" id="node-input-cancelOutput" style="width: auto;">
+    </div>
 
     <hr>
     <h4 data-i18n="mcp-tool-registry.label.annotationsHeading"></h4>
