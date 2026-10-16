@@ -49,8 +49,10 @@
         <dd>Adds the second output for cancellation and timeout messages.</dd>
         <dt>Behavior</dt>
         <dd>MCP safety annotation: read only, add only, or change, delete or send.</dd>
-        <dt>World Access</dt>
-        <dd>MCP open-world annotation. Public internet and external recipients are open-ended.</dd>
+        <dt>Open World</dt>
+        <dd>MCP <code>openWorldHint</code> for the client. <code>No</code>: the tool works only with
+        fixed targets, such as its own database. <code>Yes</code>: it reaches an open set, such as
+        any web address or any e-mail recipient. A hint, not an access control.</dd>
         <dt>Input Schema</dt>
         <dd>JSON Schema object for the tool arguments.</dd>
         <dt>Output Schema</dt>
