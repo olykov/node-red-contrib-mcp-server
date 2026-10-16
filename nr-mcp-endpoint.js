@@ -112,7 +112,6 @@ module.exports = function (RED)
             hostname,
             port: Number(settings.uiPort) || runtime.adminPort,
             root,
-            ca: runtime.adminCa || undefined,
             disabled: adminRoot === false
         };
     }
@@ -433,7 +432,6 @@ module.exports = function (RED)
             node.error('MCP runtime configuration is invalid: ' + node.configError);
             node.adminTokenEnv = '';
         }
-        node.adminCa = typeof config.adminCa === 'string' ? config.adminCa.trim() : '';
         node.trustedProxies = [];
         try
         {

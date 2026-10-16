@@ -24,14 +24,14 @@
         in Code Groups. Code is sent to the MCP client and secrets in code are not redacted.</dd>
         <dt>Admin Port</dt>
         <dd>Fallback port for the local Node-RED Admin API; the runtime uses Node-RED's configured
-        UI port, host, HTTP admin root and HTTPS setting when available.</dd>
+        UI port, host, HTTP admin root and HTTPS setting when available. When Node-RED itself serves
+        HTTPS with a certificate from a private CA, start Node-RED with
+        <code>NODE_EXTRA_CA_CERTS</code> set to that CA file.</dd>
         <dt>Admin Token</dt>
         <dd>Bearer token for the local Node-RED Admin API, stored as a credential.</dd>
         <dt>Admin Token Env</dt>
         <dd>Optional <code>MCP_*</code> environment variable for the API token. The Admin Token
         credential takes precedence.</dd>
-        <dt>Admin API CA</dt>
-        <dd>Optional PEM certificate for a private CA. TLS certificate verification remains enabled.</dd>
         <dt>Admin Path</dt>
         <dd>Exact MCP path allowed to expose the read-only admin tools.</dd>
     </dl>

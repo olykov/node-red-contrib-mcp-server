@@ -32,7 +32,6 @@
             adminTokenEnv: { value: '', validate: function(v) {
                 return !v || /^MCP_[A-Z0-9_]+$/.test(String(v).trim());
             } },
-            adminCa: { value: '' },
             adminEndpointPath: { value: '' }
         },
         credentials: {
@@ -145,10 +144,6 @@
     <div class="form-row">
         <label for="node-config-input-adminTokenEnv"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-runtime.label.adminTokenEnv"></span></label>
         <input type="text" id="node-config-input-adminTokenEnv" data-i18n="[placeholder]nr-mcp-runtime.label.adminTokenEnvPlaceholder">
-    </div>
-    <div class="form-row">
-        <label for="node-config-input-adminCa"><i class="fa fa-certificate"></i> <span data-i18n="nr-mcp-runtime.label.adminCa"></span></label>
-        <textarea id="node-config-input-adminCa" rows="4" style="width: 70%; resize: vertical;"></textarea>
     </div>
     <div class="form-row">
         <label for="node-config-input-adminEndpointPath"><i class="fa fa-link"></i> <span data-i18n="nr-mcp-runtime.label.adminEndpointPath"></span></label>

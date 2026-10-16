@@ -476,6 +476,7 @@ endpoint; `terminationGracePeriodSeconds` must exceed the pause.
 | --- | --- | --- |
 | `MCP_REDIS_URL` (default name) | `mcp-redis` in env mode | Any `MCP_*` name can be configured. |
 | `MCP_*` | `mcp-redis` Password Env, `mcp-auth` Secret Env | Names outside `MCP_` are rejected. |
+| `NODE_EXTRA_CA_CERTS` | `get_flow` Admin API calls | Optional, unset by default. Needed only when Node-RED itself serves HTTPS (`https` in `settings.js`) with a certificate from a private CA: point it at that CA file. Behind a reverse proxy the Admin API is reached over plain HTTP and needs nothing. The Admin API address comes from `uiHost` and `uiPort` in `settings.js` (loopback when `uiHost` is unset or a wildcard). |
 
 ## Rollback
 

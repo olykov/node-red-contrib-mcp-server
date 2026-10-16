@@ -26,10 +26,9 @@
             "adminToken": "Admin Token",
             "adminTokenEnv": "Admin Token Env",
             "adminTokenEnvPlaceholder": "MCP_ADMIN_TOKEN",
-            "adminCa": "Admin API CA",
             "adminEndpointPath": "Admin Path",
             "adminEndpointPathPlaceholder": "/mcp/admin",
-            "adminToolsNote": "Admin tools require an Admin Token or Admin Token Env and an Admin Endpoint Path matching an MCP Endpoint. HTTPS uses normal certificate verification; provide a private CA certificate when needed."
+            "adminToolsNote": "Admin tools require an Admin Token or Admin Token Env and an Admin Endpoint Path matching an MCP Endpoint."
         }
     },
     "nr-mcp-endpoint": {
