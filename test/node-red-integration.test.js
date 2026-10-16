@@ -4,6 +4,7 @@ const { after, before, describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const net = require('node:net');
 const helper = require('node-red-node-test-helper');
+const { mcpFetch } = require('./helpers/mcp-request');
 
 helper.init(require.resolve('node-red'));
 
@@ -86,40 +87,40 @@ describe('Node-RED runtime integration', () => {
         const adminListing = await helper.request().get('/mcp-flow-servers').expect(200);
         assert.ok(adminListing.body.servers.some(item => item.endpointId === 'it-endpoint'));
 
-        const initialized = await fetch('http://127.0.0.1:' + port + '/mcp/integration', {
-            method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' })
+        auth.readAccessToken = async token => token === 'integration-token' ?
+            { groups: ['integration-users'], scopes: ['openid'], subject: 'integration-user' } : null;
+        const discovered = await mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
+            method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer integration-token' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover' })
         });
-        assert.equal(initialized.status, 200);
-        assert.equal((await initialized.json()).result.serverInfo.name, 'integration');
+        assert.equal(discovered.status, 200);
+        assert.equal((await discovered.json()).result._meta['io.modelcontextprotocol/serverInfo'].name, 'integration');
 
         for (const origin of ['http://127.0.0.1:' + port, 'https://trusted.example.test', undefined]) {
-            const headers = { 'content-type': 'application/json' };
+            const headers = { 'content-type': 'application/json', authorization: 'Bearer integration-token' };
             if (origin) headers.origin = origin;
-            const accepted = await fetch('http://127.0.0.1:' + port + '/mcp/integration', {
+            const accepted = await mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
                 method: 'POST', headers,
-                body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'initialize' })
+                body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'server/discover' })
             });
             assert.equal(accepted.status, 200);
             await accepted.json();
         }
 
-        const rejectedOrigin = await fetch('http://127.0.0.1:' + port + '/mcp/integration', {
+        const rejectedOrigin = await mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
             method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example.test' },
             body: '{invalid-json'
         });
         assert.equal(rejectedOrigin.status, 403);
 
-        const anonymousList = await fetch('http://127.0.0.1:' + port + '/mcp/integration', {
+        const anonymousList = await mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
             method: 'POST', headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
         });
         assert.equal(anonymousList.status, 401);
 
-        auth.readAccessToken = async token => token === 'integration-token' ?
-            { groups: ['integration-users'], scopes: ['openid'], subject: 'integration-user' } : null;
         await waitFor(() => helper.getNode('it-tool').isRegistered);
-        const authorizedList = await fetch('http://127.0.0.1:' + port + '/mcp/integration', {
+        const authorizedList = await mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
             method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer integration-token' },
             body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list' })
         });
@@ -135,7 +136,7 @@ describe('Node-RED runtime integration', () => {
         assert.equal(helper.getNode('it-endpoint').isRunning, true);
 
         const executeMessage = new Promise(resolve => output.once('input', resolve));
-        const pendingCall = fetch('http://127.0.0.1:' + port + '/mcp/integration', {
+        const pendingCall = mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
             method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer integration-token' },
             body: JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call',
                 params: { name: 'integration_tool', arguments: {} } })

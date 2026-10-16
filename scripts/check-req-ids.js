@@ -48,8 +48,10 @@ function main() {
     const testText = collectTestText();
     const reviewText = fs.existsSync(reviewPath) ? fs.readFileSync(reviewPath, 'utf8') : '';
 
+    const superseded = new Set([...reviewText.matchAll(/^\|\s*(MCP-[A-Z]+-\d+)\s*\|\s*superseded\s*\|/gm)].map(match => match[1]));
     const missing = [];
     for (const req of requirements) {
+        if (superseded.has(req.id)) continue;
         const idPattern = new RegExp(`\\b${req.id}\\b`);
         if (req.verification === 'review') {
             if (!idPattern.test(reviewText)) missing.push(req);
@@ -68,7 +70,8 @@ function main() {
         return;
     }
 
-    console.log(`check-req-ids: ${requirements.length} requirement(s) all have a test or review mark.`);
+    console.log(`check-req-ids: ${requirements.length} requirement(s) all have a test or review mark` +
+        (superseded.size ? `, ${superseded.size} superseded.` : '.'));
 }
 
 main();

@@ -2,7 +2,8 @@
 
 Requirements from `docs/spec.md` verified by reading code, documentation or repository files
 instead of an automated test. `scripts/check-req-ids.js` requires every `review` requirement
-to appear here. Status is one of `done` or `open`; an `open` entry names what is still missing.
+to appear here. Status is one of `done`, `open` or `superseded`; an `open` entry names what is still
+missing, a `superseded` entry names the decision that replaced the requirement.
 
 | ID | Status | Evidence |
 | --- | --- | --- |
@@ -13,3 +14,6 @@ to appear here. Status is one of `done` or `open`; an `open` entry names what is
 | MCP-PKG-4 | done | Editor labels and help live in `locales/en-US/*.json|html`; node status texts are resolved through `lib/messages.js` from the same catalogs (`status` sections). Covered by `test/cidr.test.js` "message catalogs". |
 | MCP-PKG-5 | done | `README.md` "Kubernetes" covers Bind Host, Trusted Proxies, Allowed Origins, a `preStop` sleep of at least Tool Timeout, readiness/liveness probes and the Redis requirement for several pods. Field names match the editor. |
 | MCP-PKG-6 | open | Submit to the Flow Library after the first 3.5 publish through `release.yml`; the `node-red` keyword is already in `package.json`. This cannot be done before publication. |
+| MCP-PROTO-1 | superseded | 4.0 targets MCP 2026-07-28 only: no `initialize` negotiation and no 2025-06-18 or 2025-11-25 support; `server/discover` reports `supportedVersions: ["2026-07-28"]`. |
+| MCP-PROTO-2 | superseded | 2026-07-28 requires `MCP-Protocol-Version` on every request; a missing header is no longer accepted. Unsupported versions still get 400, now with `-32022` and the supported versions. |
+| MCP-PROTO-7 | superseded | 2026-07-28 Streamable HTTP has no client `notifications/cancelled`; closing the connection cancels the call and frees its concurrency slot. |

@@ -11,7 +11,17 @@ module.exports = function (RED)
     const { message } = require('./lib/messages');
     const statusText = (node, key, vars) => message(node, 'mcp-flow-server', 'mcp-flow-server.status.' + key, vars);
     const PACKAGE_VERSION = require('./package.json').version;
-    const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-11-25'];
+    const PROTOCOL_VERSION = '2026-07-28';
+    const SUPPORTED_PROTOCOL_VERSIONS = [PROTOCOL_VERSION];
+    const HEADER_MISMATCH = -32020;
+    const UNSUPPORTED_PROTOCOL_VERSION = -32022;
+    const LIST_TTL_MS = 60000;
+
+    function decodeHeaderValue(value)
+    {
+        const match = /^=\?base64\?(.*)\?=$/.exec(String(value));
+        return match ? Buffer.from(match[1], 'base64').toString('utf8') : value;
+    }
     const { authRouteSlug, mcpEnvName } = require('./lib/auth-provider');
     const {
         absoluteUrl,
@@ -298,29 +308,9 @@ module.exports = function (RED)
             await node.handleMcpHttpRequest(req, res);
         });
 
-        state.app.delete(/.*/, (req, res) => state.routes.has(req.path) ?
-            res.status(405).json({ error: 'method_not_allowed' }) : res.status(404).json({ error: 'MCP path not found' }));
-
-        state.app.get(/.*/, async (req, res) =>
-        {
-            const directNode = state.routes.get(req.path);
-            if (!directNode) return res.status(404).json({ error: 'MCP path not found' });
-            let authResult;
-            try
-            {
-                authResult = await validateRequest(directNode, req);
-            } catch (error)
-            {
-                directNode.error('MCP auth storage error: ' + error.message);
-                return res.status(503).json({ error: 'temporarily_unavailable' });
-            }
-            if (!authResult.ok)
-            {
-                directNode.auditDenied(req, authResult);
-                return writeAuthFailure(req, res, directNode, authResult);
-            }
-            return res.status(405).json({ error: 'method_not_allowed', error_description: 'Use JSON-RPC POST for MCP requests' });
-        });
+        state.app.all(/.*/, (req, res) => state.routes.has(req.path) ?
+            res.set('Allow', 'POST').status(405).json({ error: 'method_not_allowed', error_description: 'Use JSON-RPC POST for MCP requests' }) :
+            res.status(404).json({ error: 'MCP path not found' }));
 
         state.app.use((error, req, res, next) =>
         {
@@ -620,24 +610,45 @@ module.exports = function (RED)
             node.httpServer = portState.httpServer;
         };
 
+        node.protocolError = function (req, request)
+        {
+            const headers = req.headers || {};
+            const meta = request.params && request.params._meta;
+            const bodyVersion = meta && meta['io.modelcontextprotocol/protocolVersion'];
+            const headerVersion = headers['mcp-protocol-version'];
+            const requested = headerVersion || bodyVersion || (request.params && request.params.protocolVersion) || null;
+            if (request.method === 'initialize' || !SUPPORTED_PROTOCOL_VERSIONS.includes(requested))
+                return { code: UNSUPPORTED_PROTOCOL_VERSION, message: 'Unsupported protocol version',
+                    data: { supported: SUPPORTED_PROTOCOL_VERSIONS, requested } };
+            if (!headerVersion || headerVersion !== bodyVersion)
+                return { code: HEADER_MISMATCH, message: 'Header mismatch: MCP-Protocol-Version must match _meta protocolVersion' };
+            if (headers['mcp-method'] !== request.method)
+                return { code: HEADER_MISMATCH, message: 'Header mismatch: Mcp-Method must match method' };
+            if (request.method === 'tools/call' &&
+                decodeHeaderValue(headers['mcp-name']) !== (request.params && request.params.name))
+                return { code: HEADER_MISMATCH, message: 'Header mismatch: Mcp-Name must match params.name' };
+            return null;
+        };
+
+        node.result = function (res, id, result)
+        {
+            res.json({ jsonrpc: '2.0', id, result: { resultType: 'complete', ...result,
+                _meta: { ...(result && result._meta), 'io.modelcontextprotocol/serverInfo': { name: node.serverName, version: PACKAGE_VERSION } } } });
+        };
+
         node.handleMcpHttpRequest = async function (req, res)
         {
             const request = req.body || {};
-            const isObject = request && typeof request === 'object' && !Array.isArray(request);
-            const isResponse = isObject && request.method === undefined && request.id !== undefined &&
-                ('result' in request || 'error' in request);
-            if (!isObject || (typeof request.method !== 'string' && !isResponse))
+            if (!request || typeof request !== 'object' || Array.isArray(request) || typeof request.method !== 'string')
                 return node.rpcError(res, null, -32600, 'Invalid request', undefined, 400);
             const toolRequest = request.method === 'tools/call';
             const started = toolRequest ? process.hrtime.bigint() : null;
             let handledToolCall = false;
             try
             {
-                // Only the handshake is anonymous; everything else needs a token (HTTP 401 starts sign-in).
-                if (request.method === 'initialize' && request.id !== undefined)
-                    return node.handleInitialize(request, res);
-                if (request.method === 'notifications/initialized' && request.id === undefined)
-                    return res.status(202).end();
+                const protocolError = node.protocolError(req, request);
+                if (protocolError)
+                    return node.rpcError(res, request.id, protocolError.code, protocolError.message, protocolError.data, 400);
                 let authResult;
                 try
                 {
@@ -656,21 +667,14 @@ module.exports = function (RED)
                     node.auditDenied(req, authResult);
                     return writeAuthFailure(req, res, node, authResult);
                 }
-                if (request.id === undefined || isResponse)
-                {
-                    if (request.method === 'notifications/cancelled')
-                        node.cancelToolExecution(request.params && request.params.requestId, authResult.claims);
-                    return res.status(202).end();
-                }
-                const protocolVersion = req.headers['mcp-protocol-version'];
-                if (protocolVersion && !SUPPORTED_PROTOCOL_VERSIONS.includes(protocolVersion))
-                    return node.rpcError(res, request.id, -32600, 'Unsupported MCP-Protocol-Version', undefined, 400);
+                if (request.id === undefined) return res.status(202).end();
                 switch (request.method)
                 {
+                    case 'server/discover': return node.handleDiscover(request, res);
                     case 'tools/list': return node.handleToolsList(request, res, authResult.claims);
-                    case 'tools/call': handledToolCall = true; await node.handleToolCall(request, res, authResult.claims); break;
+                    case 'tools/call': handledToolCall = true; await node.handleToolCall(request, res, authResult.claims, req); break;
                     default:
-                        node.rpcError(res, request.id, -32601, 'Method not found: ' + request.method);
+                        node.rpcError(res, request.id, -32601, 'Method not found: ' + request.method, undefined, 404);
                 }
             } catch (error)
             {
@@ -774,7 +778,7 @@ module.exports = function (RED)
             }
 
             tools.sort((a, b) => a.name.localeCompare(b.name));
-            res.json({ jsonrpc: '2.0', id: request.id, result: { tools } });
+            node.result(res, request.id, { tools, ttlMs: LIST_TTL_MS, cacheScope: 'private' });
         };
 
         // A missing token is the normal start of sign-in; only rejected credentials are audit events.
@@ -787,7 +791,7 @@ module.exports = function (RED)
                 ip: clientIp(req, node.runtime && node.runtime.trustedProxies) });
         };
 
-        node.handleToolCall = async function (request, res, claims = {})
+        node.handleToolCall = async function (request, res, claims = {}, req)
         {
             const params = request.params || {};
             const name = params.name;
@@ -804,13 +808,14 @@ module.exports = function (RED)
                 return node.rpcError(res, request.id, -32000, 'Too many concurrent tool calls');
             }
             node.activeToolCalls++;
+            const cancel = new AbortController();
             try
             {
                 if (adminTool)
                 {
                     adminResult = await node.adminTools.callTool(name, args, claims);
                     const result = normalizeToolResult(adminResult);
-                    res.json({ jsonrpc: '2.0', id: request.id, result });
+                    node.result(res, request.id, result);
                     status = result.isError ? 'failed' : 'success';
                     return;
                 }
@@ -818,16 +823,27 @@ module.exports = function (RED)
                 if (!tool) return node.rpcError(res, request.id, -32602, 'Tool not found: ' + name);
                 if (typeof tool.validateArguments === 'function') tool.validateArguments(args);
                 toolName = tool.name;
-                const result = await node.executeToolFlow(tool, args, claims, request.id);
+                const onClose = () => { if (!res.writableEnded) cancel.abort(); };
+                if (req) req.on('close', onClose);
+                let result;
+                try
+                {
+                    result = await node.executeToolFlow(tool, args, claims, cancel.signal);
+                } finally
+                {
+                    if (req) req.removeListener('close', onClose);
+                }
+                if (cancel.signal.aborted) return;
                 const normalized = normalizeToolResult(result);
-                res.json({ jsonrpc: '2.0', id: request.id, result: normalized });
+                node.result(res, request.id, normalized);
                 status = normalized.isError ? 'failed' : 'success';
             } catch (error)
             {
-                if (error.rpcCode) node.rpcError(res, request.id, error.rpcCode, error.message);
+                if (cancel.signal.aborted) status = 'failed';
+                else if (error.rpcCode) node.rpcError(res, request.id, error.rpcCode, error.message);
                 else
                 {
-                    res.json({ jsonrpc: '2.0', id: request.id, result: textResult(error.message, true) });
+                    node.result(res, request.id, textResult(error.message, true));
                     status = 'failed';
                 }
             }
@@ -852,23 +868,13 @@ module.exports = function (RED)
             }
         };
 
-        node.handleInitialize = function (request, res)
+        node.handleDiscover = function (request, res)
         {
-            const capabilities = { tools: { listChanged: false } };
-            const requestedVersion = request.params && request.params.protocolVersion;
-            res.json({
-                jsonrpc: '2.0',
-                id: request.id,
-                result: {
-                    protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(requestedVersion) ?
-                        requestedVersion : SUPPORTED_PROTOCOL_VERSIONS.at(-1),
-                    capabilities,
-                    serverInfo: { name: node.serverName, version: PACKAGE_VERSION, description: 'Node-RED MCP Flow Server' }
-                }
-            });
+            node.result(res, request.id, { supportedVersions: SUPPORTED_PROTOCOL_VERSIONS, capabilities: { tools: {} },
+                ttlMs: LIST_TTL_MS, cacheScope: 'private' });
         };
 
-        node.executeToolFlow = function (tool, args, claims = {}, requestId)
+        node.executeToolFlow = function (tool, args, claims = {}, signal)
         {
             return new Promise((resolve, reject) =>
             {
@@ -884,10 +890,15 @@ module.exports = function (RED)
                     resolve,
                     reject,
                     timeout,
-                    endpointId: node.endpointId,
-                    requestId,
-                    subject: claims.subject || ''
+                    endpointId: node.endpointId
                 });
+                if (signal) signal.addEventListener('abort', () =>
+                {
+                    if (!pendingExecutions.has(executionId)) return;
+                    clearTimeout(timeout);
+                    pendingExecutions.delete(executionId);
+                    reject(new Error('Tool execution cancelled'));
+                }, { once: true });
                 try
                 {
                     node.send(executionMsg);
@@ -898,19 +909,6 @@ module.exports = function (RED)
                     reject(error);
                 }
             });
-        };
-
-        node.cancelToolExecution = function (requestId, claims = {})
-        {
-            if (requestId === undefined || requestId === null) return;
-            const subject = claims.subject || '';
-            for (const [executionId, pending] of pendingExecutions)
-            {
-                if (pending.endpointId !== node.endpointId || pending.requestId !== requestId || pending.subject !== subject) continue;
-                clearTimeout(pending.timeout);
-                pendingExecutions.delete(executionId);
-                pending.reject(new Error('Tool execution cancelled'));
-            }
         };
 
         let closed = false;

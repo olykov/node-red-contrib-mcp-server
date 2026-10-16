@@ -74,16 +74,17 @@
     </dl>
     <h3>Details</h3>
     <p>The output carries only tool calls. Endpoint state is shown in the node status; tool
-    telemetry comes from the MCP metrics node. Only <code>initialize</code> is unauthenticated;
-    <code>tools/list</code> and tool calls require OAuth. Notifications return HTTP 202 without a
-    body.</p>
+    telemetry comes from the MCP metrics node. The endpoint speaks MCP 2026-07-28 only, without an
+    <code>initialize</code> handshake; every request, <code>server/discover</code> included, requires
+    OAuth. Notifications return HTTP 202 without a body, and closing the connection cancels a
+    running tool call.</p>
     <dl>
         <dt>Runtime</dt>
         <dd>MCP runtime that listens on a port and hosts this endpoint path.</dd>
         <dt>Auth</dt>
         <dd>Required MCP auth configuration.</dd>
         <dt>MCP Name</dt>
-        <dd>Name returned in MCP initialize responses.</dd>
+        <dd>Server name reported in <code>serverInfo</code> of every result.</dd>
         <dt>MCP Path</dt>
         <dd>HTTP JSON-RPC path, for example <code>/mcp/ops</code>. Only POST is served.</dd>
         <dt>Groups</dt>

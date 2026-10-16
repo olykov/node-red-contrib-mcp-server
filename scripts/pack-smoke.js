@@ -69,34 +69,42 @@ async function main() {
 
     try {
         const deadline = Date.now() + 30000;
-        let initialized = false;
+        let ready = false;
         while (Date.now() < deadline && child.exitCode === null && !spawnError) {
             try {
-                const response = await fetch('http://127.0.0.1:' + port + '/mcp/example', {
-                    method: 'POST', headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' })
-                });
+                const response = await fetch('http://127.0.0.1:' + port + '/.well-known/oauth-protected-resource/mcp/example');
                 if (response.status === 200) {
-                    const body = await response.json();
-                    if (body.result && body.result.serverInfo.version === require('../package.json').version) {
-                        initialized = true;
-                        break;
-                    }
+                    ready = true;
+                    break;
                 }
             } catch {
                 await new Promise(resolve => setTimeout(resolve, 200));
             }
         }
-        if (!initialized) throw new Error(
+        if (!ready) throw new Error(
             (spawnError ? 'Node-RED failed to start: ' + spawnError.message : 'Node-RED did not serve the packed example.') +
             '\n' + output
         );
 
-        const unauthorized = await fetch('http://127.0.0.1:' + port + '/mcp/example', {
-            method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
+        const modern = method => ({
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'mcp-protocol-version': '2026-07-28', 'mcp-method': method },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 2, method,
+                params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' } } })
         });
-        if (unauthorized.status !== 401) throw new Error('Expected tools/list to require authentication.');
+        for (const method of ['server/discover', 'tools/list']) {
+            const unauthorized = await fetch('http://127.0.0.1:' + port + '/mcp/example', modern(method));
+            if (unauthorized.status !== 401 || !/resource_metadata=/.test(unauthorized.headers.get('www-authenticate') || ''))
+                throw new Error('Expected ' + method + ' to require authentication.');
+        }
+
+        const legacy = await fetch('http://127.0.0.1:' + port + '/mcp/example', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } })
+        });
+        const legacyBody = await legacy.json();
+        if (legacy.status !== 400 || legacyBody.error.code !== -32022 || legacyBody.error.data.supported[0] !== '2026-07-28')
+            throw new Error('Expected the legacy initialize handshake to be rejected with the supported versions.');
 
         const malformed = await fetch('http://127.0.0.1:' + port + '/mcp/example', {
             method: 'POST', headers: { 'content-type': 'application/json' }, body: '{invalid-json'

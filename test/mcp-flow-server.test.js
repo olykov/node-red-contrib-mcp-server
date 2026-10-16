@@ -3,6 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const EventEmitter = require('node:events');
+const { prepare, mcpFetch } = require('./helpers/mcp-request');
 
 function createRuntime(config = {}) {
     const types = {};
@@ -90,13 +91,22 @@ function mockRes() {
     };
 }
 
+function toolResult(result) {
+    const { resultType, _meta, ...rest } = result;
+    assert.strictEqual(resultType, 'complete');
+    const meta = { ..._meta };
+    delete meta['io.modelcontextprotocol/serverInfo'];
+    return Object.keys(meta).length ? { ...rest, _meta: meta } : rest;
+}
+
 function mockReq(body, headers = {}, remoteAddress = '127.0.0.1') {
-    return {
-        body,
-        headers: Object.assign({ host: 'mcp.example.test' }, headers),
+    const prepared = prepare(body, headers);
+    return Object.assign(new EventEmitter(), {
+        body: prepared.body,
+        headers: Object.assign({ host: 'mcp.example.test' }, prepared.headers),
         path: '/mcp/test',
         socket: { remoteAddress }
-    };
+    });
 }
 
 describe('upstream mcp-flow-server local extensions', () => {
@@ -538,26 +548,21 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(server.activeToolCalls, 0);
     });
 
-    // MCP-PROTO-7
-    it('releases the concurrency slot on notifications/cancelled and ignores the late flow response with a debug log', async () => {
+    it('cancels a tool call when the client closes the connection and ignores the late flow response', async () => {
         const { RED, server } = buildServer();
         RED.events.emit('mcp-tool-register', {
             name: 'sample_ping', description: 'Sample', inputSchema: { type: 'object', properties: {} }
         });
         const response = mockRes();
-        const pending = server.handleToolCall({ id: 42, params: { name: 'sample_ping', arguments: {} } }, response);
+        const request = new EventEmitter();
+        const pending = server.handleToolCall({ id: 42, params: { name: 'sample_ping', arguments: {} } }, response, {}, request);
         await new Promise(resolve => setImmediate(resolve));
         assert.equal(server.activeToolCalls, 1);
         const execution = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
 
-        await server.handleMcpHttpRequest(
-            mockReq({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 42 } },
-                { authorization: 'Bearer test-token' }),
-            mockRes()
-        );
+        request.emit('close');
         await pending;
-        assert.equal(response.body.result.isError, true);
-        assert.equal(response.body.result.content[0].text, 'Tool execution cancelled');
+        assert.equal(response.body, undefined, 'no response is written for a closed connection');
         assert.equal(server.activeToolCalls, 0, 'concurrency slot must be released on cancellation');
 
         const debugCalls = [];
@@ -944,10 +949,10 @@ describe('upstream mcp-flow-server local extensions', () => {
         }, () => {}, () => {});
 
         await pending;
-        assert.deepStrictEqual(res.body.result, { content: [{ type: 'text', text: JSON.stringify({ ok: true, replacement: true }) }] });
+        assert.deepStrictEqual(toolResult(res.body.result), { content: [{ type: 'text', text: JSON.stringify({ ok: true, replacement: true }) }] });
     });
 
-    it('permits initialize without a bearer token on an OAuth endpoint', async () => {
+    it('challenges an anonymous server/discover on an OAuth endpoint', async () => {
         const authNode = { id: 'auth-1', oauthSlug: 'test-login', baseScopes: 'openid profile email', readAccessToken: async () => null };
         const { server } = buildServer({
             auth: 'auth-1',
@@ -957,14 +962,13 @@ describe('upstream mcp-flow-server local extensions', () => {
         });
         const res = mockRes();
 
-        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'initialize' }), res);
+        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'server/discover' }), res);
 
-        assert.strictEqual(res.statusCode, 200);
-        assert.strictEqual(res.body.result.serverInfo.name, 'test');
-        assert.strictEqual(res.headers['www-authenticate'], undefined);
+        assert.strictEqual(res.statusCode, 401);
+        assert.match(res.headers['www-authenticate'], /^Bearer resource_metadata=/);
     });
 
-    it('returns OAuth challenge for GET discovery probes on an OAuth endpoint', async () => {
+    it('answers GET on the MCP path with 405 and no session stream', async () => {
         const authNode = { id: 'auth-1', oauthSlug: 'test-login', baseScopes: 'openid profile email', readAccessToken: async () => null };
         const { server } = buildServer({
             auth: 'auth-1',
@@ -975,10 +979,10 @@ describe('upstream mcp-flow-server local extensions', () => {
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try
         {
-            const res = await fetch('http://127.0.0.1:18110/mcp/test', { headers: { host: 'mcp.example.test' } });
-            assert.strictEqual(res.status, 401);
-            assert.match(res.headers.get('www-authenticate'), /^Bearer /);
-            assert.match(res.headers.get('www-authenticate'), /oauth-protected-resource\/mcp\/test/);
+            const res = await mcpFetch('http://127.0.0.1:18110/mcp/test', { headers: { host: 'mcp.example.test' } });
+            assert.strictEqual(res.status, 405);
+            assert.strictEqual(res.headers.get('allow'), 'POST');
+            assert.notEqual(res.headers.get('content-type'), 'text/event-stream');
         } finally
         {
             await new Promise(resolve => server.stopServer(() => resolve()));
@@ -996,16 +1000,16 @@ describe('upstream mcp-flow-server local extensions', () => {
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try
         {
-            const res = await fetch('http://127.0.0.1:18111/.well-known/oauth-protected-resource', { headers: { host: 'mcp.example.test' } });
+            const res = await mcpFetch('http://127.0.0.1:18111/.well-known/oauth-protected-resource', { headers: { host: 'mcp.example.test' } });
             const body = await res.json();
             assert.strictEqual(res.status, 200);
             assert.strictEqual(body.resource, 'https://mcp.example.test/mcp/test');
             assert.deepStrictEqual(body.authorization_servers, ['https://mcp.example.test']);
 
-            const legacy = await fetch('http://127.0.0.1:18111/.well-known/oauth-authorization-server/test-login', { headers: { host: 'mcp.example.test' } });
+            const legacy = await mcpFetch('http://127.0.0.1:18111/.well-known/oauth-authorization-server/test-login', { headers: { host: 'mcp.example.test' } });
             assert.strictEqual(legacy.status, 200);
 
-            const pathfulIssuer = await fetch('http://127.0.0.1:18111/.well-known/oauth-authorization-server/oauth/test-login', { headers: { host: 'mcp.example.test' } });
+            const pathfulIssuer = await mcpFetch('http://127.0.0.1:18111/.well-known/oauth-authorization-server/oauth/test-login', { headers: { host: 'mcp.example.test' } });
             const issuerBody = await pathfulIssuer.json();
             assert.strictEqual(pathfulIssuer.status, 200);
             assert.strictEqual(issuerBody.issuer, 'https://mcp.example.test');
@@ -1048,7 +1052,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.strictEqual(partial.statusCode, 403);
     });
 
-    it('allows initialize with a valid endpoint-scoped access token', async () => {
+    it('allows server/discover with a valid endpoint-scoped access token', async () => {
         const authNode = {
             id: 'auth-1', oauthSlug: 'test-login',
             baseScopes: 'openid profile email',
@@ -1068,12 +1072,12 @@ describe('upstream mcp-flow-server local extensions', () => {
         const res = mockRes();
 
         await server.handleMcpHttpRequest(mockReq(
-            { jsonrpc: '2.0', id: 1, method: 'initialize' },
+            { jsonrpc: '2.0', id: 1, method: 'server/discover' },
             { authorization: 'Bearer configured-value' }
         ), res);
 
         assert.strictEqual(res.statusCode, 200);
-        assert.strictEqual(res.body.result.serverInfo.name, 'test');
+        assert.strictEqual(res.body.result._meta['io.modelcontextprotocol/serverInfo'].name, 'test');
     });
 
     it('advertises automatic OAuth scopes on every tool', async () => {
@@ -1145,7 +1149,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
         assert.strictEqual(res.statusCode, 200);
         assert.strictEqual(res.body.result.content[0].text, 'ok');
-        assert.strictEqual(res.body.result._meta, undefined);
+        assert.strictEqual(res.body.result._meta['mcp/www_authenticate'], undefined);
         assert.strictEqual(server.sent.length, 0);
     });
 });
@@ -1226,7 +1230,7 @@ describe('tool-level OAuth discovery', () => {
             const valid = mockRes();
             await context.server.handleMcpHttpRequest(mockReq(request, { authorization: 'Bearer valid' }), valid);
             assert.equal(valid.body.result.content[0].text, 'ok');
-            assert.equal(valid.body.result._meta, undefined);
+            assert.equal(valid.body.result._meta['mcp/www_authenticate'], undefined);
         }
         assert.equal(context.executions(), 2);
     });
@@ -1269,13 +1273,13 @@ describe('tool-level OAuth discovery', () => {
         assert.equal(server.sent.length, 0);
     });
 
-    // MCP-PROTO-4, MCP-KEEP-1
-    it('serves the anonymous handshake and challenges everything else over HTTP', async () => {
+    // MCP-KEEP-1
+    it('challenges every MCP request without a token over HTTP and rejects the legacy handshake', async () => {
         const context = setup({ serverPort: 18114 });
         const server = context.server;
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         const post = async (method, token) => {
-            const res = await fetch('http://127.0.0.1:18114/mcp/test', {
+            const res = await mcpFetch('http://127.0.0.1:18114/mcp/test', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', connection: 'close',
                     ...(token ? { authorization: 'Bearer ' + token } : {}) },
@@ -1285,13 +1289,17 @@ describe('tool-level OAuth discovery', () => {
             return { status: res.status, body: await res.json() };
         };
         try {
-            assert.equal((await post('initialize')).status, 200);
-            const initialized = await fetch('http://127.0.0.1:18114/mcp/test', {
+            const legacy = await post('initialize');
+            assert.equal(legacy.status, 400);
+            assert.equal(legacy.body.error.code, -32022);
+            assert.deepStrictEqual(legacy.body.error.data.supported, ['2026-07-28']);
+            assert.equal((await post('server/discover')).status, 401);
+            const notification = await mcpFetch('http://127.0.0.1:18114/mcp/test', {
                 method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' },
                 body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })
             });
-            assert.equal(initialized.status, 202);
-            assert.equal(await initialized.text(), '');
+            assert.equal(notification.status, 401);
+            await notification.text();
             assert.equal((await post('tools/list', 'expired')).status, 401);
             const list = await post('tools/list', 'valid');
             assert.equal(list.status, 200);
@@ -1339,7 +1347,7 @@ describe('automatic runtime startup without CORS', () => {
             await start();
             for (const node of endpoints) {
                 assert.equal(node.isRunning, true);
-                const response = await fetch('http://127.0.0.1:18116' + node.serverPath, {
+                const response = await mcpFetch('http://127.0.0.1:18116' + node.serverPath, {
                     method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://browser.example.test',
                         authorization: 'Bearer test-token' },
                     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
@@ -1350,15 +1358,15 @@ describe('automatic runtime startup without CORS', () => {
                 assert.equal(response.headers.get('access-control-allow-headers'), null);
                 await response.json();
             }
-            const preflight = await fetch('http://127.0.0.1:18116/mcp/test', { method: 'OPTIONS',
+            const preflight = await mcpFetch('http://127.0.0.1:18116/mcp/test', { method: 'OPTIONS',
                 headers: { origin: 'https://browser.example.test', 'access-control-request-method': 'POST' } });
             assert.equal(preflight.headers.get('access-control-allow-origin'), null);
             await preflight.text();
-            const stream = await fetch('http://127.0.0.1:18116/mcp/test/sse');
+            const stream = await mcpFetch('http://127.0.0.1:18116/mcp/test/sse');
             assert.equal(stream.status, 404);
             assert.notEqual(stream.headers.get('content-type'), 'text/event-stream');
             await stream.text();
-            const keepAlive = await fetch('http://127.0.0.1:18116/mcp/test', { method: 'POST',
+            const keepAlive = await mcpFetch('http://127.0.0.1:18116/mcp/test', { method: 'POST',
                 headers: { 'content-type': 'application/json', connection: 'keep-alive' },
                 body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) });
             await keepAlive.json();
@@ -1412,7 +1420,7 @@ describe('automatic runtime startup without CORS', () => {
         const { server } = createRuntime({ __runtime: { serverPort: 18119 } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
-            const response = await fetch('http://127.0.0.1:18119/mcp/test', {
+            const response = await mcpFetch('http://127.0.0.1:18119/mcp/test', {
                 method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example.test' },
                 body: '{invalid-json'
             });
@@ -1451,32 +1459,30 @@ describe('stable OAuth routes', () => {
 
     it('keeps HTTP discovery stable after replacement and removes old node-ID routes', async () => {
         // The test replaces the listener; do not reuse its old keep-alive sockets.
-        const fetch = (url, options = {}) => globalThis.fetch(url, {
-            ...options, headers: { ...options.headers, connection: 'close' }
-        });
+        const fetchClose = (target, init = {}) => mcpFetch(target, { ...init, headers: { connection: 'close', ...(init.headers || {}) } });
         const oldAuth = auth('old-auth-id');
         const context = setup(oldAuth);
         let active = context.server;
         await start(active);
         try {
             const url = 'http://127.0.0.1:18112';
-            const before = await (await fetch(url + '/.well-known/oauth-authorization-server/test-login')).json();
+            const before = await (await fetchClose(url + '/.well-known/oauth-authorization-server/test-login')).json();
             assert.strictEqual(before.authorization_endpoint, 'https://mcp.example.test/oauth/test-login/authorize');
             assert.strictEqual(before.token_endpoint, 'https://mcp.example.test/oauth/test-login/token');
-            assert.strictEqual((await fetch(url + '/oauth/old-auth-id/authorize')).status, 404);
-            assert.strictEqual((await fetch(url + '/.well-known/oauth-authorization-server/old-auth-id')).status, 404);
-            assert.strictEqual((await fetch(url + '/oauth/unknown/authorize')).status, 404);
-            const invalid = await fetch(url + '/oauth/test-login/callback?code=test&state=unknown');
+            assert.strictEqual((await fetchClose(url + '/oauth/old-auth-id/authorize')).status, 404);
+            assert.strictEqual((await fetchClose(url + '/.well-known/oauth-authorization-server/old-auth-id')).status, 404);
+            assert.strictEqual((await fetchClose(url + '/oauth/unknown/authorize')).status, 404);
+            const invalid = await fetchClose(url + '/oauth/test-login/callback?code=test&state=unknown');
             assert.strictEqual(invalid.status, 400);
             assert.strictEqual((await invalid.json()).error, 'invalid_state');
             await stop(active);
             active = endpoint(context, auth('replacement-auth-id'), 'replacement-endpoint', '/mcp/test');
             await start(active);
-            const after = await (await fetch(url + '/.well-known/oauth-authorization-server/test-login')).json();
+            const after = await (await fetchClose(url + '/.well-known/oauth-authorization-server/test-login')).json();
             assert.deepStrictEqual(after, before);
-            assert.strictEqual((await fetch(url + '/oauth/replacement-auth-id/authorize')).status, 404);
-            assert.strictEqual((await fetch(url + '/oauth/test-login/authorize')).status, 400);
-            assert.strictEqual((await fetch(url + '/oauth/test-login/token', { method: 'POST' })).status, 400);
+            assert.strictEqual((await fetchClose(url + '/oauth/replacement-auth-id/authorize')).status, 404);
+            assert.strictEqual((await fetchClose(url + '/oauth/test-login/authorize')).status, 400);
+            assert.strictEqual((await fetchClose(url + '/oauth/test-login/token', { method: 'POST' })).status, 400);
         } finally { await stop(active); }
     });
 
@@ -1507,17 +1513,17 @@ describe('stable OAuth routes', () => {
         await start(second);
         try {
             const url = 'http://127.0.0.1:18114';
-            const callback = await fetch(url + '/oauth/first-login/callback?code=test&state=test');
+            const callback = await mcpFetch(url + '/oauth/first-login/callback?code=test&state=test');
             assert.strictEqual(callback.status, 400);
             assert.strictEqual((await callback.json()).error, 'invalid_state');
-            const token = await fetch(url + '/oauth/first-login/token', {
+            const token = await mcpFetch(url + '/oauth/first-login/token', {
                 method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'grant_type=authorization_code&code=test'
             });
             assert.strictEqual(token.status, 400);
             assert.strictEqual((await token.json()).error, 'invalid_grant');
-            assert.strictEqual((await fetch(url + '/.well-known/oauth-authorization-server')).status, 404);
-            assert.strictEqual((await fetch(url + '/.well-known/oauth-authorization-server/first-login')).status, 200);
-            assert.strictEqual((await fetch(url + '/.well-known/oauth-authorization-server/second-login')).status, 200);
+            assert.strictEqual((await mcpFetch(url + '/.well-known/oauth-authorization-server')).status, 404);
+            assert.strictEqual((await mcpFetch(url + '/.well-known/oauth-authorization-server/first-login')).status, 200);
+            assert.strictEqual((await mcpFetch(url + '/.well-known/oauth-authorization-server/second-login')).status, 200);
         } finally { await stop(second); await stop(context.server); }
     });
 });
@@ -1601,7 +1607,7 @@ describe('Creating Nodes review fixes', () => {
             __runtime: { serverPort: 18120 } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
-            const post = body => fetch('http://127.0.0.1:18120/oauth/storage-login/token', { method: 'POST',
+            const post = body => mcpFetch('http://127.0.0.1:18120/oauth/storage-login/token', { method: 'POST',
                 headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
             const outage = await post('grant_type=refresh_token&refresh_token=boom');
             assert.strictEqual(outage.status, 503);
@@ -1625,17 +1631,17 @@ describe('Creating Nodes review fixes', () => {
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
             const url = 'http://127.0.0.1:18121';
-            const callback = await fetch(url + '/oauth/leak-login/callback?code=a&state=b');
+            const callback = await mcpFetch(url + '/oauth/leak-login/callback?code=a&state=b');
             assert.strictEqual(callback.status, 503);
             assert.doesNotMatch(await callback.text(), /secret internal detail/);
-            const get = await fetch(url + '/mcp/test', { headers: { authorization: 'Bearer x' } });
-            assert.strictEqual(get.status, 503);
+            const get = await mcpFetch(url + '/mcp/test', { headers: { authorization: 'Bearer x' } });
+            assert.strictEqual(get.status, 405);
             assert.doesNotMatch(await get.text(), /secret internal detail/);
-            const rpc = await fetch(url + '/mcp/test', { method: 'POST', headers: { 'content-type': 'application/json',
+            const rpc = await mcpFetch(url + '/mcp/test', { method: 'POST', headers: { 'content-type': 'application/json',
                 authorization: 'Bearer x' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
                 params: { name: 'any' } }) });
             assert.doesNotMatch(await rpc.text(), /secret internal detail/);
-            const authorize = await fetch(url + '/oauth/leak-login/authorize?response_type=code&code_challenge_method=S256' +
+            const authorize = await mcpFetch(url + '/oauth/leak-login/authorize?response_type=code&code_challenge_method=S256' +
                 '&code_challenge=c&client_id=https%3A%2F%2Fclient.example.test%2Fm.json&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcb&state=s');
             assert.doesNotMatch(await authorize.text(), /allowedClientHosts|client_id host/);
         } finally { await new Promise(resolve => server.emit('close', resolve)); }
@@ -1663,7 +1669,7 @@ describe('3.0 configuration rules', () => {
         RED.events.emit('mcp-tool-register', { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
-            const health = await fetch('http://127.0.0.1:18131/health');
+            const health = await mcpFetch('http://127.0.0.1:18131/health');
             assert.strictEqual(health.status, 404);
             await health.text();
             const pending = server.handleToolCall({ id: 1, params: { name: 'ping', arguments: {} } }, mockRes());
@@ -1676,26 +1682,37 @@ describe('3.0 configuration rules', () => {
 });
 
 describe('protocol version header and JSON-RPC batch handling', () => {
-    // MCP-PROTO-2
-    it('enforces the MCP-Protocol-Version header after initialize while accepting a missing header', async () => {
+    it('validates the protocol version and the mirrored request headers', async () => {
         const { server, nodeMap } = createRuntime({ __runtime: { serverPort: 18150 } });
         nodeMap['default-auth'].readAccessToken = async () => ({ groups: ['test-group'], scopes: ['openid'] });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
-            const call = headers => fetch('http://127.0.0.1:18150/mcp/test', {
-                method: 'POST',
-                headers: Object.assign({ 'content-type': 'application/json', authorization: 'Bearer test-token' }, headers),
-                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
-            });
-            const supported = await call({ 'mcp-protocol-version': '2025-06-18' });
-            assert.equal(supported.status, 200);
-            const missing = await call({});
-            assert.equal(missing.status, 200);
-            const unsupported = await call({ 'mcp-protocol-version': '2024-11-05' });
+            const meta = { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' };
+            const call = async (headers, body) => {
+                const res = await mcpFetch('http://127.0.0.1:18150/mcp/test', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json', authorization: 'Bearer test-token', 'x-test-raw': '1', ...headers },
+                    body: JSON.stringify({ jsonrpc: '2.0', id: 1, ...body })
+                });
+                return { status: res.status, body: await res.json() };
+            };
+            const list = { method: 'tools/list', params: { _meta: meta } };
+            const modern = { 'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/list' };
+            assert.equal((await call(modern, list)).status, 200);
+            const unsupported = await call({ ...modern, 'mcp-protocol-version': '2025-11-25' }, { method: 'tools/list',
+                params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2025-11-25' } } });
             assert.equal(unsupported.status, 400);
-            assert.deepStrictEqual(await unsupported.json(), {
-                jsonrpc: '2.0', id: 1, error: { code: -32600, message: 'Unsupported MCP-Protocol-Version' }
-            });
+            assert.deepStrictEqual(unsupported.body.error.data, { supported: ['2026-07-28'], requested: '2025-11-25' });
+            assert.equal((await call({ 'mcp-method': 'tools/list' }, list)).body.error.code, -32020);
+            assert.equal((await call({ ...modern, 'mcp-method': 'tools/call' }, list)).body.error.code, -32020);
+            const toolCall = { method: 'tools/call', params: { name: 'ping', arguments: {}, _meta: meta } };
+            const callHeaders = { ...modern, 'mcp-method': 'tools/call' };
+            assert.equal((await call({ ...callHeaders, 'mcp-name': 'other' }, toolCall)).body.error.code, -32020);
+            const encoded = await call({ ...callHeaders, 'mcp-name': '=?base64?' + Buffer.from('ping').toString('base64') + '?=' }, toolCall);
+            assert.notEqual(encoded.body.error && encoded.body.error.code, -32020);
+            const unknown = await call({ ...modern, 'mcp-method': 'resources/list' }, { method: 'resources/list', params: { _meta: meta } });
+            assert.equal(unknown.status, 404);
+            assert.equal(unknown.body.error.code, -32601);
         } finally { await new Promise(resolve => server.emit('close', resolve)); }
     });
 
@@ -1704,11 +1721,11 @@ describe('protocol version header and JSON-RPC batch handling', () => {
         const { server } = createRuntime({ __runtime: { serverPort: 18151 } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
-            const deleted = await fetch('http://127.0.0.1:18151/mcp/test', { method: 'DELETE' });
+            const deleted = await mcpFetch('http://127.0.0.1:18151/mcp/test', { method: 'DELETE' });
             assert.equal(deleted.status, 405);
-            assert.deepStrictEqual(await deleted.json(), { error: 'method_not_allowed' });
+            assert.equal((await deleted.json()).error, 'method_not_allowed');
 
-            const batch = await fetch('http://127.0.0.1:18151/mcp/test', {
+            const batch = await mcpFetch('http://127.0.0.1:18151/mcp/test', {
                 method: 'POST', headers: { 'content-type': 'application/json' },
                 body: JSON.stringify([{ jsonrpc: '2.0', id: 1, method: 'tools/list' }])
             });
@@ -1790,33 +1807,23 @@ describe('audit log and OAuth hardening', () => {
         assert.throws(() => createRuntime({ allowedGroups: '' }).server.initializeServer(), /Groups are required/);
     });
 
-    it('normalizes empty, Buffer and object results and reports the package version', () => {
+    it('answers server/discover with 2026-07-28, identity, capabilities and cache hints', () => {
         const { server } = createRuntime();
         const res = mockRes();
-        server.handleInitialize({ id: 1 }, res);
-        assert.strictEqual(res.body.result.serverInfo.version, require('../package.json').version);
-    });
-
-    // MCP-PROTO-1
-    it('negotiates the requested protocol version or falls back to the newest supported one', () => {
-        const { server } = createRuntime();
-        const supported = mockRes();
-        server.handleInitialize({ id: 1, params: { protocolVersion: '2025-06-18' } }, supported);
-        assert.equal(supported.body.result.protocolVersion, '2025-06-18');
-        const latest = mockRes();
-        server.handleInitialize({ id: 2, params: { protocolVersion: '2025-11-25' } }, latest);
-        assert.equal(latest.body.result.protocolVersion, '2025-11-25');
-        const unsupported = mockRes();
-        server.handleInitialize({ id: 3, params: { protocolVersion: '2024-11-05' } }, unsupported);
-        assert.equal(unsupported.body.result.protocolVersion, '2025-11-25');
+        server.handleDiscover({ id: 1 }, res);
+        assert.deepStrictEqual(res.body.result.supportedVersions, ['2026-07-28']);
+        assert.equal(res.body.result.resultType, 'complete');
+        assert.equal(res.body.result._meta['io.modelcontextprotocol/serverInfo'].version, require('../package.json').version);
+        assert.equal(res.body.result.cacheScope, 'private');
+        assert.ok(Number.isInteger(res.body.result.ttlMs));
     });
 
     // MCP-PROTO-3
-    it('advertises tools.listChanged as false since the package never sends list_changed notifications', () => {
+    it('does not advertise tool list changes since the package never sends them', () => {
         const { server } = createRuntime();
         const res = mockRes();
-        server.handleInitialize({ id: 1 }, res);
-        assert.equal(res.body.result.capabilities.tools.listChanged, false);
+        server.handleDiscover({ id: 1 }, res);
+        assert.deepStrictEqual(res.body.result.capabilities.tools, {});
     });
 
     // MCP-HTTP-1
@@ -1824,7 +1831,7 @@ describe('audit log and OAuth hardening', () => {
         const { server } = createRuntime({ __runtime: { serverPort: 18140 } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
-            const res = await fetch('http://127.0.0.1:18140/mcp/test', { method: 'POST', headers: { 'content-type': 'application/json' },
+            const res = await mcpFetch('http://127.0.0.1:18140/mcp/test', { method: 'POST', headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', pad: 'secret-body-marker-' + 'x'.repeat(300 * 1024) }) });
             assert.strictEqual(res.status, 413);
             assert.match(res.headers.get('content-type'), /application\/json/);
@@ -1840,7 +1847,7 @@ describe('audit log and OAuth hardening', () => {
         const { server } = createRuntime({ __runtime: { serverPort: 18141 } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
-            const malformed = await fetch('http://127.0.0.1:18141/mcp/test', {
+            const malformed = await mcpFetch('http://127.0.0.1:18141/mcp/test', {
                 method: 'POST', headers: { 'content-type': 'application/json' }, body: '{invalid-json'
             });
             assert.equal(malformed.status, 400);
@@ -1850,7 +1857,7 @@ describe('audit log and OAuth hardening', () => {
             });
 
             server.handleMcpHttpRequest = async () => { throw new Error('internal route marker'); };
-            const failed = await fetch('http://127.0.0.1:18141/mcp/test', {
+            const failed = await mcpFetch('http://127.0.0.1:18141/mcp/test', {
                 method: 'POST', headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/list' })
             });
@@ -1863,14 +1870,14 @@ describe('audit log and OAuth hardening', () => {
                 message.includes('internal route marker')));
             assert.ok(!JSON.stringify(body).includes('internal route marker'));
 
-            const oauthMalformed = await fetch('http://127.0.0.1:18141/oauth/default-login/token', {
+            const oauthMalformed = await mcpFetch('http://127.0.0.1:18141/oauth/default-login/token', {
                 method: 'POST', headers: { 'content-type': 'application/json' }, body: '{invalid-json'
             });
             assert.equal(oauthMalformed.status, 400);
             assert.match(oauthMalformed.headers.get('content-type'), /application\/json/);
             assert.deepStrictEqual(await oauthMalformed.json(), { error: 'invalid_request' });
 
-            const oauthTooLarge = await fetch('http://127.0.0.1:18141/oauth/default-login/token', {
+            const oauthTooLarge = await mcpFetch('http://127.0.0.1:18141/oauth/default-login/token', {
                 method: 'POST', headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ code: 'secret-oauth-marker-' + 'x'.repeat(300 * 1024) })
             });
@@ -1909,8 +1916,8 @@ describe('tool result tolerance', () => {
     }
 
     it('maps undefined to empty content, Buffers to text and error objects to their message', async () => {
-        assert.deepStrictEqual((await call({ result: undefined })).result, { content: [] });
-        assert.deepStrictEqual((await call({ result: Buffer.from('hello') })).result, { content: [{ type: 'text', text: 'hello' }] });
+        assert.deepStrictEqual(toolResult((await call({ result: undefined })).result), { content: [] });
+        assert.deepStrictEqual(toolResult((await call({ result: Buffer.from('hello') })).result), { content: [{ type: 'text', text: 'hello' }] });
         const errored = await call({ error: { message: 'catch message' } });
         assert.strictEqual(errored.result.isError, true);
         assert.strictEqual(errored.result.content[0].text, 'catch message');
@@ -1947,7 +1954,7 @@ describe('notifications and endpoint limits', () => {
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
             for (const method of ['notifications/cancelled', 'notifications/something-new']) {
-                const res = await fetch('http://127.0.0.1:18160/mcp/test', {
+                const res = await mcpFetch('http://127.0.0.1:18160/mcp/test', {
                     method: 'POST',
                     headers: { 'content-type': 'application/json', authorization: 'Bearer test-token' },
                     body: JSON.stringify({ jsonrpc: '2.0', method, params: { requestId: 'none' } })
@@ -1980,48 +1987,26 @@ describe('notifications and endpoint limits', () => {
     });
 });
 
-describe('notification authentication and cancellation scope', () => {
-    // MCP-PROTO-4, MCP-PROTO-7
-    function withPendingCall(owner) {
-        const built = createRuntime();
-        built.nodeMap['default-auth'].readAccessToken = async token => ({
-            'owner-token': { subject: 'owner', groups: ['test-group'], scopes: ['openid'] },
-            'other-token': { subject: 'other', groups: ['test-group'], scopes: ['openid'] }
-        })[token] || null;
-        built.RED.events.emit('mcp-tool-register', { name: 'slow', description: 'Slow', inputSchema: { type: 'object', properties: {} } });
-        const response = mockRes();
-        const pending = built.server.handleToolCall({ id: 7, params: { name: 'slow', arguments: {} } }, response, { subject: owner });
-        return { ...built, response, pending };
-    }
-    const cancel = (server, headers) => {
+describe('notifications and client messages', () => {
+    const send = (server, body, headers) => {
         const res = mockRes();
         res.end = function () { this.ended = true; return this; };
-        return server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 7 } }, headers), res)
-            .then(() => res);
+        return server.handleMcpHttpRequest(mockReq(body, headers), res).then(() => res);
     };
 
-    it('does not let an anonymous or different caller cancel a pending call', async () => {
-        const { server, pending } = withPendingCall('owner');
-        await new Promise(resolve => setImmediate(resolve));
-        assert.strictEqual((await cancel(server, {})).statusCode, 401);
-        assert.strictEqual(server.activeToolCalls, 1);
-        assert.strictEqual((await cancel(server, { authorization: 'Bearer other-token' })).statusCode, 202);
-        assert.strictEqual(server.activeToolCalls, 1);
-        assert.strictEqual((await cancel(server, { authorization: 'Bearer owner-token' })).statusCode, 202);
-        await pending;
-        assert.strictEqual(server.activeToolCalls, 0);
-    });
-
-    it('accepts an authenticated JSON-RPC response with 202 and rejects an anonymous one', async () => {
+    // MCP-PROTO-4
+    it('accepts authenticated notifications with 202 and challenges anonymous ones', async () => {
         const { server } = createRuntime();
-        const send = headers => {
-            const res = mockRes();
-            res.end = function () { this.ended = true; return this; };
-            return server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 3, result: {} }, headers), res).then(() => res);
-        };
-        const accepted = await send({ authorization: 'Bearer test-token' });
+        const accepted = await send(server, { jsonrpc: '2.0', method: 'notifications/unknown' }, { authorization: 'Bearer test-token' });
         assert.strictEqual(accepted.statusCode, 202);
         assert.strictEqual(accepted.body, undefined);
-        assert.strictEqual((await send({})).statusCode, 401);
+        assert.strictEqual((await send(server, { jsonrpc: '2.0', method: 'notifications/unknown' }, {})).statusCode, 401);
+    });
+
+    it('rejects JSON-RPC responses from the client', async () => {
+        const { server } = createRuntime();
+        const res = await send(server, { jsonrpc: '2.0', id: 3, result: {} }, { authorization: 'Bearer test-token' });
+        assert.strictEqual(res.statusCode, 400);
+        assert.strictEqual(res.body.error.code, -32600);
     });
 });

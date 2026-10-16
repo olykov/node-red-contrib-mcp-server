@@ -301,10 +301,13 @@ Config-node details retain ordinary property types and values. Node-RED's flow A
 
 `get_flow` never requests the full `/flows` export. The tab index walks Node-RED's in-memory configuration once and caches only compact tab metadata until the next runtime deploy; it does not serialize or transfer full flows. `meta.cached` indicates whether the index was reused. The index excludes undeployed editor changes. Tab detail modes read `/flow/:id`; subflow modes read `/flow/global` and optionally the specified tab. These endpoints still make Node-RED prepare the selected flow before the palette applies its response limits. Responses cap lists at 40 items and edges at 80; Admin API reads have a 15-second timeout and a 32 MiB response limit. Tab indexing stops above 100,000 configuration nodes; graph inspection stops above 20,000 nodes or 100,000 wire visits. `meta` reports the source, scan count, returned node count and truncation.
 
-Only the handshake (`initialize`, `notifications/initialized`) is anonymous. `tools/list`,
-`tools/call` and every other method require a valid token; without one the endpoint answers
-HTTP 401 with `WWW-Authenticate` pointing to the protected resource metadata, which starts
-sign-in in MCP clients (MCP authorization spec). Tools advertise `securitySchemes` and the
+The endpoint speaks MCP 2026-07-28 only: there is no `initialize` handshake and no session. Every
+request carries `MCP-Protocol-Version`, `Mcp-Method` (and `Mcp-Name` for `tools/call`) matching its
+body and `_meta`; a mismatch is `400` with `-32020`, any other revision is `400` with `-32022` and
+the supported versions. Every request, `server/discover` included, needs a valid token; without
+one the endpoint answers HTTP 401 with `WWW-Authenticate` pointing to the protected resource
+metadata, which starts sign-in in MCP clients (MCP authorization spec). Closing the connection
+cancels a running tool call. GET and DELETE answer 405. Tools advertise `securitySchemes` and the
 matching `_meta.securitySchemes`.
 
 All tool calls validate credentials before flow or admin execution. Missing, invalid or
