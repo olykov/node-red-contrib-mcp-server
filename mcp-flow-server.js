@@ -777,7 +777,7 @@ module.exports = function (RED)
                 {
                     case 'server/discover': return node.handleDiscover(request, res);
                     case 'tools/list': return node.handleToolsList(request, res, authResult.claims);
-                    case 'tools/call': handledToolCall = true; await node.handleToolCall(request, res, authResult.claims, req); break;
+                    case 'tools/call': handledToolCall = true; await node.handleToolCall(request, res, authResult.claims); break;
                     default:
                         node.rpcError(res, request.id, -32601, 'Method not found: ' + request.method, undefined, 404);
                 }
@@ -857,7 +857,7 @@ module.exports = function (RED)
                 ip: clientIp(req, node.runtime && node.runtime.trustedProxies) });
         };
 
-        node.handleToolCall = async function (request, res, claims = {}, req)
+        node.handleToolCall = async function (request, res, claims = {})
         {
             const params = request.params || {};
             const name = params.name;
@@ -889,15 +889,16 @@ module.exports = function (RED)
                 if (!tool) return node.rpcError(res, request.id, -32602, 'Tool not found: ' + name);
                 if (typeof tool.validateArguments === 'function') tool.validateArguments(args);
                 toolName = tool.name;
+                // The request stream closes once its body is read; only the response closes with the connection.
                 const onClose = () => { if (!res.writableEnded) cancel.abort(); };
-                if (req) req.on('close', onClose);
+                if (typeof res.on === 'function') res.on('close', onClose);
                 let result;
                 try
                 {
                     result = await node.executeToolFlow(tool, args, claims, cancel.signal);
                 } finally
                 {
-                    if (req) req.removeListener('close', onClose);
+                    if (typeof res.removeListener === 'function') res.removeListener('close', onClose);
                 }
                 if (cancel.signal.aborted) return;
                 const normalized = normalizeToolResult(result);

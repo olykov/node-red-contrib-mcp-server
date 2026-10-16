@@ -185,6 +185,19 @@ describe('Node-RED runtime integration', () => {
         assert.equal(helper.getNode('it-endpoint').httpServer, originalServer);
         assert.equal(helper.getNode('it-endpoint').isRunning, true);
 
+        const abort = new AbortController();
+        const started = new Promise(resolve => output.once('input', resolve));
+        const aborted = mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
+            method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer integration-token' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'integration_tool', arguments: {} } }),
+            signal: abort.signal
+        }).catch(error => error);
+        await started;
+        assert.equal(endpoint.activeToolCalls, 1);
+        abort.abort();
+        await aborted;
+        await waitFor(() => endpoint.activeToolCalls === 0);
+
         const executeMessage = new Promise(resolve => output.once('input', resolve));
         const pendingCall = mcpFetch('http://127.0.0.1:' + port + '/mcp/integration', {
             method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer integration-token' },

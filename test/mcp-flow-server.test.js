@@ -574,14 +574,13 @@ describe('upstream mcp-flow-server local extensions', () => {
         registerTool(RED, {
             name: 'sample_ping', description: 'Sample', inputSchema: { type: 'object', properties: {} }
         });
-        const response = mockRes();
-        const request = new EventEmitter();
-        const pending = server.handleToolCall({ id: 42, params: { name: 'sample_ping', arguments: {} } }, response, {}, request);
+        const response = Object.assign(new EventEmitter(), mockRes());
+        const pending = server.handleToolCall({ id: 42, params: { name: 'sample_ping', arguments: {} } }, response);
         await new Promise(resolve => setImmediate(resolve));
         assert.equal(server.activeToolCalls, 1);
         const execution = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
 
-        request.emit('close');
+        response.emit('close');
         await pending;
         assert.equal(response.body, undefined, 'no response is written for a closed connection');
         assert.equal(server.activeToolCalls, 0, 'concurrency slot must be released on cancellation');
