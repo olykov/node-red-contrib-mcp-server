@@ -5,12 +5,14 @@ module.exports = function (RED)
     const http = require('http');
     const express = require('express');
     const { randomUUID: uuidv4 } = require('crypto');
-    const NodeCache = require('node-cache');
+    const { normalizeIp, parseCidr, ipInCidr } = require('./lib/cidr');
     const { createAdminTools } = require('./lib/admin-tools');
     const { auditLog } = require('./lib/audit');
+    const { message } = require('./lib/messages');
+    const statusText = (node, key, vars) => message(node, 'mcp-flow-server', 'mcp-flow-server.status.' + key, vars);
     const PACKAGE_VERSION = require('./package.json').version;
-    const MAX_CONCURRENT_TOOL_CALLS = 32;
-    const { authRouteSlug } = require('./lib/auth-provider');
+    const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-11-25'];
+    const { authRouteSlug, mcpEnvName } = require('./lib/auth-provider');
     const {
         absoluteUrl,
         authorizeMetadata,
@@ -24,10 +26,32 @@ module.exports = function (RED)
     } = require('./lib/mcp-auth');
 
 
-    const toolRegistry = new NodeCache({ stdTTL: 0 });
-    const serverInstances = new NodeCache({ stdTTL: 0 });
+    const toolRegistry = new Map();
+    const serverInstances = new Map();
     const portServers = new Map();
     const pendingExecutions = new Map();
+    const loggedToolConflicts = new Set();
+    let legacyAdminTokenWarningShown = false;
+
+    function origin(value)
+    {
+        try
+        {
+            const url = new URL(value);
+            if (!['http:', 'https:'].includes(url.protocol) || url.origin === 'null' ||
+                url.username || url.password || url.pathname !== '/' || url.search || url.hash) return '';
+            return url.origin;
+        } catch
+        {
+            return '';
+        }
+    }
+
+    function requestSize(req, error)
+    {
+        const size = Number(error && error.received || req.headers && req.headers['content-length']);
+        return Number.isSafeInteger(size) && size >= 0 ? size : null;
+    }
 
     function parseGroupList(value)
     {
@@ -64,7 +88,48 @@ module.exports = function (RED)
 
     function runtimeAdminToken(runtime)
     {
-        return process.env.NODE_RED_ADMIN_API_TOKEN || (runtime && runtime.adminToken) || '';
+        return runtime && runtime.adminToken ||
+            (runtime && runtime.adminTokenEnv && process.env[runtime.adminTokenEnv]) ||
+            process.env.NODE_RED_ADMIN_API_TOKEN || '';
+    }
+
+    function adminApiConfig(RED, runtime)
+    {
+        const settings = RED.settings || {};
+        const configuredHost = typeof settings.uiHost === 'string' ? settings.uiHost.trim() : '';
+        const hostname = !configuredHost || configuredHost === '0.0.0.0' || configuredHost === '::' ?
+            '127.0.0.1' : configuredHost;
+        const adminRoot = settings.httpAdminRoot;
+        const root = typeof adminRoot === 'string' && adminRoot !== '/' ?
+            normalizePath(adminRoot).replace(/\/+$/, '') : '';
+        return {
+            protocol: settings.https ? 'https:' : 'http:',
+            hostname,
+            port: Number(settings.uiPort) || runtime.adminPort,
+            root,
+            ca: runtime.adminCa || undefined,
+            disabled: adminRoot === false
+        };
+    }
+
+    function clientIp(req, trustedProxies)
+    {
+        const socketIp = req.socket && req.socket.remoteAddress || '';
+        const address = normalizeIp(socketIp);
+        if (!address) return socketIp;
+        const proxies = trustedProxies || [];
+        const isTrusted = ip => proxies.some(cidr => ipInCidr(ip, cidr));
+        if (!isTrusted(address)) return address;
+
+        const forwarded = typeof req.headers['x-forwarded-for'] === 'string' ?
+            req.headers['x-forwarded-for'].split(',').map(value => value.trim()).filter(Boolean) : [];
+        for (let index = forwarded.length - 1; index >= 0; index--)
+        {
+            const candidate = normalizeIp(forwarded[index]);
+            if (!candidate) break;
+            if (!isTrusted(candidate)) return candidate;
+        }
+        return address;
     }
 
     function hasAdminTools(runtime, serverPath)
@@ -86,9 +151,10 @@ module.exports = function (RED)
         return true;
     }
 
-    function registryKey(toolName, endpointPath)
+    function registryKey(tool)
     {
-        return (endpointPath || '*') + ':' + toolName;
+        if (tool.registeredBy) return 'node:' + tool.registeredBy;
+        return (tool.endpointPath || '*') + ':' + tool.name;
     }
 
     function getPortServer(port)
@@ -98,6 +164,7 @@ module.exports = function (RED)
 
         const state = {
             port: key,
+            bindHost: '',
             app: express(),
             httpServer: null,
             routes: new Map(),
@@ -106,6 +173,17 @@ module.exports = function (RED)
             isListening: false
         };
 
+        state.app.use((req, res, next) =>
+        {
+            const node = state.routes.get(req.path);
+            if (!node || req.method !== 'POST' || !req.headers.origin) return next();
+            const requestOrigin = origin(req.headers.origin);
+            const baseOrigin = origin(node.publicBaseUrl);
+            const allowedOrigins = node.runtime && node.runtime.allowedOrigins || [];
+            if (!requestOrigin || (requestOrigin !== baseOrigin && !allowedOrigins.includes(requestOrigin)))
+                return res.status(403).json({ error: 'origin_not_allowed' });
+            return next();
+        });
         state.app.use(express.json({ limit: '256kb' }));
         state.app.use(express.urlencoded({ extended: false, limit: '16kb' }));
 
@@ -219,6 +297,9 @@ module.exports = function (RED)
             await node.handleMcpHttpRequest(req, res);
         });
 
+        state.app.delete(/.*/, (req, res) => state.routes.has(req.path) ?
+            res.status(405).json({ error: 'method_not_allowed' }) : res.status(404).json({ error: 'MCP path not found' }));
+
         state.app.get(/.*/, async (req, res) =>
         {
             const directNode = state.routes.get(req.path);
@@ -240,7 +321,53 @@ module.exports = function (RED)
             return res.status(405).json({ error: 'method_not_allowed', error_description: 'Use JSON-RPC POST for MCP requests' });
         });
 
+        state.app.use((error, req, res, next) =>
+        {
+            if (res.headersSent) return next(error);
+            const node = state.routes.get(req.path) || Array.from(state.routes.values()).find(candidate =>
+                candidate.authConfig && req.path.startsWith('/oauth/' + candidate.authConfig.oauthSlug + '/'));
+            const isMcp = Boolean(state.routes.get(req.path) && req.method === 'POST');
+            const isOAuth = req.path.startsWith('/oauth/');
+            const requestId = uuidv4();
+            const tooLarge = error && error.type === 'entity.too.large';
+            const invalidJson = error instanceof SyntaxError && error.type === 'entity.parse.failed';
+            const code = tooLarge ? 'request_too_large' : (invalidJson ? 'invalid_json' : 'internal_error');
+            const logNode = node || state.nodes.values().next().value;
+            if (logNode)
+            {
+                logNode.error('HTTP request failed ' + JSON.stringify({
+                    requestId, code, method: req.method, path: req.path, bodySize: requestSize(req, error),
+                    ...(code === 'internal_error' ? { error: error && error.message || String(error) } : {})
+                }));
+            }
+            const status = tooLarge ? 413 : (invalidJson ? 400 : 500);
+            if (isMcp)
+            {
+                const rpcCode = tooLarge ? -32600 : (invalidJson ? -32700 : -32603);
+                const message = tooLarge ? 'Invalid request' : (invalidJson ? 'Parse error' : 'Internal error');
+                return res.status(status).json({ jsonrpc: '2.0', id: null,
+                    error: { code: rpcCode, message, ...(status === 500 ? { data: { requestId } } : {}) } });
+            }
+            if (isOAuth || tooLarge || invalidJson)
+                return res.status(status).json(tooLarge || invalidJson ?
+                    { error: 'invalid_request' } : { error: 'internal_error', requestId });
+            return res.status(500).json({ error: 'internal_error', requestId });
+        });
+
         state.httpServer = http.createServer(state.app);
+        state.httpServer.on('error', error =>
+        {
+            if (!state.isListening) return;
+            state.isListening = false;
+            for (const node of state.nodes)
+            {
+                node.isRunning = false;
+                node.status({ fill: 'red', shape: 'dot', text: statusText(node, 'error') });
+                node.error('MCP HTTP server error: ' + error.message);
+                const instance = serverInstances.get(node.serverId);
+                if (instance) serverInstances.set(node.serverId, { ...instance, isRunning: false });
+            }
+        });
         portServers.set(key, state);
         return state;
     }
@@ -298,8 +425,49 @@ module.exports = function (RED)
         node.runtimeName = config.runtimeName || node.name || 'mcp-runtime';
         node.serverPort = Number(config.serverPort || 8001);
         node.publicBaseUrl = config.publicBaseUrl || '';
+        node.bindHost = typeof config.bindHost === 'string' ? config.bindHost.trim() : '';
+        if (!node.bindHost) node.warn('MCP runtime bindHost is not set; listening on all interfaces for backward compatibility');
+        node.allowedOrigins = parseGroupList(config.allowedOrigins || '').map(origin);
+        if (node.allowedOrigins.some(value => !value))
+        {
+            node.configError = 'Allowed Origins must contain only valid HTTP(S) origins';
+            node.error('MCP runtime configuration is invalid: ' + node.configError);
+            node.allowedOrigins = [];
+        }
+        node.allowFunctionCode = config.allowFunctionCode === true || config.allowFunctionCode === 'true';
+        node.codeGroups = parseGroupList(config.codeGroups || '');
         node.adminPort = Number(config.adminPort || 1880);
         node.adminToken = (node.credentials && node.credentials.adminToken) || '';
+        try
+        {
+            node.adminTokenEnv = mcpEnvName(config.adminTokenEnv, 'Admin Token Env');
+        } catch (error)
+        {
+            node.configError = error.message;
+            node.error('MCP runtime configuration is invalid: ' + node.configError);
+            node.adminTokenEnv = '';
+        }
+        node.adminCa = typeof config.adminCa === 'string' ? config.adminCa.trim() : '';
+        if (!node.adminToken && !(node.adminTokenEnv && process.env[node.adminTokenEnv]) &&
+            process.env.NODE_RED_ADMIN_API_TOKEN &&
+            !legacyAdminTokenWarningShown)
+        {
+            legacyAdminTokenWarningShown = true;
+            node.warn('NODE_RED_ADMIN_API_TOKEN is deprecated; configure Admin Token or Admin Token Env');
+        }
+        node.trustedProxies = [];
+        try
+        {
+            node.trustedProxies = parseGroupList(config.trustedProxies || '').map(cidr =>
+            {
+                parseCidr(cidr);
+                return cidr;
+            });
+        } catch
+        {
+            node.configError = 'Trusted Proxies must contain valid IP addresses or CIDR ranges';
+            node.error('MCP runtime configuration is invalid: ' + node.configError);
+        }
         node.adminEndpointPath = config.adminEndpointPath ? normalizePath(config.adminEndpointPath) : '';
         let toolTelemetryListener = null;
         let telemetryWarningShown = false;
@@ -347,6 +515,22 @@ module.exports = function (RED)
         node.authConfig = configNode(RED, config.auth);
         node.endpointId = node.id;
         node.activeToolCalls = 0;
+        node.toolTimeoutMs = config.toolTimeoutMs === undefined || config.toolTimeoutMs === '' ?
+            30000 : Number(config.toolTimeoutMs);
+        node.maxConcurrentCalls = config.maxConcurrentCalls === undefined || config.maxConcurrentCalls === '' ?
+            32 : Number(config.maxConcurrentCalls);
+        if (!Number.isInteger(node.toolTimeoutMs) || node.toolTimeoutMs < 1000 || node.toolTimeoutMs > 600000)
+        {
+            node.configError = 'Tool Timeout must be between 1000 and 600000 milliseconds';
+            node.error('MCP endpoint configuration is invalid: ' + node.configError);
+            node.toolTimeoutMs = 30000;
+        }
+        if (!Number.isInteger(node.maxConcurrentCalls) || node.maxConcurrentCalls < 1 || node.maxConcurrentCalls > 1024)
+        {
+            node.configError = 'Max Concurrent Calls must be between 1 and 1024';
+            node.error('MCP endpoint configuration is invalid: ' + node.configError);
+            node.maxConcurrentCalls = 32;
+        }
         node.serverName = config.serverName || config.name || 'node-red-mcp-server';
         node.serverPath = normalizePath(config.serverPath);
         node.serverPort = runtime ? runtime.serverPort : 0;
@@ -358,16 +542,24 @@ module.exports = function (RED)
         node.adminTools = createAdminTools({
             adminPort: node.adminPort,
             getAdminToken: () => node.adminToken,
+            getAdminConfig: () => adminApiConfig(RED, runtime),
             eachNode: RED.nodes.eachNode && RED.nodes.eachNode.bind(RED.nodes),
-            events: RED.events
+            events: RED.events,
+            canIncludeCode: claims => node.canIncludeFunctionCode(claims)
         });
 
         node.httpServer = null;
         node.app = null;
         node.isRunning = false;
         node.serverId = uuidv4();
+        node.canIncludeFunctionCode = function (claims = {})
+        {
+            const groups = Array.isArray(claims.groups) ? claims.groups.map(String) : [];
+            return Boolean(runtime && runtime.allowFunctionCode &&
+                runtime.codeGroups.some(group => groups.includes(group)));
+        };
 
-        node.status({ fill: "grey", shape: "ring", text: "stopped" });
+        node.status({ fill: "grey", shape: "ring", text: statusText(node, 'stopped') });
 
         node.publishToolTelemetry = function (event)
         {
@@ -383,6 +575,10 @@ module.exports = function (RED)
             {
                 throw new Error('MCP runtime is required');
             }
+            if (node.configError)
+                throw new Error('MCP endpoint configuration is invalid: ' + node.configError);
+            if (node.runtime.configError)
+                throw new Error('MCP runtime configuration is invalid: ' + node.runtime.configError);
             if (!node.authConfig)
                 throw new Error('MCP auth configuration is required');
             if (node.authConfig.configError)
@@ -415,6 +611,7 @@ module.exports = function (RED)
                 }
             }
             portState.runtimeId = node.runtimeId;
+            portState.bindHost = node.runtime.bindHost || '';
             portState.routes.set(node.serverPath, node);
             portState.nodes.add(node);
             node.portState = portState;
@@ -425,32 +622,58 @@ module.exports = function (RED)
         node.handleMcpHttpRequest = async function (req, res)
         {
             const request = req.body || {};
+            if (!request || typeof request !== 'object' || Array.isArray(request) ||
+                typeof request.method !== 'string')
+                return node.rpcError(res, null, -32600, 'Invalid request', undefined, 400);
             const toolRequest = request.method === 'tools/call';
             const started = toolRequest ? process.hrtime.bigint() : null;
             let handledToolCall = false;
             try
             {
                 // Only the handshake is anonymous; everything else needs a token (HTTP 401 starts sign-in).
-                if (request.method === 'initialize') return node.handleInitialize(request, res);
-                if (request.method === 'notifications/initialized' && request.id === undefined)
+                if (request.method === 'initialize' && request.id !== undefined)
+                    return node.handleInitialize(request, res);
+                // Notifications have no id and get no response channel for errors, so they are
+                // acknowledged with 202 unconditionally rather than challenged for auth.
+                if (request.id === undefined)
+                {
+                    if (request.method === 'notifications/cancelled')
+                        node.cancelToolExecution(request.params && request.params.requestId);
                     return res.status(202).end();
-                const authResult = await validateRequest(node, req);
+                }
+                let authResult;
+                try
+                {
+                    authResult = await validateRequest(node, req);
+                } catch (error)
+                {
+                    const requestId = uuidv4();
+                    node.error('MCP token validation storage failed ' + JSON.stringify({
+                        requestId, error: error.message
+                    }));
+                    res.set('Retry-After', '1');
+                    return node.rpcError(res, request.id, -32603, 'Service unavailable', { requestId }, 503);
+                }
                 if (!authResult.ok)
                 {
                     node.auditDenied(req, authResult);
                     return writeAuthFailure(req, res, node, authResult);
                 }
+                const protocolVersion = req.headers['mcp-protocol-version'];
+                if (protocolVersion && !SUPPORTED_PROTOCOL_VERSIONS.includes(protocolVersion))
+                    return node.rpcError(res, request.id, -32600, 'Unsupported MCP-Protocol-Version', undefined, 400);
                 switch (request.method)
                 {
-                    case 'tools/list': return node.handleToolsList(request, res);
+                    case 'tools/list': return node.handleToolsList(request, res, authResult.claims);
                     case 'tools/call': handledToolCall = true; await node.handleToolCall(request, res, authResult.claims); break;
                     default:
                         node.rpcError(res, request.id, -32601, 'Method not found: ' + request.method);
                 }
             } catch (error)
             {
-                node.error('MCP request error: ' + error.message);
-                node.rpcError(res, request.id, -32603, 'Internal error', undefined, 500);
+                const requestId = uuidv4();
+                node.error('MCP request failed ' + JSON.stringify({ requestId, error: error.message }));
+                node.rpcError(res, request.id, -32603, 'Internal error', { requestId }, 500);
             } finally
             {
                 if (toolRequest && !handledToolCall)
@@ -466,20 +689,54 @@ module.exports = function (RED)
 
         node.rpcError = function (res, id, code, message, data, httpStatus)
         {
-            const body = { jsonrpc: '2.0', id, error: { code, message, ...(data ? { data } : {}) } };
+            const body = { jsonrpc: '2.0', id: id === undefined ? null : id,
+                error: { code, message, ...(data ? { data } : {}) } };
             if (httpStatus) res.status(httpStatus).json(body);
             else res.json(body);
         };
 
         node.registeredTools = function ()
         {
-            const tools = toolRegistry.keys()
+            const tools = Array.from(toolRegistry.keys())
                 .map(key => toolRegistry.get(key))
-                .filter(tool => toolBelongsToEndpoint(tool, node.serverPath));
-            const byName = new Map();
-            tools.filter(tool => !tool.endpointPath).forEach(tool => byName.set(tool.name, tool));
-            tools.filter(tool => tool.endpointPath).forEach(tool => byName.set(tool.name, tool));
-            return Array.from(byName.values());
+                .filter(Boolean);
+            const paths = new Set([node.serverPath]);
+            for (const state of portServers.values())
+                for (const path of state.routes.keys()) paths.add(path);
+
+            const conflictedOwners = new Set();
+            const activeConflicts = new Set();
+            const selectedByPath = new Map();
+            for (const path of paths)
+            {
+                const bound = tools.filter(tool => tool.endpointPath === path);
+                const shared = tools.filter(tool => !tool.endpointPath);
+                const names = new Set([...bound, ...shared].map(tool => tool.name));
+                const selected = [];
+                for (const name of names)
+                {
+                    const endpointTools = bound.filter(tool => tool.name === name);
+                    const effective = endpointTools.length ? endpointTools : shared.filter(tool => tool.name === name);
+                    if (effective.length > 1)
+                    {
+                        effective.forEach(tool => conflictedOwners.add(tool.registeredBy || tool.name));
+                        const conflictKey = path + ':' + name;
+                        activeConflicts.add(conflictKey);
+                        if (!loggedToolConflicts.has(conflictKey))
+                        {
+                            loggedToolConflicts.add(conflictKey);
+                            node.warn('Duplicate MCP tool name "' + name + '" on ' + path);
+                        }
+                    } else if (effective.length === 1) selected.push(effective[0]);
+                }
+                selectedByPath.set(path, selected);
+            }
+            for (const key of loggedToolConflicts)
+                if (!activeConflicts.has(key)) loggedToolConflicts.delete(key);
+            for (const tool of tools)
+                if (typeof tool.setStatus === 'function')
+                    tool.setStatus(conflictedOwners.has(tool.registeredBy || tool.name));
+            return (selectedByPath.get(node.serverPath) || []).sort((a, b) => a.name.localeCompare(b.name));
         };
 
         node.toolDescriptor = function (tool)
@@ -493,17 +750,27 @@ module.exports = function (RED)
             }, oauthScopes(node.authConfig), tool._meta);
         };
 
-        node.handleToolsList = function (request, res)
+        node.handleToolsList = function (request, res, claims = {})
         {
             const tools = node.registeredTools()
                 .map(tool => node.toolDescriptor(tool));
 
             if (node.adminToolsEnabled)
             {
-                node.adminTools.TOOLS.forEach(tool => tools.push(withSecurityMeta(tool,
-                    oauthScopes(node.authConfig))));
+                node.adminTools.TOOLS.forEach(tool =>
+                {
+                    let descriptor = tool;
+                    if (tool.name === 'get_flow' && !node.canIncludeFunctionCode(claims))
+                    {
+                        descriptor = { ...tool, inputSchema: { ...tool.inputSchema,
+                            properties: { ...tool.inputSchema.properties } } };
+                        delete descriptor.inputSchema.properties.includeCode;
+                    }
+                    tools.push(withSecurityMeta(descriptor, oauthScopes(node.authConfig)));
+                });
             }
 
+            tools.sort((a, b) => a.name.localeCompare(b.name));
             res.json({ jsonrpc: '2.0', id: request.id, result: { tools } });
         };
 
@@ -514,7 +781,7 @@ module.exports = function (RED)
             const claims = result.claims || {};
             auditLog(node, 'mcp.auth', { outcome: 'denied', reason: result.error, subject: claims.subject,
                 client: claims.client, session: claims.session, endpoint: node.serverName,
-                ip: (req.headers && req.headers['x-forwarded-for']) || (req.socket && req.socket.remoteAddress) });
+                ip: clientIp(req, node.runtime && node.runtime.trustedProxies) });
         };
 
         node.handleToolCall = async function (request, res, claims = {})
@@ -527,8 +794,7 @@ module.exports = function (RED)
             let adminResult;
             let status = 'failed';
             let toolName = adminTool ? name : 'unknown';
-            // Arguments are not checked against inputSchema yet; flows validate their own input until per-tool schemas land.
-            if (node.activeToolCalls >= MAX_CONCURRENT_TOOL_CALLS)
+            if (node.activeToolCalls >= node.maxConcurrentCalls)
             {
                 auditLog(node, 'mcp.tool_call', { outcome: 'rejected', reason: 'too_many_calls', tool: name,
                     endpoint: node.serverName, subject: claims.subject, client: claims.client, session: claims.session }, 'warn');
@@ -539,7 +805,7 @@ module.exports = function (RED)
             {
                 if (adminTool)
                 {
-                    adminResult = await node.adminTools.callTool(name, args);
+                    adminResult = await node.adminTools.callTool(name, args, claims);
                     const result = normalizeToolResult(adminResult);
                     res.json({ jsonrpc: '2.0', id: request.id, result });
                     status = result.isError ? 'failed' : 'success';
@@ -547,14 +813,20 @@ module.exports = function (RED)
                 }
                 const tool = node.registeredTools().find(candidate => candidate.name === name);
                 if (!tool) return node.rpcError(res, request.id, -32602, 'Tool not found: ' + name);
+                if (typeof tool.validateArguments === 'function') tool.validateArguments(args);
                 toolName = tool.name;
-                const result = await node.executeToolFlow(tool, args, claims);
+                const result = await node.executeToolFlow(tool, args, claims, request.id);
                 const normalized = normalizeToolResult(result);
                 res.json({ jsonrpc: '2.0', id: request.id, result: normalized });
                 status = normalized.isError ? 'failed' : 'success';
             } catch (error)
             {
-                node.rpcError(res, request.id, error.rpcCode || -32603, error.message);
+                if (error.rpcCode) node.rpcError(res, request.id, error.rpcCode, error.message);
+                else
+                {
+                    res.json({ jsonrpc: '2.0', id: request.id, result: textResult(error.message, true) });
+                    status = 'failed';
+                }
             }
             finally
             {
@@ -579,19 +851,21 @@ module.exports = function (RED)
 
         node.handleInitialize = function (request, res)
         {
-            const capabilities = { tools: { listChanged: true } };
+            const capabilities = { tools: { listChanged: false } };
+            const requestedVersion = request.params && request.params.protocolVersion;
             res.json({
                 jsonrpc: '2.0',
                 id: request.id,
                 result: {
-                    protocolVersion: '2024-11-05',
+                    protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(requestedVersion) ?
+                        requestedVersion : SUPPORTED_PROTOCOL_VERSIONS.at(-1),
                     capabilities,
                     serverInfo: { name: node.serverName, version: PACKAGE_VERSION, description: 'Node-RED MCP Flow Server' }
                 }
             });
         };
 
-        node.executeToolFlow = function (tool, args, claims = {})
+        node.executeToolFlow = function (tool, args, claims = {}, requestId)
         {
             return new Promise((resolve, reject) =>
             {
@@ -602,15 +876,36 @@ module.exports = function (RED)
                 {
                     pendingExecutions.delete(executionId);
                     reject(new Error('Tool execution timeout'));
-                }, 30000);
+                }, Math.min(tool.timeoutMs || node.toolTimeoutMs, node.toolTimeoutMs));
                 pendingExecutions.set(executionId, {
                     resolve,
                     reject,
                     timeout,
-                    endpointId: node.endpointId
+                    endpointId: node.endpointId,
+                    requestId
                 });
-                node.send(executionMsg);
+                try
+                {
+                    node.send(executionMsg);
+                } catch (error)
+                {
+                    clearTimeout(timeout);
+                    pendingExecutions.delete(executionId);
+                    reject(error);
+                }
             });
+        };
+
+        node.cancelToolExecution = function (requestId)
+        {
+            if (requestId === undefined || requestId === null) return;
+            for (const [executionId, pending] of pendingExecutions)
+            {
+                if (pending.endpointId !== node.endpointId || pending.requestId !== requestId) continue;
+                clearTimeout(pending.timeout);
+                pendingExecutions.delete(executionId);
+                pending.reject(new Error('Tool execution cancelled'));
+            }
         };
 
         let closed = false;
@@ -622,7 +917,7 @@ module.exports = function (RED)
                 callback(null, { success: false, message: 'Server already running' });
                 return;
             }
-            node.status({ fill: 'yellow', shape: 'ring', text: 'starting...' });
+            node.status({ fill: 'yellow', shape: 'ring', text: statusText(node, 'starting') });
             try
             {
                 node.initializeServer();
@@ -632,7 +927,7 @@ module.exports = function (RED)
                     portState.httpServer.removeListener('error', startError);
                     if (closed) return;
                     node.isRunning = true;
-                    node.status({ fill: 'green', shape: 'dot', text: 'running :' + node.serverPort });
+                    node.status({ fill: 'green', shape: 'dot', text: statusText(node, 'running', { port: node.serverPort }) });
                     serverInstances.set(node.serverId, {
                         nodeId: String(node.id),
                         runtimeId: String(node.runtimeId || ''),
@@ -651,7 +946,7 @@ module.exports = function (RED)
                     portState.httpServer.removeListener('listening', startListening);
                     if (closed) return;
                     node.error('Server error: ' + error.message);
-                    node.status({ fill: 'red', shape: 'dot', text: 'error' });
+                    node.status({ fill: 'red', shape: 'dot', text: statusText(node, 'error') });
                     callback(error);
                 };
                 const startListening = () =>
@@ -668,11 +963,15 @@ module.exports = function (RED)
 
                 portState.httpServer.once('error', startError);
                 portState.httpServer.once('listening', startListening);
-                if (!portState.httpServer.listening) portState.httpServer.listen(portState.port);
+                if (!portState.httpServer.listening)
+                {
+                    if (portState.bindHost) portState.httpServer.listen(portState.port, portState.bindHost);
+                    else portState.httpServer.listen(portState.port);
+                }
             } catch (error)
             {
                 node.error('Failed to start server: ' + error.message);
-                node.status({ fill: 'red', shape: 'dot', text: 'error' });
+                node.status({ fill: 'red', shape: 'dot', text: statusText(node, 'error') });
                 callback(error);
             }
         };
@@ -684,7 +983,7 @@ module.exports = function (RED)
                 callback(null, { success: true, message: 'Server already stopped' });
                 return;
             }
-            if (!closed) node.status({ fill: 'yellow', shape: 'ring', text: 'stopping...' });
+            if (!closed) node.status({ fill: 'yellow', shape: 'ring', text: statusText(node, 'stopping') });
 
             const portState = node.portState;
             node.portState = null;
@@ -697,8 +996,8 @@ module.exports = function (RED)
             const finish = () =>
             {
                 node.isRunning = false;
-                serverInstances.del(node.serverId);
-                if (!closed) node.status({ fill: 'grey', shape: 'ring', text: 'stopped' });
+                serverInstances.delete(node.serverId);
+                if (!closed) node.status({ fill: 'grey', shape: 'ring', text: statusText(node, 'stopped') });
                 callback(null, { success: true, message: 'Server stopped' });
             };
 
@@ -717,10 +1016,10 @@ module.exports = function (RED)
         };
 
         let restartTimer = null;
+        let pendingRestartDone = null;
         // The output carries only tool calls; commands produce no messages.
         node.on('input', function (msg, send, done)
         {
-            done = done || function (error) { if (error) node.error(error, msg); };
             const finished = error => done(error || undefined);
 
             if (msg.topic === 'mcp-tool-response' && msg.payload && msg.payload.executionId)
@@ -728,7 +1027,7 @@ module.exports = function (RED)
                 const pending = pendingExecutions.get(msg.payload.executionId);
                 if (!pending)
                 {
-                    node.warn('Orphan MCP tool response for executionId: ' + msg.payload.executionId);
+                    node.debug('Ignoring late or cancelled MCP tool response for executionId: ' + msg.payload.executionId);
                     return done();
                 }
                 clearTimeout(pending.timeout);
@@ -749,9 +1048,11 @@ module.exports = function (RED)
                     {
                         if (error) return done(error);
                         clearTimeout(restartTimer);
+                        pendingRestartDone = finished;
                         restartTimer = setTimeout(() =>
                         {
                             restartTimer = null;
+                            pendingRestartDone = null;
                             node.startServer(finished);
                         }, 1000);
                     });
@@ -768,6 +1069,12 @@ module.exports = function (RED)
             closed = true;
             clearTimeout(restartTimer);
             restartTimer = null;
+            if (pendingRestartDone)
+            {
+                const restartDone = pendingRestartDone;
+                pendingRestartDone = null;
+                restartDone();
+            }
             RED.events.removeListener('flows:started', startOnDeploy);
             node.adminTools.dispose();
             for (const [executionId, pending] of pendingExecutions.entries())
@@ -792,17 +1099,31 @@ module.exports = function (RED)
     RED.events.on('mcp-tool-register', (toolDef) =>
     {
         if (!toolDef || !toolDef.name) return;
-        toolRegistry.set(registryKey(toolDef.name, toolDef.endpointPath), toolDef);
+        toolRegistry.set(registryKey(toolDef), toolDef);
+        for (const state of portServers.values())
+            for (const node of state.routes.values()) node.registeredTools();
     });
     RED.events.on('mcp-tool-unregister', (toolDef) =>
     {
         if (typeof toolDef === 'string')
         {
-            toolRegistry.del(registryKey(toolDef, ''));
+            for (const key of toolRegistry.keys())
+            {
+                const tool = toolRegistry.get(key);
+                if (tool && tool.name === toolDef && !tool.endpointPath) toolRegistry.delete(key);
+            }
             return;
         }
         if (!toolDef || !toolDef.name) return;
-        toolRegistry.del(registryKey(toolDef.name, toolDef.endpointPath));
+        if (toolDef.registeredBy)
+        {
+            toolRegistry.delete('node:' + toolDef.registeredBy);
+        } else
+        {
+            toolRegistry.delete(registryKey(toolDef));
+        }
+        for (const state of portServers.values())
+            for (const node of state.routes.values()) node.registeredTools();
     });
 
     const readPermission = RED.auth && typeof RED.auth.needsPermission === 'function' ?
@@ -810,17 +1131,17 @@ module.exports = function (RED)
     RED.httpAdmin.get('/mcp-flow-servers', ...readPermission, function (req, res)
     {
         const servers = [];
-        serverInstances.keys().forEach(key =>
+        for (const key of serverInstances.keys())
         {
             const server = serverInstances.get(key);
             if (server)
             {
-                const toolCount = toolRegistry.keys()
+                const toolCount = Array.from(toolRegistry.keys())
                     .map(toolKey => toolRegistry.get(toolKey))
                     .filter(tool => toolBelongsToEndpoint(tool, server.path)).length;
                 servers.push({ serverId: key, runtimeId: server.runtimeId, endpointId: server.endpointId, serverName: server.serverName, path: server.path, isRunning: server.isRunning, port: server.port, startTime: server.startTime, toolCount });
             }
-        });
+        }
         res.json({ servers });
     });
 };

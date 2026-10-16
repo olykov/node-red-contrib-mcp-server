@@ -1,0 +1,103 @@
+
+<script type="text/html" data-help-name="mcp-runtime">
+    <p>Local MCP HTTP listener shared by one or more MCP Server endpoints.</p>
+    <h3>Details</h3>
+    <p>Several endpoints may share one runtime port when their MCP paths differ.
+    The runtime also hosts the OAuth routes of the auth configurations used by its endpoints.</p>
+    <dl>
+        <dt>Port</dt>
+        <dd>Local HTTP port of the listener.</dd>
+        <dt>Base URL</dt>
+        <dd>Required. Client-facing base URL used in OAuth metadata and challenges, directly or through
+        a proxy. It may be reachable only over VPN. Endpoints do not start without it.</dd>
+        <dt>Bind Host</dt>
+        <dd>Address used by the listener. New runtimes default to <code>127.0.0.1</code>; set an
+        explicit address when remote clients must connect.</dd>
+        <dt>Allowed Origins</dt>
+        <dd>Exact browser origins in addition to the Base URL origin. Requests without an
+        <code>Origin</code> header are not restricted by this setting.</dd>
+        <dt>Trusted Proxies</dt>
+        <dd>CIDR ranges of trusted reverse proxies. Forwarded client addresses are used in audit
+        logs only when the TCP peer is in this list.</dd>
+        <dt>Allow Function Code</dt>
+        <dd>When enabled, Function code may be returned by <code>get_flow</code> only to users
+        in Code Groups. Code is sent to the MCP client and secrets in code are not redacted.</dd>
+        <dt>Admin Port</dt>
+        <dd>Fallback port for the local Node-RED Admin API; the runtime uses Node-RED's configured
+        UI port, host, HTTP admin root and HTTPS setting when available.</dd>
+        <dt>Admin Token</dt>
+        <dd>Bearer token for the local Node-RED Admin API, stored as a credential.
+        <code>NODE_RED_ADMIN_API_TOKEN</code> remains a deprecated fallback.</dd>
+        <dt>Admin Token Env</dt>
+        <dd>Optional <code>MCP_*</code> environment variable for the API token. The Admin Token
+        credential takes precedence.</dd>
+        <dt>Admin API CA</dt>
+        <dd>Optional PEM certificate for a private CA. TLS certificate verification remains enabled.</dd>
+        <dt>Admin Path</dt>
+        <dd>Exact MCP path allowed to expose the read-only admin tools.</dd>
+    </dl>
+    <p>Admin tools are exposed only when a token and Admin Path are set and an MCP Server on this
+    runtime uses exactly that path.</p>
+    <p>Older configurations without Bind Host continue listening on all interfaces and emit a
+    warning. Set an explicit address to silence that warning.</p>
+    <h3>References</h3>
+    <ul>
+        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>
+    </ul>
+</script>
+
+<script type="text/html" data-help-name="mcp-flow-server">
+    <p>One MCP endpoint on a selected runtime. Tool calls are passed into the flow and answered
+    from the flow.</p>
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>topic <span class="property-type">string</span></dt>
+        <dd><code>mcp-tool-response</code> to answer a tool call, or a command:
+        <code>start</code>, <code>stop</code> or <code>restart</code>. Commands produce no output.</dd>
+        <dt class="optional">payload.command <span class="property-type">string</span></dt>
+        <dd>Command used when <code>topic</code> is not set.</dd>
+        <dt class="optional">payload.executionId <span class="property-type">string</span></dt>
+        <dd>For <code>mcp-tool-response</code>: the id received in the tool call.</dd>
+        <dt class="optional">payload.result <span class="property-type">any</span></dt>
+        <dd>Tool result: an MCP result object, content array, string or JSON value.</dd>
+        <dt class="optional">payload.error <span class="property-type">string | Error</span></dt>
+        <dd>Error text or object; the call returns an MCP result with <code>isError: true</code>.</dd>
+    </dl>
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>topic <span class="property-type">string</span></dt>
+        <dd>Always <code>mcp-tool-execute</code>.</dd>
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd><code>toolName</code>, <code>arguments</code> and <code>executionId</code>.</dd>
+        <dt>mcp <span class="property-type">object</span></dt>
+        <dd>Caller identity: <code>subject</code>, <code>email</code>, <code>groups</code>, <code>client</code>.</dd>
+    </dl>
+    <h3>Details</h3>
+    <p>The output carries only tool calls. Endpoint state is shown in the node status; tool
+    telemetry comes from the MCP metrics node. Only <code>initialize</code> is unauthenticated;
+    <code>tools/list</code> and tool calls require OAuth. Notifications return HTTP 202 without a
+    body.</p>
+    <dl>
+        <dt>Runtime</dt>
+        <dd>MCP runtime that listens on a port and hosts this endpoint path.</dd>
+        <dt>Auth</dt>
+        <dd>Required MCP auth configuration.</dd>
+        <dt>MCP Name</dt>
+        <dd>Name returned in MCP initialize responses.</dd>
+        <dt>MCP Path</dt>
+        <dd>HTTP JSON-RPC path, for example <code>/mcp/ops</code>. Only POST is served.</dd>
+        <dt>Groups</dt>
+        <dd>Required groups separated by commas or spaces. A user needs at least one of them; an
+        endpoint without groups does not start.</dd>
+        <dt>Tool Timeout</dt>
+        <dd>Execution deadline in milliseconds (1000-600000). Timed out flow calls return an MCP
+        result with <code>isError: true</code>.</dd>
+        <dt>Max Concurrent Calls</dt>
+        <dd>Maximum simultaneous tool executions (1-1024); excess calls receive JSON-RPC error
+        <code>-32000</code>.</dd>
+    </dl>
+    <h3>References</h3>
+    <ul>
+        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>
+    </ul>
+</script>

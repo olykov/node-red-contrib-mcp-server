@@ -4,7 +4,7 @@
         color: '#E9967A',
         defaults: {
             name: { value: '' },
-            toolName: { value: '', required: true, validate: RED.validators.regex(/^[a-z][a-z0-9_]*$/) },
+            toolName: { value: '', required: true, validate: RED.validators.regex(/^[a-z][a-z0-9_]{0,63}$/) },
             toolDescription: { value: '' },
             endpoint: {
                 value: '',
@@ -22,7 +22,7 @@
             toolBehavior: { value: '' },
             worldAccess: { value: '' },
             toolSchema: { value: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}', validate: function(v) {
-                try { var parsed = JSON.parse(v); return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed); }
+                try { var parsed = JSON.parse(v); return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.type === 'object'; }
                 catch (_) { return false; }
             } },
             outputSchema: { value: '', validate: function(v) {
@@ -30,23 +30,28 @@
                 try { var parsed = JSON.parse(v); return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed); }
                 catch (_) { return false; }
             } },
+            timeoutMs: { value: 0, validate: function(v) {
+                return v === '' || Number(v) === 0 ||
+                    (RED.validators.number()(v) && Number.isInteger(Number(v)) && Number(v) >= 1000 && Number(v) <= 600000);
+            } },
         },
         inputs: 0,
         outputs: 0,
         paletteLabel: 'MCP Tool',
         icon: 'font-awesome/fa-wrench',
         label: function() {
-            return this.name || this.toolName || 'MCP Tool';
+            return this.name || this.toolName || this._('mcp-tool-registry.label.paletteLabel');
         },
         labelStyle: function() {
             return this.name ? 'node_label_italic' : '';
         },
         oneditprepare: function() {
+            var node = this;
             var endpointSelect = $('#node-input-endpoint');
             var currentEndpoint = this.endpoint || '';
             endpointSelect.empty();
-            endpointSelect.append($('<option></option>').attr('value', '').text('Select MCP endpoint...'));
-            endpointSelect.append($('<option></option>').attr('value', '__shared__').text('Shared (All MCPs)'));
+            endpointSelect.append($('<option></option>').attr('value', '').text(node._('mcp-tool-registry.label.endpointSelectPrompt')));
+            endpointSelect.append($('<option></option>').attr('value', '__shared__').text(node._('mcp-tool-registry.label.endpointShared')));
             if (RED.nodes && typeof RED.nodes.eachNode === 'function') {
                 RED.nodes.eachNode(function(node) {
                     if (node.type !== 'mcp-flow-server') return;
@@ -80,23 +85,23 @@
                     editor.setValue(JSON.stringify(JSON.parse(schema), null, 2), -1);
                     return true;
                 } catch (error) {
-                    RED.notify(label + ' invalid JSON: ' + error.message, 'error');
+                    RED.notify(label + ' ' + error.message, 'error');
                     return false;
                 }
             }
 
             $('#format-json-fields-btn').on('click', function() {
-                var inputOk = formatJsonField(node.schemaEditors.toolSchema, 'Input schema', false);
-                var outputOk = formatJsonField(node.schemaEditors.outputSchema, 'Output schema', true);
-                if (inputOk && outputOk) RED.notify('JSON fields formatted', 'success');
+                var inputOk = formatJsonField(node.schemaEditors.toolSchema, node._('mcp-tool-registry.label.inputSchemaInvalid') + ':', false);
+                var outputOk = formatJsonField(node.schemaEditors.outputSchema, node._('mcp-tool-registry.label.outputSchemaInvalid') + ':', true);
+                if (inputOk && outputOk) RED.notify(node._('mcp-tool-registry.label.formatSuccess'), 'success');
             });
 
             $('#node-input-toolName').on('input', function() {
                 var toolName = $(this).val();
-                var isValid = /^[a-z][a-z0-9_]*$/.test(toolName);
+                var isValid = /^[a-z][a-z0-9_]{0,63}$/.test(toolName);
                 if (toolName && !isValid) {
                     $(this).addClass('input-error');
-                    $('#tool-name-validation').show().text('Tool name must use lowercase letters, numbers, and underscores.');
+                    $('#tool-name-validation').show().text(node._('mcp-tool-registry.label.toolNameValidation'));
                 } else {
                     $(this).removeClass('input-error');
                     $('#tool-name-validation').hide();
@@ -120,56 +125,61 @@
 
 <script type="text/html" data-template-name="mcp-tool-registry">
     <div class="form-row">
-        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
-        <input type="text" id="node-input-name" placeholder="Human-readable tool name">
+        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-tool-registry.label.name"></span></label>
+        <input type="text" id="node-input-name" data-i18n="[placeholder]mcp-tool-registry.label.namePlaceholder">
     </div>
 
     <div class="form-row">
-        <label for="node-input-toolName"><i class="fa fa-cog"></i> Tool Name</label>
-        <input type="text" id="node-input-toolName" placeholder="my_custom_tool">
+        <label for="node-input-toolName"><i class="fa fa-cog"></i> <span data-i18n="mcp-tool-registry.label.toolName"></span></label>
+        <input type="text" id="node-input-toolName" data-i18n="[placeholder]mcp-tool-registry.label.toolNamePlaceholder">
         <div id="tool-name-validation" class="mcp-tool-registry-validation"></div>
     </div>
 
     <div class="form-row">
-        <label for="node-input-toolDescription"><i class="fa fa-info-circle"></i> Description</label>
-        <textarea id="node-input-toolDescription" rows="4" style="width: 70%; resize: vertical;" placeholder="Describe what this tool does"></textarea>
+        <label for="node-input-toolDescription"><i class="fa fa-info-circle"></i> <span data-i18n="mcp-tool-registry.label.toolDescription"></span></label>
+        <textarea id="node-input-toolDescription" rows="4" style="width: 70%; resize: vertical;" data-i18n="[placeholder]mcp-tool-registry.label.toolDescriptionPlaceholder"></textarea>
     </div>
 
     <div class="form-row">
-        <label for="node-input-endpoint"><i class="fa fa-sitemap"></i> Endpoint</label>
+        <label for="node-input-endpoint"><i class="fa fa-sitemap"></i> <span data-i18n="mcp-tool-registry.label.endpoint"></span></label>
         <select id="node-input-endpoint" style="width: 70%;"></select>
     </div>
+    <div class="form-row">
+        <label for="node-input-timeoutMs"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-tool-registry.label.timeoutMs"></span></label>
+        <input type="number" id="node-input-timeoutMs" min="0" max="600000" step="1">
+    </div>
+    <div class="form-tips" data-i18n="mcp-tool-registry.label.timeoutTip"></div>
 
     <hr>
-    <h4>Annotations</h4>
+    <h4 data-i18n="mcp-tool-registry.label.annotationsHeading"></h4>
 
     <div class="form-row">
-        <label for="node-input-toolBehavior"><i class="fa fa-shield"></i> Behavior</label>
+        <label for="node-input-toolBehavior"><i class="fa fa-shield"></i> <span data-i18n="mcp-tool-registry.label.behavior"></span></label>
         <select id="node-input-toolBehavior" style="width: 70%;">
-            <option value="">Unspecified</option>
-            <option value="read">Read only</option>
-            <option value="write">Add only</option>
-            <option value="destructive">Change / Delete / Send</option>
+            <option value="" data-i18n="mcp-tool-registry.label.behaviorUnspecified"></option>
+            <option value="read" data-i18n="mcp-tool-registry.label.behaviorRead"></option>
+            <option value="write" data-i18n="mcp-tool-registry.label.behaviorWrite"></option>
+            <option value="destructive" data-i18n="mcp-tool-registry.label.behaviorDestructive"></option>
         </select>
     </div>
 
     <div class="form-row">
-        <label for="node-input-worldAccess"><i class="fa fa-globe"></i> Scope</label>
+        <label for="node-input-worldAccess"><i class="fa fa-globe"></i> <span data-i18n="mcp-tool-registry.label.worldAccess"></span></label>
         <select id="node-input-worldAccess" style="width: 70%;">
-            <option value="">Unspecified</option>
-            <option value="closed">Fixed target</option>
-            <option value="open">Open-ended</option>
+            <option value="" data-i18n="mcp-tool-registry.label.worldAccessUnspecified"></option>
+            <option value="closed" data-i18n="mcp-tool-registry.label.worldAccessClosed"></option>
+            <option value="open" data-i18n="mcp-tool-registry.label.worldAccessOpen"></option>
         </select>
     </div>
 
     <div class="form-row">
-        <label for="node-input-toolSchema-editor" style="display: block; width: auto;"><i class="fa fa-code"></i> Input Schema</label>
+        <label for="node-input-toolSchema-editor" style="display: block; width: auto;"><i class="fa fa-code"></i> <span data-i18n="mcp-tool-registry.label.inputSchema"></span></label>
         <div style="height: 220px; min-height: 120px;" class="node-text-editor" id="node-input-toolSchema-editor"></div>
         <input type="hidden" id="node-input-toolSchema">
     </div>
 
     <div class="form-row">
-        <label for="node-input-outputSchema-editor" style="display: block; width: auto;"><i class="fa fa-code"></i> Output Schema</label>
+        <label for="node-input-outputSchema-editor" style="display: block; width: auto;"><i class="fa fa-code"></i> <span data-i18n="mcp-tool-registry.label.outputSchema"></span></label>
         <div style="height: 220px; min-height: 120px;" class="node-text-editor" id="node-input-outputSchema-editor"></div>
         <input type="hidden" id="node-input-outputSchema">
     </div>
@@ -177,7 +187,7 @@
     <div class="form-row">
         <label></label>
         <button type="button" id="format-json-fields-btn" class="red-ui-button">
-            <i class="fa fa-magic"></i> Format JSON Fields
+            <i class="fa fa-magic"></i> <span data-i18n="mcp-tool-registry.label.formatJsonButton"></span>
         </button>
     </div>
 
@@ -188,31 +198,4 @@
             font-size: 12px;
         }
     </style>
-</script>
-
-<script type="text/html" data-help-name="mcp-tool-registry">
-    <p>Registers one MCP tool for one endpoint or for every endpoint.</p>
-    <h3>Details</h3>
-    <p>The tool is advertised when the flow starts and removed when the node stops. Calls reach the
-    selected MCP Server output as <code>mcp-tool-execute</code>; the flow must answer with
-    <code>mcp-tool-response</code>.</p>
-    <dl>
-        <dt>Tool Name</dt>
-        <dd>MCP tool name: lowercase letters, digits and underscores, starting with a letter.</dd>
-        <dt>Endpoint</dt>
-        <dd>MCP path of the MCP Server that offers the tool, so the binding survives copy, import
-        and node replacement. <code>Shared (All MCPs)</code> exposes it on every endpoint.</dd>
-        <dt>Behavior</dt>
-        <dd>MCP safety annotation: read only, add only, or change, delete or send.</dd>
-        <dt>Scope</dt>
-        <dd>MCP open-world annotation. Public internet and external recipients are open-ended.</dd>
-        <dt>Input Schema</dt>
-        <dd>JSON Schema object for the tool arguments.</dd>
-        <dt>Output Schema</dt>
-        <dd>Optional JSON Schema object for the structured result.</dd>
-    </dl>
-    <h3>References</h3>
-    <ul>
-        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>
-    </ul>
 </script>

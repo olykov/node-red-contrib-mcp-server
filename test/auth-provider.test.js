@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const EventEmitter = require('node:events');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const axios = require('axios');
+const httpMock = require('./helpers/fetch-mock');
 const { generateKeyPair, exportJWK, createLocalJWKSet, SignJWT } = require('jose');
 const { providerSettings, authRouteSlug } = require('../lib/auth-provider');
 const { beginAuthorization, completeAuthorization, exchangeClientCode, validateRequest, oidcDiscovery, sha256Base64Url, authorizeMetadata,
@@ -161,10 +161,10 @@ describe('Microsoft signed-token authorization', () => {
             .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
             .setIssuer(options.issuer || auth.issuerUrl).setAudience(options.audience || client)
             .setIssuedAt().setExpirationTime(options.expired ? -1 : '5m').sign(options.signingKey || privateKey);
-        const get = axios.get;
-        const post = axios.post;
+        const get = httpMock.get;
+        const post = httpMock.post;
         const calls = [];
-        axios.get = async url => {
+        httpMock.get = async url => {
             calls.push(url);
             if (url.endsWith('/.well-known/openid-configuration')) return { data: {
                 issuer: auth.issuerUrl, authorization_endpoint: auth.issuerUrl + '/authorize',
@@ -173,7 +173,7 @@ describe('Microsoft signed-token authorization', () => {
             } };
             throw new Error('Unexpected UserInfo request');
         };
-        axios.post = async (url, body) => {
+        httpMock.post = async (url, body) => {
             assert.equal(url, auth.issuerUrl + '/token');
             const form = new URLSearchParams(body);
             assert.equal(form.get('client_id'), client);
@@ -187,7 +187,7 @@ describe('Microsoft signed-token authorization', () => {
                 query: { code: 'upstream-code', state: 'state' } }, res, node);
             assert.equal(await auth.readState('state'), null);
             return { res, auth, node, state, calls };
-        } finally { axios.get = get; axios.post = post; }
+        } finally { httpMock.get = get; httpMock.post = post; }
     }
 
     it('round-trips verified roles through code/PKCE/token and enforces endpoint/resource policies', async () => {
@@ -237,18 +237,18 @@ describe('Microsoft signed-token authorization', () => {
     });
 
     it('rejects discovery for a different issuer', async () => {
-        const get = axios.get;
-        axios.get = async () => ({ data: { issuer: 'https://other.example.test', authorization_endpoint: 'https://other.example.test/authorize',
+        const get = httpMock.get;
+        httpMock.get = async () => ({ data: { issuer: 'https://other.example.test', authorization_endpoint: 'https://other.example.test/authorize',
             token_endpoint: 'https://other.example.test/token', userinfo_endpoint: 'https://other.example.test/userinfo', jwks_uri: 'https://other.example.test/jwks' } });
         try { await assert.rejects(() => oidcDiscovery(providerSettings(microsoft)), /discovery issuer mismatch/); }
-        finally { axios.get = get; }
+        finally { httpMock.get = get; }
     });
 
     it('uses Microsoft scopes and callback in the authorize request', async () => {
-        const get = axios.get;
+        const get = httpMock.get;
         const auth = runtime()({ ...microsoft, allowedClientHosts: 'client.example.test' });
         auth.discovery = { expiresAt: Date.now() + 10000, value: { authorization_endpoint: auth.issuerUrl + '/authorize' } };
-        axios.get = async () => ({ data: { client_id: 'https://client.example.test/metadata.json', redirect_uris: ['https://client.example.test/callback'] } });
+        httpMock.get = async () => ({ data: { client_id: 'https://client.example.test/metadata.json', redirect_uris: ['https://client.example.test/callback'] } });
         const res = response();
         try {
             await beginAuthorization({ headers: {}, query: { response_type: 'code', code_challenge_method: 'S256',
@@ -259,16 +259,16 @@ describe('Microsoft signed-token authorization', () => {
             assert.equal(url.searchParams.get('scope'), 'openid profile email');
             assert.equal(url.searchParams.get('client_id'), client);
             assert.equal(url.searchParams.get('redirect_uri'), 'https://mcp.example.test/oauth/test-login/callback');
-        } finally { axios.get = get; }
+        } finally { httpMock.get = get; }
     });
 });
 
 describe('native loopback redirects', () => {
     async function authorize(metadata, redirectUri, overrides = {}) {
-        const get = axios.get;
+        const get = httpMock.get;
         const auth = runtime()({ ...microsoft, allowedClientHosts: 'client.example.test' });
         auth.discovery = { expiresAt: Date.now() + 10000, value: { authorization_endpoint: auth.issuerUrl + '/authorize' } };
-        axios.get = async () => ({ data: { client_id: 'https://client.example.test/metadata.json', ...metadata } });
+        httpMock.get = async () => ({ data: { client_id: 'https://client.example.test/metadata.json', ...metadata } });
         const res = response();
         try {
             await beginAuthorization({ headers: {}, query: {
@@ -277,7 +277,7 @@ describe('native loopback redirects', () => {
                 state: 'client-state', ...overrides
             } }, res, { authConfig: auth, endpointId: 'test-endpoint', serverPath: '/mcp/test', publicBaseUrl: 'https://mcp.example.test' });
             return { res, auth };
-        } finally { axios.get = get; }
+        } finally { httpMock.get = get; }
     }
 
     it('allows only port changes for registered native loopback hosts and preserves the actual redirect', async () => {
@@ -358,6 +358,13 @@ describe('native loopback redirects', () => {
 
 describe('auth provider editor', () => {
     const html = fs.readFileSync(require.resolve('../mcp-auth.html'), 'utf8');
+    const catalog = JSON.parse(fs.readFileSync(require.resolve('../locales/en-US/mcp-auth.json'), 'utf8'));
+    function translate(key, params) {
+        const value = key.split('.').reduce((obj, part) => obj && obj[part], catalog);
+        if (typeof value !== 'string') return key;
+        if (!params) return value;
+        return Object.keys(params).reduce((text, name) => text.split('__' + name + '__').join(params[name]), value);
+    }
     const definitions = {};
     const values = {};
     const visible = {};
@@ -392,7 +399,7 @@ describe('auth provider editor', () => {
         const definition = definitions['mcp-auth'];
         values['#node-config-input-clientId'] = 'oidc-client';
         values['#node-config-input-microsoftClientId'] = client;
-        definition.oneditprepare.call({ provider: 'microsoft' });
+        definition.oneditprepare.call({ provider: 'microsoft', _: translate });
         assert.deepEqual(tabs.definitions.map(tab => tab.id), ['microsoft', 'oidc']);
         assert.equal(tabs.definitions[1].label, 'OIDC');
         assert.equal(values['#node-config-input-provider'], 'microsoft');
@@ -403,7 +410,7 @@ describe('auth provider editor', () => {
         assert.equal(visible['#mcp-auth-oidc'], true);
         assert.equal(visible['#mcp-auth-microsoft'], false);
         assert.equal(values['#node-config-input-microsoftClientId'], client);
-        definition.oneditprepare.call({ provider: values['#node-config-input-provider'] });
+        definition.oneditprepare.call({ provider: values['#node-config-input-provider'], _: translate });
         assert.equal(visible['#mcp-auth-oidc'], true);
         assert.equal(values['#node-config-input-clientId'], 'oidc-client');
     });
@@ -425,7 +432,7 @@ describe('auth provider editor', () => {
 
     it('updates the redirect template from the typed slug without reading a runtime', () => {
         values['#node-config-input-oauthSlug'] = 'first-login';
-        definitions['mcp-auth'].oneditprepare.call({ id: 'auth' });
+        definitions['mcp-auth'].oneditprepare.call({ id: 'auth', _: translate });
         assert.equal(values['#mcp-auth-redirect-url'], 'Redirect URL: https://<nodered>/oauth/first-login/callback');
         values['#node-config-input-oauthSlug'] = 'second-login';
         handlers['#node-config-input-oauthSlug:input']();
@@ -447,7 +454,7 @@ describe('auth configuration reporting', () => {
         const types = {};
         const RED = { events: new EventEmitter(), httpAdmin: { get() {} }, nodes: {
             createNode(target, config) { Object.setPrototypeOf(target, EventEmitter.prototype); EventEmitter.call(target);
-                target.id = config.id; target.credentials = {}; target.status = () => {}; target.error = () => {}; },
+                target.id = config.id; target.credentials = {}; target.status = () => {}; target.error = () => {}; target.warn = () => {}; },
             registerType(name, ctor) { types[name] = ctor; },
             getNode(id) { return id === 'auth' ? node : id === 'runtime' ? runtimeNode : null; } } };
         delete require.cache[require.resolve('../mcp-flow-server')];
@@ -470,6 +477,7 @@ describe('auth configuration reporting', () => {
 });
 
 describe('environment variable names', () => {
+    // MCP-KEEP-4
     it('accepts only MCP_* variable names for editor-supplied secrets and storage', () => {
         const { mcpEnvName } = require('../lib/auth-provider');
         assert.strictEqual(mcpEnvName('MCP_REDIS_URL', 'URL Env'), 'MCP_REDIS_URL');
@@ -482,6 +490,7 @@ describe('environment variable names', () => {
         assert.strictEqual(build({ ...oidc, clientSecretEnv: 'MCP_OIDC_SECRET' }).configError, undefined);
     });
 
+    // MCP-KEEP-4
     it('rejects non-MCP storage variables and stops the dependent auth configuration', () => {
         const types = {};
         const nodes = {};

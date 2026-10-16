@@ -1,15 +1,23 @@
 {
   "name": "@olykov/node-red-mcp-server",
-  "version": "3.3.0",
+  "version": "3.5.0",
   "description": "Upstream-first Node-RED palette for exposing flows as MCP servers and tools.",
-  "main": "mcp-flow-server.js",
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "lint": "eslint .",
-    "test": "node --test --test-timeout=30000",
-    "coverage": "node --test --test-timeout=30000 --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 --test-coverage-exclude=test/**",
-    "prepublishOnly": "npm run lint && npm test"
+    "check:spec": "node scripts/check-req-ids.js",
+    "test": "node --unhandled-rejections=strict --test --test-timeout=30000",
+    "coverage": "node --unhandled-rejections=strict --test --test-timeout=30000 --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 --test-coverage-exclude=test/**",
+    "smoke:pack": "node --unhandled-rejections=strict scripts/pack-smoke.js",
+    "prepublishOnly": "npm run lint && npm run check:spec && npm test"
   },
   "keywords": [
+    "node-red",
     "mcp",
     "model-context-protocol",
     "tools",
@@ -33,7 +41,7 @@
     "url": "https://github.com/olykov/node-red-contrib-mcp-server/issues"
   },
   "node-red": {
-    "version": ">=5.0.0",
+    "version": ">=5.0.0 <6.0.0",
     "nodes": {
       "mcp-auth": "mcp-auth.js",
       "mcp-flow-server": "mcp-flow-server.js",
@@ -42,11 +50,10 @@
     }
   },
   "dependencies": {
-    "axios": "^1.6.0",
+    "ajv": "^8.20.0",
     "express": "^5.2.1",
     "ioredis": "^5.4.1",
-    "jose": "^5.10.0",
-    "node-cache": "^5.1.2"
+    "jose": "^5.10.0"
   },
   "engines": {
     "node": ">=22.9"
@@ -58,11 +65,19 @@
     "CHANGELOG.md",
     "LICENSE",
     "lib/",
+    "locales/",
     "examples/"
   ],
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "eslint": "^9.39.5",
-    "globals": "^17.13.0"
+    "globals": "^17.13.0",
+    "node-red": "^5.0.8",
+    "node-red-node-test-helper": "^0.3.6"
+  },
+  "overrides": {
+    "@node-red/registry": {
+      "npm": "11.21.1"
+    }
   }
 }

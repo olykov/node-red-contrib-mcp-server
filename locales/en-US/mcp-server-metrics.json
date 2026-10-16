@@ -1,0 +1,15 @@
+{
+    "mcp-server-metrics": {
+        "label": {
+            "name": "MCP Metrics",
+            "nameField": "Name",
+            "namePlaceholder": "MCP Server Metrics",
+            "runtime": "Runtime"
+        },
+        "status": {
+            "runtimeUnavailable": "runtime unavailable",
+            "duplicate": "duplicate",
+            "listening": "listening"
+        }
+    }
+}

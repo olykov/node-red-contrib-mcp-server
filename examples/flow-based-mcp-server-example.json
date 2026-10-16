@@ -31,7 +31,7 @@
         "type": "mcp-redis",
         "name": "MCP example storage",
         "mode": "memory",
-        "redisUrlEnv": "REDIS_URL",
+        "redisUrlEnv": "MCP_REDIS_URL",
         "host": "127.0.0.1",
         "port": 6379,
         "db": 0,

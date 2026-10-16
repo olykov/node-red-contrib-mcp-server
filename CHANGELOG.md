@@ -4,10 +4,59 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
-## Unreleased
+## 3.5.0 - 2026-10-17
 
-- README: deploy guidance follows Node-RED's deploy modes (Modified Nodes by default) and lists
-  what restarts an endpoint.
+- Dependencies: `ipaddr.js` is no longer a direct dependency; Trusted Proxies matching uses
+  `node:net` (`lib/cidr.js`). Runtime dependencies are `ajv`, `express`, `ioredis` and `jose`.
+- Node status texts come from the `locales/en-US` catalogs (`lib/messages.js`).
+- Release: `release.yml` reuses the CI matrix, publishes with npm trusted publishing and
+  provenance from the protected `npm` environment (no token), and creates the GitHub Release
+  only after a successful publish. CI also runs `npm run check:spec`; `REVIEW.md` records the
+  requirements verified by review.
+- Tests: fixed the MCP-PROTO-2 test (it now sends a token), added requirement markers for the
+  3.4 and 3.5 requirements and the section 6 invariants.
+- Validation: tool Input and Output Schema are compiled with Ajv (JSON Schema 2020-12) at
+  registration; invalid schemas, invalid tool names or a Tool Timeout above its endpoint's Tool
+  Timeout stop the tool from registering; call-time arguments are validated against the compiled
+  Input Schema.
+- Security: `mcp-runtime` Trusted Proxies (CIDR list) gate which `X-Forwarded-For` addresses are
+  trusted for audit/metrics `client`; Admin Token resolution now prefers the credential, then
+  Admin Token Env, then the deprecated `NODE_RED_ADMIN_API_TOKEN` (logs a warning instead of
+  silently overriding the credential); admin HTTP requests support HTTPS and a CA override.
+- Protocol: advertise `tools.listChanged: false`; `isError: true` tool results no longer carry a
+  JSON-RPC `error` object; `notifications/cancelled` frees the concurrency slot immediately and a
+  late flow response is dropped with a debug log instead of a warn "Orphan response".
+- Lifecycle: a deferred `restart` whose 1-second timer is still pending when the node closes now
+  calls `done()` exactly once; the Node-RED 0.x `done` shim is removed (Node-RED `>=5.0.0 <6.0.0`
+  always supplies `done`).
+- Storage/dependencies: in-memory auth storage uses a plain `Map` instead of `node-cache`;
+  identity-provider HTTP calls use the built-in `fetch` with response size/time limits instead of
+  `axios`; Redis client sets connect/command timeouts and disables offline queueing/retries so a
+  down Redis fails fast instead of hanging; `ipaddr.js` added for CIDR parsing.
+- i18n: editor labels, placeholders, tips, status texts and help panels moved from inline HTML to
+  `locales/en-US/*.json` and `*.html` message catalogs for all four nodes, enabling future
+  translations without touching node definitions.
+- Packaging: `package.json` gains `exports`, `publishConfig.access`, the `node-red` keyword, a
+  pinned `node-red: ">=5.0.0 <6.0.0"` range, `locales/` in `files`; `SECURITY.md` added; a tagged
+  release GitHub Actions workflow (`release.yml`) publishes to npm.
+- Documentation: "Upgrading to 3.5" migration guidance, a "Kubernetes" deployment section
+  (bindHost, trustedProxies, allowedOrigins, preStop pause, readiness/liveness, mandatory Redis
+  with multiple pods), and corrected the Admin Token precedence and tool-argument-validation notes.
+- Tests: Ajv validation, trusted-proxy client IP resolution, deferred-restart-close and
+  cancellation/concurrency-slot/late-response coverage, i18n catalog structure checks.
+
+## 3.4.0 - 2026-10-16
+
+- HTTP: normalize malformed and oversized JSON responses, include request IDs for internal
+  failures, avoid logging request bodies, and return retryable MCP storage failures.
+- Security: bind new runtimes to loopback, restrict browser origins, preserve legacy bind behavior
+  with a warning, and make Function code available only to explicitly permitted groups.
+- Registry: track tool ownership, omit duplicate names with a single conflict warning, and return
+  tools in deterministic order.
+- Tests and packaging: add real Node-RED integration coverage, a clean-userDir tarball smoke test,
+  strict unhandled-rejection handling, and a Node 22/24 × Node-RED 5.0/latest CI matrix.
+- Documentation: update the 3.4 migration guidance, deploy guidance, runtime help, and example
+  environment names.
 
 ## 3.3.0 - 2026-10-15
 

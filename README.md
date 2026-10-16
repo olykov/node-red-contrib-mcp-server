@@ -65,10 +65,63 @@ cd ~/.node-red
 npm link @olykov/node-red-mcp-server
 ```
 
+## Upgrading to 3.5
+
+The package now declares `node-red: ">=5.0.0 <6.0.0"` (was open-ended). Reinstall dependencies:
+`axios` and `node-cache` are gone, replaced by the built-in `fetch` (identity-provider HTTP
+calls) and a plain `Map` (in-memory token/session storage); `ajv` and `ipaddr.js` are new
+dependencies.
+
+Tool **Input Schema** and **Output Schema** are now compiled with Ajv (JSON Schema 2020-12) when
+the tool registers. A tool with an invalid schema, an invalid name (must match
+`^[a-z][a-z0-9_]{0,63}$`) or a **Tool Timeout** above its endpoint's **Tool Timeout** no longer
+registers; its status turns red (`invalid`) and the reason is logged with `node.warn`. At call
+time, arguments that fail the compiled Input Schema are rejected before the flow runs. To roll
+back a tool that no longer registers, fix its name, schema or timeout, or pin the 3.4.x release.
+
+`mcp-runtime` **Admin Token** resolution order changed: the **Admin Token** credential, then
+**Admin Token Env**, then the deprecated `NODE_RED_ADMIN_API_TOKEN` environment variable (which
+now logs a deprecation warning and no longer overrides the credential). Update any deployment
+that relied on `NODE_RED_ADMIN_API_TOKEN` taking priority.
+
+Behind a reverse proxy, set **Trusted Proxies** (CIDR list) on `mcp-runtime` so audit log and
+metrics `client` IPs use `X-Forwarded-For` only from those addresses; without it, every client is
+reported by the socket address.
+
+The MCP endpoint advertises `tools.listChanged: false` (the palette does not send
+`notifications/tools/list_changed`); `isError: true` tool results no longer include a
+JSON-RPC `error` object, matching the specification's distinction between protocol errors and
+tool execution errors. `notifications/cancelled` for an in-flight call now frees its concurrency
+slot immediately; a flow response that arrives after cancellation or timeout is dropped with a
+debug log line instead of a `warn` "Orphan response" line. A `restart` command whose 1-second
+timer is still pending when the node closes now calls its deferred `done()` exactly once instead
+of leaving it uncalled.
+
+Editor labels and help panels now come from `locales/en-US/*.json` and `*.html` message
+catalogs instead of inline HTML; non-English translations can be added under `locales/<lang>/`
+without touching the node definitions.
+
+See `README.md` "Kubernetes" below for `bindHost`, `trustedProxies`, `allowedOrigins` and probe
+guidance when running more than one pod. To roll back, pin the 3.4.x release; no other
+configuration changes are required.
+
 ## Upgrading to 3.2
 
 `tools/list` now requires a token. Clients that listed tools anonymously must sign in first;
 Claude Code and Codex do this on the HTTP 401. To roll back, pin the 3.1.0 commit.
+
+## Upgrading to 3.4
+
+New runtime nodes bind to `127.0.0.1` by default. Existing runtimes without a saved **Bind
+Host** keep listening on all interfaces for compatibility and log a warning; set the address
+explicitly after upgrade. If a browser-based MCP client connects from an origin different from
+the runtime **Base URL**, add that exact origin to **Allowed Origins**. Requests without an
+`Origin` header are unaffected.
+
+`get_flow` no longer advertises Function code by default. To allow it, enable **Allow Function
+Code** on the runtime and specify **Code Groups**. Only callers in those groups can request the
+code. Function code is passed to the MCP client without secret redaction, so enable this only
+for trusted users. To roll back, restore the previous runtime fields and pin the 3.3.x release.
 
 ## Upgrading to 3.1
 
@@ -102,7 +155,7 @@ the auth node ID; users sign in again.
 
 ## Flow Server Extensions
 
-`mcp-runtime` owns the local HTTP listener: port, base URL and optional admin API settings. Endpoints start automatically on Node-RED's `flows:started` event. Responses do not enable cross-origin browser access.
+`mcp-runtime` owns the local HTTP listener: port, bind host, base URL and optional admin API settings. New runtimes bind to loopback; use a reverse proxy or configure an explicit address when remote clients must connect. Endpoints start automatically on Node-RED's `flows:started` event. Browser requests are restricted to the Base URL origin and explicitly allowed origins.
 
 Base URL is required. It is the address clients and their browsers use to reach the MCP runtime,
 directly or through a proxy. It may be VPN-only; public internet exposure is not
@@ -193,8 +246,9 @@ requests already being answered, such as `get_flow` or a token exchange, finish 
 background, and the port stays open while any endpoint on it is running.
 
 Each endpoint runs at most 32 tool calls at once; further calls get JSON-RPC error `-32000`
-until one finishes. Tool arguments are not validated against the Input Schema, so the flow must
-check its own input.
+until one finishes. Tool arguments are validated against the compiled Input Schema before the
+flow runs; a tool whose Input or Output Schema fails to compile, or whose Tool Timeout exceeds
+its endpoint's Tool Timeout, does not register.
 
 Admin tools expose read-only `get_flow` only when the selected runtime has Admin Port, Admin Token, and Admin Endpoint Path configured, and the endpoint path exactly matches that Admin Endpoint Path.
 
@@ -370,13 +424,42 @@ The flow also receives the caller in `msg.mcp` (`subject`, `email`, `groups`, `c
 each `mcp-tool-execute` message. Retention and forwarding of the Node-RED log belong to the
 deployment.
 
+## Kubernetes
+
+Set **Bind Host** to the pod IP or `0.0.0.0` (not `127.0.0.1`) so the Service can reach the
+container, and set **Trusted Proxies** to the cluster's ingress/load-balancer CIDR so audit and
+metrics `client` IPs reflect the real caller instead of the proxy address. Set **Allowed Origins**
+to the public hostnames of any browser-based MCP client; the **Base URL** origin is always
+allowed.
+
+Use a `preStop` hook that sleeps at least as long as the endpoint's **Tool Timeout**
+(`toolTimeoutMs`, default 30000 ms) before Node-RED receives `SIGTERM`, so in-flight tool calls
+have time to finish instead of being cut off mid-response:
+
+```yaml
+lifecycle:
+  preStop:
+    exec:
+      command: ["sh", "-c", "sleep 30"]
+```
+
+Readiness and liveness probes can both be a TCP socket check on the runtime port (or an HTTP
+check against any registered endpoint path, which returns 401 without a token but proves the
+port accepts connections); liveness should have a longer timeout than readiness so a slow
+identity-provider round trip does not restart the pod.
+
+Running more than one pod requires `mcp-redis` in Redis mode: Memory mode keeps authorization
+state and opaque access tokens in process memory, so a second pod or a restarted pod cannot see
+sessions or tokens issued by another pod, and sign-ins and refreshes fail unpredictably behind a
+load balancer.
+
 ## Environment Variables
 
 | Variable | Used by | Notes |
 | --- | --- | --- |
 | `MCP_REDIS_URL` (default name) | `mcp-redis` in env mode | Any `MCP_*` name can be configured. |
 | `MCP_*` | `mcp-redis` Password Env, `mcp-auth` Secret Env | Names outside `MCP_` are rejected. |
-| `NODE_RED_ADMIN_API_TOKEN` | `mcp-runtime` admin tools | Overrides the Admin Token credential when set. Give it read-only Node-RED permissions; `get_flow` only issues GET requests. |
+| `NODE_RED_ADMIN_API_TOKEN` | `mcp-runtime` admin tools | Deprecated fallback, used only when neither the Admin Token credential nor Admin Token Env is set; logs a warning. Give it read-only Node-RED permissions; `get_flow` only issues GET requests. |
 
 ## Rollback
 

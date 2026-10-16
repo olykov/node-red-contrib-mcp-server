@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const EventEmitter = require('node:events');
-const axios = require('axios');
+const fetchMock = require('./helpers/fetch-mock');
 const { generateKeyPair, exportJWK, createLocalJWKSet, SignJWT } = require('jose');
 const { RefreshTokenStore, boundedTtl, reuseGrace, ACCESS_TTL, REFRESH_IDLE_TTL, SESSION_TTL } = require('../lib/refresh-tokens');
 const { MemoryAuthStorage, RedisAuthStorage } = require('../lib/auth-storage');
@@ -68,7 +68,7 @@ async function setup(t, options = {}) {
     const sign = async (nonce, claims = {}) => new SignJWT({ sub: state.subject, roles: state.roles,
         tid: tenant, ...(nonce ? { nonce } : {}), ...claims }).setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
         .setIssuer(auth.issuerUrl).setAudience(auth.clientId).setIssuedAt().setExpirationTime('1h').sign(privateKey);
-    t.mock.method(axios, 'post', async (_, body) => {
+    t.mock.method(fetchMock, 'post', async (_, body) => {
         const params = new URLSearchParams(body);
         state.posts.push(params);
         if (state.fail) throw state.fail;
@@ -76,7 +76,7 @@ async function setup(t, options = {}) {
             id_token: state.missingIdToken ? undefined : (state.idToken ||
                 await sign(params.get('grant_type') === 'authorization_code' ? 'initial-nonce' : undefined)) } };
     });
-    t.mock.method(axios, 'get', async path => {
+    t.mock.method(fetchMock, 'get', async path => {
         if (path === discovery.userinfo_endpoint) return { data: { sub: state.subject, groups: state.groups } };
         return { data: { client_id: path, redirect_uris: ['http://localhost/callback'] } };
     });
@@ -224,6 +224,7 @@ describe('rotating refresh tokens', () => {
         assert.equal((await context.refresh(res.body.refresh_token, { scope: 'offline_access' })).body.error, 'invalid_scope');
     });
 
+    // MCP-KEEP-3
     it('revokes the session on reuse, including its replacement refresh and access tokens', async t => {
         const context = await setup(t, { refreshReuseGraceSeconds: 0 });
         const initial = await context.code();
@@ -236,6 +237,7 @@ describe('rotating refresh tokens', () => {
         assert.ok(refreshEvent(context.state.logs, 'replay'));
     });
 
+    // MCP-KEEP-3
     it('returns the same encrypted rotation result under concurrent calls', async t => {
         const context = await setup(t);
         const initial = await context.code();
@@ -284,7 +286,7 @@ describe('rotating refresh tokens', () => {
 
     it('restores the claim after network, 503 and 429 errors without leaking provider details', async t => {
         const context = await setup(t);
-        for (const failure of [new axios.AxiosError('private provider details', 'ERR_NETWORK'),
+        for (const failure of [new fetchMock.MockHttpError('private provider details', 'ERR_NETWORK'),
             { code: 'ETIMEDOUT' }, { code: 'ECONNRESET' }, { code: 'ENOTFOUND' },
             { response: { status: 503 } }, { response: { status: 429, headers: { 'retry-after': '12' } } }]) {
             const initial = await context.code();
@@ -375,7 +377,7 @@ describe('rotating refresh tokens', () => {
         const initial = await context.code();
         const discovery = context.auth.discovery;
         context.auth.discovery = null;
-        const get = t.mock.method(axios, 'get', async () => { throw new Error('discovery unavailable'); });
+        const get = t.mock.method(fetchMock, 'get', async () => { throw new Error('discovery unavailable'); });
         assert.equal((await context.refresh(initial.body.refresh_token)).statusCode, 503);
         assert.equal((await context.auth.refreshStore.read(initial.body.refresh_token)).state, 'active');
         get.mock.restore();
@@ -442,7 +444,7 @@ describe('rotating refresh tokens', () => {
         const blocked = new Promise(resolve => { release = resolve; });
         const started = new Promise(resolve => { arrived = resolve; });
         let requests = 0;
-        t.mock.method(axios, 'post', async () => {
+        t.mock.method(fetchMock, 'post', async () => {
             if (++requests === 1) {
                 arrived();
                 await blocked;
@@ -593,7 +595,7 @@ describe('rotating refresh tokens', () => {
         const context = await setup(t);
         const initial = await context.code();
         const previous = (await context.auth.refreshStore.read(initial.body.refresh_token)).upstreamRefresh;
-        t.mock.method(axios, 'post', async () => ({ data: {
+        t.mock.method(fetchMock, 'post', async () => ({ data: {
             access_token: 'upstream-access', id_token: await context.sign()
         } }));
         const next = await context.refresh(initial.body.refresh_token);
@@ -601,6 +603,7 @@ describe('rotating refresh tokens', () => {
         assert.equal((await context.auth.refreshStore.read(next.body.refresh_token)).upstreamRefresh, previous);
     });
 
+    // MCP-KEEP-3
     it('rejects forged ciphertext and enforces provider namespace isolation', () => {
         const storage = new MemoryAuthStorage();
         const one = new RefreshTokenStore(() => storage, 'one', Buffer.from(key, 'hex'), 100, 200);
@@ -613,6 +616,7 @@ describe('rotating refresh tokens', () => {
         assert.throws(() => one.open(bytes.toString('base64')));
     });
 
+    // MCP-KEEP-3
     it('stores Redis sessions with an atomic CAS and can reload them through another store instance', async () => {
         const entries = new Map();
         const fake = { status: 'ready', async set(k, v) { entries.set(k, v); },

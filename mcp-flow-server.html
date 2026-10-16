@@ -8,9 +8,32 @@
                 return RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536;
             } },
             publicBaseUrl: { value: '', required: true, validate: RED.validators.regex(/^https?:\/\/[^\/]+/) },
+            bindHost: { value: '127.0.0.1', required: true },
+            allowedOrigins: { value: '', validate: function(v) {
+                return String(v || '').split(/[\s,]+/).filter(Boolean).every(function(value) {
+                    try {
+                        var url = new URL(value);
+                        return ['http:', 'https:'].indexOf(url.protocol) !== -1 && url.origin === value &&
+                            !url.username && !url.password;
+                    } catch (_) { return false; }
+                });
+            } },
+            trustedProxies: { value: '', validate: function(v) {
+                return String(v || '').split(/[\s,]+/).filter(Boolean).every(function(value) {
+                    return /^[0-9a-fA-F:.]+\/\d{1,3}$/.test(value);
+                });
+            } },
+            allowFunctionCode: { value: false },
+            codeGroups: { value: '', validate: function(v) {
+                return !$('#node-config-input-allowFunctionCode').prop('checked') || !!String(v || '').trim();
+            } },
             adminPort: { value: 1880, required: false, validate: function(v) {
                 return v === '' || (RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536);
             } },
+            adminTokenEnv: { value: '', validate: function(v) {
+                return !v || /^MCP_[A-Z0-9_]+$/.test(String(v).trim());
+            } },
+            adminCa: { value: '' },
             adminEndpointPath: { value: '' }
         },
         credentials: {
@@ -18,7 +41,7 @@
         },
         paletteLabel: 'MCP Runtime',
         label: function() {
-            return this.name || this.runtimeName || 'MCP Runtime';
+            return this.name || this.runtimeName || this._('mcp-runtime.label.paletteLabel');
         }
     });
 
@@ -31,7 +54,13 @@
             auth: { value: '', type: 'mcp-auth', required: true },
             serverName: { value: 'node-red-mcp-server', required: true },
             serverPath: { value: '/mcp', required: true },
-            allowedGroups: { value: '', required: true }
+            allowedGroups: { value: '', required: true },
+            toolTimeoutMs: { value: 30000, required: true, validate: function(v) {
+                return RED.validators.number()(v) && Number.isInteger(Number(v)) && v >= 1000 && v <= 600000;
+            } },
+            maxConcurrentCalls: { value: 32, required: true, validate: function(v) {
+                return RED.validators.number()(v) && Number.isInteger(Number(v)) && v >= 1 && v <= 1024;
+            } }
         },
         inputs: 1,
         outputs: 1,
@@ -40,30 +69,32 @@
         outputLabels: 'Tool calls (mcp-tool-execute)',
         icon: 'font-awesome/fa-cogs',
         label: function() {
-            return this.name || 'MCP Server';
+            return this.name || this._('mcp-flow-server.label.paletteLabel');
         },
         labelStyle: function() {
             return this.name ? 'node_label_italic' : '';
         },
         oneditprepare: function() {
+            var node = this;
             function loadFlowServers() {
                 $.ajax({ url: 'mcp-flow-servers', method: 'GET', timeout: 5000 })
                     .done(function(data) {
                         var statusDiv = $('#flow-servers-status').empty();
                         if (data.servers && data.servers.length > 0) {
-                            $('<h5>').text('Running Flow Servers:').appendTo(statusDiv);
+                            $('<h5>').text(node._('mcp-flow-server.label.statusRunningHeading')).appendTo(statusDiv);
                             var list = $('<ul>').appendTo(statusDiv);
                             data.servers.forEach(function(server) {
-                                var status = server.isRunning ? 'running' : 'stopped';
+                                var status = server.isRunning ?
+                                    node._('mcp-flow-server.label.statusRunning') : node._('mcp-flow-server.label.statusStopped');
                                 $('<li>').text(status + ' ' + server.serverName + ' ' + (server.path || '/mcp') +
                                     ' (port ' + server.port + ') - ' + server.toolCount + ' tools').appendTo(list);
                             });
                         } else {
-                            $('<p>').text('No flow servers currently running').appendTo(statusDiv);
+                            $('<p>').text(node._('mcp-flow-server.label.statusNone')).appendTo(statusDiv);
                         }
                     })
                     .fail(function() {
-                        $('#flow-servers-status').empty().append($('<p>').text('Failed to load flow server status'));
+                        $('#flow-servers-status').empty().append($('<p>').text(node._('mcp-flow-server.label.statusFetchFailed')));
                     });
             }
 
@@ -75,71 +106,109 @@
 
 <script type="text/html" data-template-name="mcp-runtime">
     <div class="form-row">
-        <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
-        <input type="text" id="node-config-input-name" placeholder="Optional display name">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-runtime.label.name"></span></label>
+        <input type="text" id="node-config-input-name" data-i18n="[placeholder]mcp-runtime.label.namePlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-runtimeName"><i class="fa fa-server"></i> Runtime Name</label>
-        <input type="text" id="node-config-input-runtimeName" placeholder="mcp-runtime">
+        <label for="node-config-input-runtimeName"><i class="fa fa-server"></i> <span data-i18n="mcp-runtime.label.runtimeName"></span></label>
+        <input type="text" id="node-config-input-runtimeName" data-i18n="[placeholder]mcp-runtime.label.runtimeNamePlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-serverPort"><i class="fa fa-plug"></i> Port</label>
-        <input type="text" id="node-config-input-serverPort" placeholder="8001">
+        <label for="node-config-input-serverPort"><i class="fa fa-plug"></i> <span data-i18n="mcp-runtime.label.port"></span></label>
+        <input type="text" id="node-config-input-serverPort" data-i18n="[placeholder]mcp-runtime.label.portPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-publicBaseUrl"><i class="fa fa-link"></i> Base URL</label>
-        <input type="text" id="node-config-input-publicBaseUrl" placeholder="https://mcp.example.com">
+        <label for="node-config-input-publicBaseUrl"><i class="fa fa-link"></i> <span data-i18n="mcp-runtime.label.baseUrl"></span></label>
+        <input type="text" id="node-config-input-publicBaseUrl" data-i18n="[placeholder]mcp-runtime.label.baseUrlPlaceholder">
     </div>
+    <div class="form-row">
+        <label for="node-config-input-bindHost"><i class="fa fa-sitemap"></i> <span data-i18n="mcp-runtime.label.bindHost"></span></label>
+        <input type="text" id="node-config-input-bindHost" data-i18n="[placeholder]mcp-runtime.label.bindHostPlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-allowedOrigins"><i class="fa fa-globe"></i> <span data-i18n="mcp-runtime.label.allowedOrigins"></span></label>
+        <input type="text" id="node-config-input-allowedOrigins" data-i18n="[placeholder]mcp-runtime.label.allowedOriginsPlaceholder">
+    </div>
+    <div class="form-tips" data-i18n="mcp-runtime.label.allowedOriginsTip"></div>
+    <div class="form-row">
+        <label for="node-config-input-trustedProxies"><i class="fa fa-share-alt"></i> <span data-i18n="mcp-runtime.label.trustedProxies"></span></label>
+        <input type="text" id="node-config-input-trustedProxies" data-i18n="[placeholder]mcp-runtime.label.trustedProxiesPlaceholder">
+    </div>
+    <div class="form-tips" data-i18n="mcp-runtime.label.trustedProxiesTip"></div>
 
     <hr>
-    <h4>Admin Tools</h4>
+    <h4 data-i18n="mcp-runtime.label.adminToolsHeading"></h4>
+    <div class="form-row">
+        <label for="node-config-input-allowFunctionCode" data-i18n="mcp-runtime.label.allowFunctionCode"></label>
+        <input type="checkbox" id="node-config-input-allowFunctionCode" style="width: auto;">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-codeGroups"><i class="fa fa-users"></i> <span data-i18n="mcp-runtime.label.codeGroups"></span></label>
+        <input type="text" id="node-config-input-codeGroups" data-i18n="[placeholder]mcp-runtime.label.codeGroupsPlaceholder">
+    </div>
+    <div class="form-tips" data-i18n="mcp-runtime.label.codeGroupsTip"></div>
 
     <div class="form-row">
-        <label for="node-config-input-adminPort"><i class="fa fa-plug"></i> Admin Port</label>
-        <input type="text" id="node-config-input-adminPort" placeholder="1880">
+        <label for="node-config-input-adminPort"><i class="fa fa-plug"></i> <span data-i18n="mcp-runtime.label.adminPort"></span></label>
+        <input type="text" id="node-config-input-adminPort" data-i18n="[placeholder]mcp-runtime.label.adminPortPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-adminToken"><i class="fa fa-key"></i> Admin Token</label>
-        <input type="password" id="node-config-input-adminToken" autocomplete="off" placeholder="NODE_RED_ADMIN_API_TOKEN overrides this when set">
+        <label for="node-config-input-adminToken"><i class="fa fa-key"></i> <span data-i18n="mcp-runtime.label.adminToken"></span></label>
+        <input type="password" id="node-config-input-adminToken" autocomplete="off">
     </div>
     <div class="form-row">
-        <label for="node-config-input-adminEndpointPath"><i class="fa fa-link"></i> Admin Path</label>
-        <input type="text" id="node-config-input-adminEndpointPath" placeholder="/mcp/admin">
+        <label for="node-config-input-adminTokenEnv"><i class="fa fa-key"></i> <span data-i18n="mcp-runtime.label.adminTokenEnv"></span></label>
+        <input type="text" id="node-config-input-adminTokenEnv" data-i18n="[placeholder]mcp-runtime.label.adminTokenEnvPlaceholder">
     </div>
-    <div class="form-tips mcp-admin-tools-note">
-        Admin tools are exposed only when Admin Port, Admin Token or NODE_RED_ADMIN_API_TOKEN, and Admin Endpoint Path are set, and an MCP Server on this runtime uses exactly that path.
+    <div class="form-row">
+        <label for="node-config-input-adminCa"><i class="fa fa-certificate"></i> <span data-i18n="mcp-runtime.label.adminCa"></span></label>
+        <textarea id="node-config-input-adminCa" rows="4" style="width: 70%; resize: vertical;"></textarea>
     </div>
+    <div class="form-row">
+        <label for="node-config-input-adminEndpointPath"><i class="fa fa-link"></i> <span data-i18n="mcp-runtime.label.adminEndpointPath"></span></label>
+        <input type="text" id="node-config-input-adminEndpointPath" data-i18n="[placeholder]mcp-runtime.label.adminEndpointPathPlaceholder">
+    </div>
+    <div class="form-tips mcp-admin-tools-note" data-i18n="mcp-runtime.label.adminToolsNote"></div>
 </script>
+
 
 <script type="text/html" data-template-name="mcp-flow-server">
     <div class="form-row">
-        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
-        <input type="text" id="node-input-name" placeholder="Optional display name">
+        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-flow-server.label.name"></span></label>
+        <input type="text" id="node-input-name" data-i18n="[placeholder]mcp-flow-server.label.namePlaceholder">
     </div>
 
     <div class="form-row">
-        <label for="node-input-runtime"><i class="fa fa-sitemap"></i> Runtime</label>
+        <label for="node-input-runtime"><i class="fa fa-sitemap"></i> <span data-i18n="mcp-flow-server.label.runtime"></span></label>
         <input type="text" id="node-input-runtime">
     </div>
     <div class="form-row">
-        <label for="node-input-auth"><i class="fa fa-lock"></i> Auth</label>
+        <label for="node-input-auth"><i class="fa fa-lock"></i> <span data-i18n="mcp-flow-server.label.auth"></span></label>
         <input type="text" id="node-input-auth">
     </div>
 
     <hr>
-    <h4>MCP Endpoint</h4>
+    <h4 data-i18n="mcp-flow-server.label.endpointHeading"></h4>
 
     <div class="form-row">
-        <label for="node-input-serverName"><i class="fa fa-server"></i> MCP Name</label>
-        <input type="text" id="node-input-serverName" placeholder="node-red-mcp-server">
+        <label for="node-input-serverName"><i class="fa fa-server"></i> <span data-i18n="mcp-flow-server.label.serverName"></span></label>
+        <input type="text" id="node-input-serverName" data-i18n="[placeholder]mcp-flow-server.label.serverNamePlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-input-serverPath"><i class="fa fa-link"></i> MCP Path</label>
-        <input type="text" id="node-input-serverPath" placeholder="/mcp">
+        <label for="node-input-serverPath"><i class="fa fa-link"></i> <span data-i18n="mcp-flow-server.label.serverPath"></span></label>
+        <input type="text" id="node-input-serverPath" data-i18n="[placeholder]mcp-flow-server.label.serverPathPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-input-allowedGroups"><i class="fa fa-users"></i> Groups</label>
-        <input type="text" id="node-input-allowedGroups" placeholder="Required, comma- or space-separated">
+        <label for="node-input-allowedGroups"><i class="fa fa-users"></i> <span data-i18n="mcp-flow-server.label.allowedGroups"></span></label>
+        <input type="text" id="node-input-allowedGroups" data-i18n="[placeholder]mcp-flow-server.label.allowedGroupsPlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-input-toolTimeoutMs"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-flow-server.label.toolTimeoutMs"></span></label>
+        <input type="number" id="node-input-toolTimeoutMs" min="1000" max="600000" step="1">
+    </div>
+    <div class="form-row">
+        <label for="node-input-maxConcurrentCalls"><i class="fa fa-tasks"></i> <span data-i18n="mcp-flow-server.label.maxConcurrentCalls"></span></label>
+        <input type="number" id="node-input-maxConcurrentCalls" min="1" max="1024" step="1">
     </div>
 
 
@@ -147,11 +216,11 @@
     <div class="form-row">
         <label></label>
         <button type="button" id="refresh-status-btn" class="red-ui-button">
-            <i class="fa fa-refresh"></i> Refresh Status
+            <i class="fa fa-refresh"></i> <span data-i18n="mcp-flow-server.label.refreshStatusButton"></span>
         </button>
     </div>
 
-    <div id="flow-servers-status" class="mcp-flow-server-status">Loading flow server status...</div>
+    <div id="flow-servers-status" class="mcp-flow-server-status" data-i18n="mcp-flow-server.label.statusLoading"></div>
 
     <style>
         .mcp-flow-server-status {
@@ -172,81 +241,4 @@
             background: var(--red-ui-secondary-background, #f8f9fa);
         }
     </style>
-</script>
-
-<script type="text/html" data-help-name="mcp-runtime">
-    <p>Local MCP HTTP listener shared by one or more MCP Server endpoints.</p>
-    <h3>Details</h3>
-    <p>Several endpoints may share one runtime port when their MCP paths differ.
-    The runtime also hosts the OAuth routes of the auth configurations used by its endpoints.</p>
-    <dl>
-        <dt>Port</dt>
-        <dd>Local HTTP port of the listener.</dd>
-        <dt>Base URL</dt>
-        <dd>Required. Client-facing base URL used in OAuth metadata and challenges, directly or through
-        a proxy. It may be reachable only over VPN. Endpoints do not start without it.</dd>
-        <dt>Admin Port</dt>
-        <dd>Local Node-RED Admin API port used by the read-only admin tools.</dd>
-        <dt>Admin Token</dt>
-        <dd>Bearer token for the local Node-RED Admin API, stored as a credential.
-        <code>NODE_RED_ADMIN_API_TOKEN</code> takes precedence when set.</dd>
-        <dt>Admin Path</dt>
-        <dd>Exact MCP path allowed to expose the read-only admin tools.</dd>
-    </dl>
-    <p>Admin tools are exposed only when Admin Port, a token and Admin Path are set and an
-    MCP Server on this runtime uses exactly that path.</p>
-    <h3>References</h3>
-    <ul>
-        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>
-    </ul>
-</script>
-
-<script type="text/html" data-help-name="mcp-flow-server">
-    <p>One MCP endpoint on a selected runtime. Tool calls are passed into the flow and answered
-    from the flow.</p>
-    <h3>Inputs</h3>
-    <dl class="message-properties">
-        <dt>topic <span class="property-type">string</span></dt>
-        <dd><code>mcp-tool-response</code> to answer a tool call, or a command:
-        <code>start</code>, <code>stop</code> or <code>restart</code>. Commands produce no output.</dd>
-        <dt class="optional">payload.command <span class="property-type">string</span></dt>
-        <dd>Command used when <code>topic</code> is not set.</dd>
-        <dt class="optional">payload.executionId <span class="property-type">string</span></dt>
-        <dd>For <code>mcp-tool-response</code>: the id received in the tool call.</dd>
-        <dt class="optional">payload.result <span class="property-type">any</span></dt>
-        <dd>Tool result: an MCP result object, content array, string or JSON value.</dd>
-        <dt class="optional">payload.error <span class="property-type">string | Error</span></dt>
-        <dd>Error text or object; the tool call fails with this message.</dd>
-    </dl>
-    <h3>Outputs</h3>
-    <dl class="message-properties">
-        <dt>topic <span class="property-type">string</span></dt>
-        <dd>Always <code>mcp-tool-execute</code>.</dd>
-        <dt>payload <span class="property-type">object</span></dt>
-        <dd><code>toolName</code>, <code>arguments</code> and <code>executionId</code>.</dd>
-        <dt>mcp <span class="property-type">object</span></dt>
-        <dd>Caller identity: <code>subject</code>, <code>email</code>, <code>groups</code>, <code>client</code>.</dd>
-    </dl>
-    <h3>Details</h3>
-    <p>The output carries only tool calls. Endpoint state is shown in the node status; tool
-    telemetry comes from the MCP metrics node. Every tool call requires OAuth; discovery
-    (<code>initialize</code>, <code>tools/list</code>) stays visible. A call fails after 30 seconds without a matching
-    <code>mcp-tool-response</code>.</p>
-    <dl>
-        <dt>Runtime</dt>
-        <dd>MCP runtime that listens on a port and hosts this endpoint path.</dd>
-        <dt>Auth</dt>
-        <dd>Required MCP auth configuration.</dd>
-        <dt>MCP Name</dt>
-        <dd>Name returned in MCP initialize responses.</dd>
-        <dt>MCP Path</dt>
-        <dd>HTTP JSON-RPC path, for example <code>/mcp/ops</code>. Only POST is served.</dd>
-        <dt>Groups</dt>
-        <dd>Required groups separated by commas or spaces. A user needs at least one of them; an
-        endpoint without groups does not start.</dd>
-    </dl>
-    <h3>References</h3>
-    <ul>
-        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>
-    </ul>
 </script>

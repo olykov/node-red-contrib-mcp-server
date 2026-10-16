@@ -1,0 +1,69 @@
+{
+    "mcp-runtime": {
+        "label": {
+            "paletteLabel": "MCP Runtime",
+            "name": "Name",
+            "namePlaceholder": "Optional display name",
+            "runtimeName": "Runtime Name",
+            "runtimeNamePlaceholder": "mcp-runtime",
+            "port": "Port",
+            "portPlaceholder": "8001",
+            "baseUrl": "Base URL",
+            "baseUrlPlaceholder": "https://mcp.example.com",
+            "bindHost": "Bind Host",
+            "bindHostPlaceholder": "127.0.0.1",
+            "allowedOrigins": "Allowed Origins",
+            "allowedOriginsPlaceholder": "https://console.example.com",
+            "allowedOriginsTip": "The Base URL origin is allowed automatically. Add exact origins only for trusted browser clients.",
+            "trustedProxies": "Trusted Proxies",
+            "trustedProxiesPlaceholder": "10.0.0.0/8, 2001:db8::/32",
+            "trustedProxiesTip": "Only configure proxy CIDRs that you control. Forwarded client addresses are ignored unless the TCP peer is trusted.",
+            "adminToolsHeading": "Admin Tools",
+            "allowFunctionCode": "Allow Function Code",
+            "codeGroups": "Code Groups",
+            "codeGroupsPlaceholder": "Required when Function code is enabled",
+            "codeGroupsTip": "Function code is sent to the MCP client and is not redacted. Enable only for trusted groups.",
+            "adminPort": "Admin Port",
+            "adminPortPlaceholder": "1880",
+            "adminToken": "Admin Token",
+            "adminTokenEnv": "Admin Token Env",
+            "adminTokenEnvPlaceholder": "MCP_ADMIN_TOKEN",
+            "adminCa": "Admin API CA",
+            "adminEndpointPath": "Admin Path",
+            "adminEndpointPathPlaceholder": "/mcp/admin",
+            "adminToolsNote": "Admin tools require an Admin Token or Admin Token Env and an Admin Endpoint Path matching an MCP Server. HTTPS uses normal certificate verification; provide a private CA certificate when needed."
+        }
+    },
+    "mcp-flow-server": {
+        "label": {
+            "paletteLabel": "MCP Server",
+            "name": "Name",
+            "namePlaceholder": "Optional display name",
+            "runtime": "Runtime",
+            "auth": "Auth",
+            "endpointHeading": "MCP Endpoint",
+            "serverName": "MCP Name",
+            "serverNamePlaceholder": "node-red-mcp-server",
+            "serverPath": "MCP Path",
+            "serverPathPlaceholder": "/mcp",
+            "allowedGroups": "Groups",
+            "allowedGroupsPlaceholder": "Required, comma- or space-separated",
+            "toolTimeoutMs": "Tool Timeout (ms)",
+            "maxConcurrentCalls": "Max Concurrent Calls",
+            "refreshStatusButton": "Refresh Status",
+            "statusLoading": "Loading flow server status...",
+            "statusRunningHeading": "Running Flow Servers:",
+            "statusNone": "No flow servers currently running",
+            "statusFetchFailed": "Failed to load flow server status",
+            "statusRunning": "running",
+            "statusStopped": "stopped"
+        },
+        "status": {
+            "error": "error",
+            "stopped": "stopped",
+            "starting": "starting...",
+            "stopping": "stopping...",
+            "running": "running :{{port}}"
+        }
+    }
+}

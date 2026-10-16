@@ -1,0 +1,61 @@
+<script type="text/html" data-help-name="mcp-redis">
+    <p>Storage for MCP authorization state, authorization codes, access tokens and refresh sessions.</p>
+    <h3>Details</h3>
+    <dl>
+        <dt>Mode</dt>
+        <dd><code>Memory</code> for local tests only: every restart or deploy clears all sessions, so
+        users sign in again. <code>Redis URL from environment</code> or
+        <code>Manual Redis settings</code> keep sessions across restarts.</dd>
+        <dt>URL Env</dt>
+        <dd>Environment variable holding the Redis URL, default <code>MCP_REDIS_URL</code>.</dd>
+        <dt>Host, Port, DB, TLS, Username</dt>
+        <dd>Manual Redis connection settings.</dd>
+        <dt>Password, Password Env</dt>
+        <dd>Redis password as a credential, or the name of an environment variable that holds it.</dd>
+        <dt>Environment variable names</dt>
+        <dd>Must start with <code>MCP_</code>, so a configuration cannot read other process secrets.</dd>
+        <dt>Key Prefix</dt>
+        <dd>Prefix for every stored key.</dd>
+    </dl>
+    <p>Connection errors are reported as warnings at most once a minute.</p>
+</script>
+
+<script type="text/html" data-help-name="mcp-auth">
+    <p>OAuth authorization for MCP endpoints, backed by Microsoft Entra ID or another OIDC provider.</p>
+    <h3>Details</h3>
+    <p>The selected provider tab is active. Secrets are stored as credentials or read from
+    environment variables whose names start with <code>MCP_</code>. An invalid configuration is reported in the log and every endpoint that
+    uses it refuses to start.</p>
+    <dl>
+        <dt>Slug</dt>
+        <dd>Stable OAuth route name. Register
+        <code>https://your-nodered-host/oauth/your-slug/callback</code> with the provider. Slugs
+        must be unique across separate auth configurations on the same listener or base URL.</dd>
+        <dt>Microsoft Entra ID</dt>
+        <dd>Single-tenant v2 issuer from Tenant ID; roles from the verified ID token; scopes
+        <code>openid profile email</code>. At least one app role is required.</dd>
+        <dt>OIDC</dt>
+        <dd>Configured issuer, UserInfo groups and scopes <code>openid profile email groups</code>.</dd>
+        <dt>Refresh Key</dt>
+        <dd>64 hex characters (<code>openssl rand -hex 32</code>) that encrypt stored provider
+        refresh tokens. Without it no refresh tokens are issued.</dd>
+        <dt>Client Hosts</dt>
+        <dd>Hosts allowed
+        <code>claude.ai</code>; use <code>*.example.com</code> to allow subdomains.</dd>
+        <dt>Storage</dt>
+        <dd>MCP auth storage; use Redis for sessions that must survive restarts.</dd>
+        <dt>Access TTL, Refresh TTL, Session TTL</dt>
+        <dd>Seconds. Access tokens last at most 15 minutes, refresh sessions expire after at most 7 idle
+        days and at most 21 days in total; refresh never extends the total. An identical refresh
+        retry within 30 seconds gets the same result; provider outages answer
+        <code>temporarily_unavailable</code> without revoking the session.</dd>
+    </dl>
+    <p>Sessions belong to the provider identity and slug, not to this node's ID: a replacement
+    node with the same settings keeps users signed in. Changing provider, issuer, client ID,
+    group claim or slug, or switching storage, ends all existing sessions.</p>
+    <h3>References</h3>
+    <ul>
+        <li><a href="https://datatracker.ietf.org/doc/html/rfc6749">RFC 6749 OAuth 2.0</a></li>
+        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol authorization</a></li>
+    </ul>
+</script>

@@ -15,6 +15,7 @@ function createRuntime(config = {}) {
     const RED = {
         events,
         log: { debug() {} },
+        settings: config.__settings || {},
         nodes: {
             createNode(node, nodeConfig) {
                 Object.setPrototypeOf(node, EventEmitter.prototype);
@@ -52,6 +53,7 @@ function createRuntime(config = {}) {
         id: 'runtime-1',
         runtimeName: 'test-runtime',
         serverPort: 18001,
+        bindHost: '127.0.0.1',
         publicBaseUrl: 'https://mcp.example.test'
     }, config.__runtime || {});
     const runtimeNode = new types['mcp-runtime'](runtimeConfig);
@@ -88,11 +90,12 @@ function mockRes() {
     };
 }
 
-function mockReq(body, headers = {}) {
+function mockReq(body, headers = {}, remoteAddress = '127.0.0.1') {
     return {
         body,
         headers: Object.assign({ host: 'mcp.example.test' }, headers),
-        path: '/mcp/test'
+        path: '/mcp/test',
+        socket: { remoteAddress }
     };
 }
 
@@ -168,12 +171,61 @@ describe('upstream mcp-flow-server local extensions', () => {
         });
     });
 
+    // MCP-REG-1
+    it('omits duplicate endpoint tools and restores the remaining owner on unregister', () => {
+        const { RED, types, server } = buildServer();
+        require('../mcp-tool-registry')(RED);
+        server.initializeServer();
+        const first = new types['mcp-tool-registry']({ id: 'duplicate-a', toolName: 'same_tool',
+            endpoint: server.serverPath, toolSchema: '{"type":"object","properties":{}}' });
+        const second = new types['mcp-tool-registry']({ id: 'duplicate-b', toolName: 'same_tool',
+            endpoint: server.serverPath, toolSchema: '{"type":"object","properties":{}}' });
+        first.registerTool();
+        second.registerTool();
+
+        assert.deepStrictEqual(server.registeredTools().map(tool => tool.name), []);
+        assert.equal(first.statuses.at(-1).text, 'duplicate');
+        assert.equal(second.statuses.at(-1).text, 'duplicate');
+        assert.equal(server.warnings.filter(message => message.includes('Duplicate MCP tool name')).length, 1);
+
+        first.unregisterTool();
+        assert.deepStrictEqual(server.registeredTools().map(tool => tool.registeredBy), ['duplicate-b']);
+        assert.equal(second.statuses.at(-1).text, 'registered');
+    });
+
+    // MCP-REG-2, MCP-REG-3
+    it('uses endpoint tools instead of same-name shared tools and sorts the list deterministically', () => {
+        const { RED, server } = buildServer();
+        RED.events.emit('mcp-tool-register', { name: 'zeta', description: 'Z', registeredBy: 'z',
+            inputSchema: { type: 'object', properties: {} } });
+        RED.events.emit('mcp-tool-register', { name: 'same', description: 'Shared', registeredBy: 'shared',
+            inputSchema: { type: 'object', properties: {} } });
+        RED.events.emit('mcp-tool-register', { name: 'same', description: 'Bound', endpointPath: server.serverPath,
+            registeredBy: 'bound', inputSchema: { type: 'object', properties: {} } });
+        RED.events.emit('mcp-tool-register', { name: 'alpha', description: 'A', registeredBy: 'alpha',
+            inputSchema: { type: 'object', properties: {} } });
+
+        const response = mockRes();
+        server.handleToolsList({ id: 1 }, response);
+        assert.deepStrictEqual(response.body.result.tools.map(tool => tool.name), ['alpha', 'same', 'zeta']);
+        assert.equal(response.body.result.tools[1].description, 'Bound');
+    });
+
     it('requires an explicit runtime config node before starting', () => {
         const runtime = createRuntime({ runtime: '' });
 
         assert.strictEqual(runtime.server.runtime, null);
         assert.strictEqual(runtime.server.serverPort, 0);
         assert.throws(() => runtime.server.initializeServer(), /MCP runtime is required/);
+    });
+
+    // MCP-NET-2
+    it('preserves all-interface binding for legacy runtimes and warns once', () => {
+        const { runtimeNode } = buildServer({ __runtime: { bindHost: '' } });
+        assert.equal(runtimeNode.bindHost, '');
+        assert.deepStrictEqual(runtimeNode.warnings, [
+            'MCP runtime bindHost is not set; listening on all interfaces for backward compatibility'
+        ]);
     });
 
     it('uses endpoint fields with runtime transport config', () => {
@@ -346,6 +398,32 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(RED.events.listenerCount('runtime-event'), 0);
     });
 
+    // MCP-ADM-3
+    it('reads the admin API root and host from RED.settings instead of the loopback default', async () => {
+        const http = require('node:http');
+        const received = [];
+        const admin = http.createServer((req, res) => {
+            received.push(req.url);
+            res.writeHead(200, { 'content-type': 'application/json', connection: 'close' });
+            res.end(JSON.stringify({ id: 'tab1', label: 'Operations', disabled: false, nodes: [] }));
+        });
+        await new Promise(resolve => admin.listen(0, '127.0.0.1', resolve));
+        const adminPort = admin.address().port;
+        try {
+            const { server } = buildServer({
+                id: 'admin-endpoint', serverPath: '/mcp/ops',
+                __settings: { httpAdminRoot: '/admin', uiHost: '127.0.0.1', uiPort: adminPort },
+                __runtime: { adminEndpointPath: '/mcp/ops', credentials: { adminToken: 'configured-value' } }
+            });
+            const flow = (await server.adminTools.callTool('get_flow', { id: 'tab1' })).structuredContent;
+            assert.equal(flow.tab.id, 'tab1');
+            assert.deepStrictEqual(received, ['/admin/flow/tab1']);
+        } finally {
+            if (admin.closeAllConnections) admin.closeAllConnections();
+            await new Promise(resolve => admin.close(resolve));
+        }
+    });
+
     it('publishes admin calls through the runtime metrics source without changing the MCP response', async () => {
         const { server, runtimeNode, types } = buildServer({
             serverName: 'ops',
@@ -397,6 +475,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.ok(!JSON.stringify(metrics.sent[0]).includes('private-request-value'));
     });
 
+    // MCP-KEEP-6
     it('emits one bounded runtime event for a flow tool call', async () => {
         const { RED, server, runtimeNode, types } = buildServer();
         RED.events.emit('mcp-tool-register', {
@@ -415,7 +494,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         server.emit('input', {
             topic: 'mcp-tool-response',
             payload: { executionId: execution.payload.executionId, result: { secret: 'private-result' } }
-        });
+        }, () => {}, () => {});
         await pending;
 
         assert.equal(response.body.result.content[0].text, JSON.stringify({ secret: 'private-result' }));
@@ -459,6 +538,39 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(server.activeToolCalls, 0);
     });
 
+    // MCP-PROTO-7
+    it('releases the concurrency slot on notifications/cancelled and ignores the late flow response with a debug log', async () => {
+        const { RED, server } = buildServer();
+        RED.events.emit('mcp-tool-register', {
+            name: 'sample_ping', description: 'Sample', inputSchema: { type: 'object', properties: {} }
+        });
+        const response = mockRes();
+        const pending = server.handleToolCall({ id: 42, params: { name: 'sample_ping', arguments: {} } }, response);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(server.activeToolCalls, 1);
+        const execution = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
+
+        await server.handleMcpHttpRequest(
+            mockReq({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 42 } }),
+            mockRes()
+        );
+        await pending;
+        assert.equal(response.body.result.isError, true);
+        assert.equal(response.body.result.content[0].text, 'Tool execution cancelled');
+        assert.equal(server.activeToolCalls, 0, 'concurrency slot must be released on cancellation');
+
+        const debugCalls = [];
+        server.debug = message => debugCalls.push(message);
+        server.emit('input', {
+            topic: 'mcp-tool-response',
+            payload: { executionId: execution.payload.executionId, result: 'late' }
+        }, () => {}, () => {});
+        assert.equal(debugCalls.length, 1);
+        assert.match(debugCalls[0], /late or cancelled/);
+        assert.equal(server.warnings.length, 0, 'the late response must not raise an Orphan warning');
+    });
+
+    // MCP-PROTO-6
     it('tracks flow errors and rejects legacy direct calls', async () => {
         const { RED, server, runtimeNode, types } = buildServer();
         RED.events.emit('mcp-tool-register', {
@@ -558,7 +670,8 @@ describe('upstream mcp-flow-server local extensions', () => {
             jsonrpc: '2.0', id: 1, method: 'tools/call',
             params: { name: 'sample_ping', arguments: {} }
         }, { authorization: 'Bearer test-token' }), response);
-        assert.equal(response.body.error.message, 'Tool execution timeout');
+        assert.equal(response.body.result.isError, true);
+        assert.equal(response.body.result.content[0].text, 'Tool execution timeout');
         assert.equal(metrics.sent.length, 1);
         assert.equal(metrics.sent[0].payload.tool, 'sample_ping');
         assert.equal(metrics.sent[0].payload.status, 'failed');
@@ -682,6 +795,7 @@ describe('upstream mcp-flow-server local extensions', () => {
                     credentials: { adminToken: '' }
                 }
             });
+
             const res = mockRes();
             server.handleToolsList({ id: 1 }, res);
             assert.ok(res.body.result.tools.some(tool => tool.name === 'get_flow'));
@@ -689,6 +803,79 @@ describe('upstream mcp-flow-server local extensions', () => {
         {
             delete process.env.NODE_RED_ADMIN_API_TOKEN;
         }
+    });
+
+    // MCP-ADM-4
+    it('prioritizes the credential admin token, then Admin Token Env, then warns once for the legacy env var', () => {
+        process.env.NODE_RED_ADMIN_API_TOKEN = 'legacy-value';
+        process.env.MCP_CUSTOM_ADMIN_TOKEN = 'env-value';
+        try
+        {
+            const { runtimeNode: withCredential } = createRuntime({ __runtime: {
+                id: 'runtime-credential', serverPort: 18008,
+                credentials: { adminToken: 'credential-value' }, adminTokenEnv: 'MCP_CUSTOM_ADMIN_TOKEN'
+            } });
+            assert.equal(withCredential.adminToken, 'credential-value');
+            assert.ok(!withCredential.warnings.some(message => message.includes('NODE_RED_ADMIN_API_TOKEN')));
+
+            const { runtimeNode: withEnvName } = createRuntime({ __runtime: {
+                id: 'runtime-env-name', serverPort: 18009,
+                credentials: { adminToken: '' }, adminTokenEnv: 'MCP_CUSTOM_ADMIN_TOKEN'
+            } });
+            assert.equal(withEnvName.adminToken, '');
+            assert.equal(withEnvName.adminTokenEnv, 'MCP_CUSTOM_ADMIN_TOKEN');
+            assert.ok(!withEnvName.warnings.some(message => message.includes('NODE_RED_ADMIN_API_TOKEN')));
+
+            const { runtimeNode: legacyOnly } = createRuntime({ __runtime: {
+                id: 'runtime-legacy', serverPort: 18010, credentials: { adminToken: '' }
+            } });
+            assert.equal(legacyOnly.adminToken, '');
+            assert.ok(legacyOnly.warnings.some(message =>
+                message.includes('NODE_RED_ADMIN_API_TOKEN is deprecated')));
+            assert.equal(legacyOnly.warnings.filter(message =>
+                message.includes('NODE_RED_ADMIN_API_TOKEN is deprecated')).length, 1);
+        } finally
+        {
+            delete process.env.NODE_RED_ADMIN_API_TOKEN;
+            delete process.env.MCP_CUSTOM_ADMIN_TOKEN;
+        }
+    });
+
+    // MCP-ADM-1
+    it('advertises and returns Function code only for configured groups', async () => {
+        delete process.env.NODE_RED_ADMIN_API_TOKEN;
+        const { server, nodeMap } = buildServer({
+            serverPath: '/mcp/ops',
+            __runtime: { adminPort: 1881, adminEndpointPath: '/mcp/ops',
+                credentials: { adminToken: 'configured-value' }, allowFunctionCode: true,
+                codeGroups: 'MCP.CodeReaders' }
+        });
+        nodeMap['default-auth'].readAccessToken = async () => ({
+            groups: ['MCP.CodeReaders'], scopes: ['openid'], subject: 'reader'
+        });
+        const unprivileged = mockRes();
+        server.handleToolsList({ id: 1 }, unprivileged, { groups: ['MCP.Users'] });
+        assert.ok(!Object.hasOwn(unprivileged.body.result.tools.find(tool => tool.name === 'get_flow')
+            .inputSchema.properties, 'includeCode'));
+        const privileged = mockRes();
+        server.handleToolsList({ id: 2 }, privileged, { groups: ['MCP.CodeReaders'] });
+        assert.ok(Object.hasOwn(privileged.body.result.tools.find(tool => tool.name === 'get_flow')
+            .inputSchema.properties, 'includeCode'));
+        const deniedCall = mockRes();
+        await server.handleToolCall({ id: 3, params: {
+            name: 'get_flow', arguments: { includeCode: true }
+        } }, deniedCall, { groups: ['MCP.Users'] });
+        assert.equal(deniedCall.body.error.code, -32602);
+        server.adminTools.callTool = async (name, args, claims) => {
+            assert.equal(name, 'get_flow');
+            assert.equal(args.includeCode, true);
+            assert.ok(server.canIncludeFunctionCode(claims));
+            return { content: [] };
+        };
+        const response = mockRes();
+        await server.handleToolCall({ id: 4, params: { name: 'get_flow', arguments: { includeCode: true } } },
+            response, { groups: ['MCP.CodeReaders'] });
+        assert.equal(response.statusCode, 200);
     });
 
     it('keeps same tool name isolated across endpoint bindings', () => {
@@ -725,7 +912,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         server.emit('input', {
             topic: 'mcp-tool-response',
             payload: { executionId: exec.payload.executionId, result: { ok: true, received: exec.payload.arguments } }
-        });
+        }, () => {}, () => {});
         await pending;
     });
 
@@ -753,7 +940,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         replacement.emit('input', {
             topic: 'mcp-tool-response',
             payload: { executionId: exec.payload.executionId, result: { ok: true, replacement: true } }
-        });
+        }, () => {}, () => {});
 
         await pending;
         assert.deepStrictEqual(res.body.result, { content: [{ type: 'text', text: JSON.stringify({ ok: true, replacement: true }) }] });
@@ -1051,6 +1238,7 @@ describe('tool-level OAuth discovery', () => {
         assert.equal(context.executions(), 0);
     });
 
+    // MCP-KEEP-1
     it('fails closed when required auth configuration is unresolved', async () => {
         for (const auth of ['', 'missing-auth']) {
             const { server } = buildServer({ auth });
@@ -1074,6 +1262,7 @@ describe('tool-level OAuth discovery', () => {
         assert.equal(server.sent.length, 0);
     });
 
+    // MCP-PROTO-4, MCP-KEEP-1
     it('serves the anonymous handshake and challenges everything else over HTTP', async () => {
         const context = setup({ serverPort: 18114 });
         const server = context.server;
@@ -1115,8 +1304,11 @@ describe('tool-level OAuth discovery', () => {
 });
 
 describe('automatic runtime startup without CORS', () => {
+    // MCP-NET-3
     it('starts shared endpoints after flow startup and can stop and start them again', async () => {
-        const context = createRuntime({ __runtime: { serverPort: 18116 } });
+        const context = createRuntime({ __runtime: {
+            serverPort: 18116, allowedOrigins: 'https://browser.example.test'
+        } });
         const second = new context.types['mcp-flow-server']({ id: 'endpoint-second',
             runtime: context.runtimeNode.id, auth: 'default-auth', serverPath: '/mcp/second' });
         const endpoints = [context.server, second];
@@ -1193,6 +1385,35 @@ describe('automatic runtime startup without CORS', () => {
         assert.equal(RED.events.listenerCount('flows:started'), 0);
         RED.events.emit('flows:started');
         assert.equal(starts, 0);
+    });
+
+    // MCP-NET-1
+    it('keeps a persistent server error listener and reports post-start failures', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18118 } });
+        try {
+            await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+            server.httpServer.emit('error', new Error('simulated socket failure'));
+            assert.equal(server.isRunning, false);
+            assert.deepStrictEqual(server.statuses.at(-1), { fill: 'red', shape: 'dot', text: 'error' });
+            assert.ok(server.errors.some(message => message.includes('simulated socket failure')));
+        } finally {
+            await new Promise(resolve => server.emit('close', resolve));
+        }
+    });
+
+    it('rejects disallowed browser origins before parsing the request body', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18119 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            const response = await fetch('http://127.0.0.1:18119/mcp/test', {
+                method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example.test' },
+                body: '{invalid-json'
+            });
+            assert.equal(response.status, 403);
+            assert.deepStrictEqual(await response.json(), { error: 'origin_not_allowed' });
+        } finally {
+            await new Promise(resolve => server.emit('close', resolve));
+        }
     });
 });
 
@@ -1342,6 +1563,19 @@ describe('Creating Nodes review fixes', () => {
         assert.ok(!server.sent.slice(sentBefore).some(msg => msg.topic === 'mcp-server-started'));
     });
 
+    // MCP-LIFE-1
+    it('calls the deferred restart done exactly once when close happens during the 1s timer', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18130 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        let restartDoneCalls = 0;
+        server.emit('input', { topic: 'restart' }, () => {}, () => { restartDoneCalls++; });
+        await new Promise(resolve => setTimeout(resolve, 50));
+        assert.strictEqual(restartDoneCalls, 0);
+        await new Promise(resolve => server.emit('close', resolve));
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        assert.strictEqual(restartDoneCalls, 1);
+    });
+
     it('does not send stopped events or status while closing', async () => {
         const { server } = createRuntime({ __runtime: { serverPort: 18119 } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
@@ -1427,10 +1661,55 @@ describe('3.0 configuration rules', () => {
             await health.text();
             const pending = server.handleToolCall({ id: 1, params: { name: 'ping', arguments: {} } }, mockRes());
             const exec = server.sent.find(msg => msg.topic === 'mcp-tool-execute');
-            server.emit('input', { topic: 'mcp-tool-response', payload: { executionId: exec.payload.executionId, result: 'ok' } });
+            server.emit('input', { topic: 'mcp-tool-response', payload: { executionId: exec.payload.executionId, result: 'ok' } }, () => {}, () => {});
             await pending;
         } finally { await new Promise(resolve => server.emit('close', resolve)); }
         assert.deepStrictEqual(server.sent.map(msg => msg.topic), ['mcp-tool-execute']);
+    });
+});
+
+describe('protocol version header and JSON-RPC batch handling', () => {
+    // MCP-PROTO-2
+    it('enforces the MCP-Protocol-Version header after initialize while accepting a missing header', async () => {
+        const { server, nodeMap } = createRuntime({ __runtime: { serverPort: 18150 } });
+        nodeMap['default-auth'].readAccessToken = async () => ({ groups: ['test-group'], scopes: ['openid'] });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            const call = headers => fetch('http://127.0.0.1:18150/mcp/test', {
+                method: 'POST',
+                headers: Object.assign({ 'content-type': 'application/json', authorization: 'Bearer test-token' }, headers),
+                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+            });
+            const supported = await call({ 'mcp-protocol-version': '2025-06-18' });
+            assert.equal(supported.status, 200);
+            const missing = await call({});
+            assert.equal(missing.status, 200);
+            const unsupported = await call({ 'mcp-protocol-version': '2024-11-05' });
+            assert.equal(unsupported.status, 400);
+            assert.deepStrictEqual(await unsupported.json(), {
+                jsonrpc: '2.0', id: 1, error: { code: -32600, message: 'Unsupported MCP-Protocol-Version' }
+            });
+        } finally { await new Promise(resolve => server.emit('close', resolve)); }
+    });
+
+    // MCP-PROTO-5
+    it('rejects DELETE on the MCP path with 405 and JSON-RPC batch arrays with -32600', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18151 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            const deleted = await fetch('http://127.0.0.1:18151/mcp/test', { method: 'DELETE' });
+            assert.equal(deleted.status, 405);
+            assert.deepStrictEqual(await deleted.json(), { error: 'method_not_allowed' });
+
+            const batch = await fetch('http://127.0.0.1:18151/mcp/test', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify([{ jsonrpc: '2.0', id: 1, method: 'tools/list' }])
+            });
+            assert.equal(batch.status, 400);
+            assert.deepStrictEqual(await batch.json(), {
+                jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid request' }
+            });
+        } finally { await new Promise(resolve => server.emit('close', resolve)); }
     });
 });
 
@@ -1438,6 +1717,7 @@ describe('audit log and OAuth hardening', () => {
     const events = (lines, name) => lines.map(line => { try { return JSON.parse(line); } catch { return null; } })
         .filter(entry => entry && entry.event === name);
 
+    // MCP-KEEP-6
     it('audits tool calls with the caller and passes the identity to the flow, never the arguments', async () => {
         const { RED, server, nodeMap } = createRuntime();
         nodeMap['default-auth'].readAccessToken = async token => token === 'test-token' ? { groups: ['test-group'],
@@ -1462,7 +1742,7 @@ describe('audit log and OAuth hardening', () => {
     });
 
     it('audits rejected tokens but not the anonymous start of sign-in', async () => {
-        const { server } = createRuntime();
+        const { server } = createRuntime({ __runtime: { trustedProxies: '127.0.0.1/32' } });
         await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x' } }), mockRes());
         assert.strictEqual(events(server.logs, 'mcp.auth').length, 0);
         await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'x' } },
@@ -1473,12 +1753,31 @@ describe('audit log and OAuth hardening', () => {
         assert.ok(!server.logs.join('\n').includes('stolen'));
     });
 
+    // MCP-STO-2
+    it('ignores a forwarded header from a socket that is not a trusted proxy', async () => {
+        const { server } = createRuntime({ __runtime: { trustedProxies: '198.51.100.1/32' } });
+        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x' } },
+            { authorization: 'Bearer invalid-test-token', 'x-forwarded-for': '203.0.113.5' }, '192.0.2.9'), mockRes());
+        const [denied] = events(server.logs, 'mcp.auth');
+        assert.strictEqual(denied.ip, '192.0.2.9');
+    });
+
+    // MCP-STO-2
+    it('resolves the original client address from a two-hop forwarded chain behind trusted proxies', async () => {
+        const { server } = createRuntime({ __runtime: { trustedProxies: '127.0.0.1/32,10.0.0.0/8' } });
+        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x' } },
+            { authorization: 'Bearer invalid-test-token', 'x-forwarded-for': '203.0.113.5, 10.0.0.2' }), mockRes());
+        const [denied] = events(server.logs, 'mcp.auth');
+        assert.strictEqual(denied.ip, '203.0.113.5');
+    });
+
     it('audits start, stop and restart commands', async () => {
         const { server } = createRuntime({ runtime: 'missing-runtime' });
         await new Promise(resolve => server.emit('input', { topic: 'stop' }, () => {}, resolve));
         assert.deepStrictEqual(events(server.logs, 'mcp.command').map(entry => entry.command), ['stop']);
     });
 
+    // MCP-KEEP-1
     it('refuses to start without a Base URL or without groups', () => {
         assert.throws(() => createRuntime({ __runtime: { publicBaseUrl: '' } }).server.initializeServer(), /Base URL is required/);
         assert.throws(() => createRuntime({ allowedGroups: '' }).server.initializeServer(), /Groups are required/);
@@ -1491,15 +1790,102 @@ describe('audit log and OAuth hardening', () => {
         assert.strictEqual(res.body.result.serverInfo.version, require('../package.json').version);
     });
 
+    // MCP-PROTO-1
+    it('negotiates the requested protocol version or falls back to the newest supported one', () => {
+        const { server } = createRuntime();
+        const supported = mockRes();
+        server.handleInitialize({ id: 1, params: { protocolVersion: '2025-06-18' } }, supported);
+        assert.equal(supported.body.result.protocolVersion, '2025-06-18');
+        const latest = mockRes();
+        server.handleInitialize({ id: 2, params: { protocolVersion: '2025-11-25' } }, latest);
+        assert.equal(latest.body.result.protocolVersion, '2025-11-25');
+        const unsupported = mockRes();
+        server.handleInitialize({ id: 3, params: { protocolVersion: '2024-11-05' } }, unsupported);
+        assert.equal(unsupported.body.result.protocolVersion, '2025-11-25');
+    });
+
+    // MCP-PROTO-3
+    it('advertises tools.listChanged as false since the package never sends list_changed notifications', () => {
+        const { server } = createRuntime();
+        const res = mockRes();
+        server.handleInitialize({ id: 1 }, res);
+        assert.equal(res.body.result.capabilities.tools.listChanged, false);
+    });
+
+    // MCP-HTTP-1
     it('rejects oversized JSON bodies before routing', async () => {
         const { server } = createRuntime({ __runtime: { serverPort: 18140 } });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {
             const res = await fetch('http://127.0.0.1:18140/mcp/test', { method: 'POST', headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', pad: 'x'.repeat(300 * 1024) }) });
+                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', pad: 'secret-body-marker-' + 'x'.repeat(300 * 1024) }) });
             assert.strictEqual(res.status, 413);
-            await res.text();
+            assert.match(res.headers.get('content-type'), /application\/json/);
+            assert.deepStrictEqual(await res.json(), {
+                jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid request' }
+            });
+            assert.ok(!server.errors.join('\n').includes('secret-body-marker'));
         } finally { await new Promise(resolve => server.emit('close', resolve)); }
+    });
+
+    // MCP-HTTP-2, MCP-HTTP-3
+    it('returns sanitized JSON errors for invalid JSON and unexpected MCP route exceptions', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18141 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            const malformed = await fetch('http://127.0.0.1:18141/mcp/test', {
+                method: 'POST', headers: { 'content-type': 'application/json' }, body: '{invalid-json'
+            });
+            assert.equal(malformed.status, 400);
+            assert.match(malformed.headers.get('content-type'), /application\/json/);
+            assert.deepStrictEqual(await malformed.json(), {
+                jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' }
+            });
+
+            server.handleMcpHttpRequest = async () => { throw new Error('internal route marker'); };
+            const failed = await fetch('http://127.0.0.1:18141/mcp/test', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/list' })
+            });
+            const body = await failed.json();
+            assert.equal(failed.status, 500);
+            assert.equal(body.error.code, -32603);
+            assert.equal(body.error.message, 'Internal error');
+            assert.ok(body.error.data.requestId);
+            assert.ok(server.errors.some(message => message.includes(body.error.data.requestId) &&
+                message.includes('internal route marker')));
+            assert.ok(!JSON.stringify(body).includes('internal route marker'));
+
+            const oauthMalformed = await fetch('http://127.0.0.1:18141/oauth/default-login/token', {
+                method: 'POST', headers: { 'content-type': 'application/json' }, body: '{invalid-json'
+            });
+            assert.equal(oauthMalformed.status, 400);
+            assert.match(oauthMalformed.headers.get('content-type'), /application\/json/);
+            assert.deepStrictEqual(await oauthMalformed.json(), { error: 'invalid_request' });
+
+            const oauthTooLarge = await fetch('http://127.0.0.1:18141/oauth/default-login/token', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ code: 'secret-oauth-marker-' + 'x'.repeat(300 * 1024) })
+            });
+            assert.equal(oauthTooLarge.status, 413);
+            assert.deepStrictEqual(await oauthTooLarge.json(), { error: 'invalid_request' });
+            assert.ok(!server.errors.join('\n').includes('secret-oauth-marker'));
+        } finally {
+            await new Promise(resolve => server.emit('close', resolve));
+        }
+    });
+
+    // MCP-HTTP-4
+    it('returns retryable 503 when token validation storage fails', async () => {
+        const { server, nodeMap } = createRuntime();
+        nodeMap['default-auth'].readAccessToken = async () => { throw new Error('Redis unavailable'); };
+        const response = mockRes();
+        await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 7, method: 'tools/list' },
+            { authorization: 'Bearer test-token' }), response);
+        assert.equal(response.statusCode, 503);
+        assert.equal(response.headers['retry-after'], '1');
+        assert.equal(response.body.error.code, -32603);
+        assert.equal(response.body.error.message, 'Service unavailable');
     });
 });
 
@@ -1518,7 +1904,9 @@ describe('tool result tolerance', () => {
     it('maps undefined to empty content, Buffers to text and error objects to their message', async () => {
         assert.deepStrictEqual((await call({ result: undefined })).result, { content: [] });
         assert.deepStrictEqual((await call({ result: Buffer.from('hello') })).result, { content: [{ type: 'text', text: 'hello' }] });
-        assert.strictEqual((await call({ error: { message: 'catch message' } })).error.message, 'catch message');
+        const errored = await call({ error: { message: 'catch message' } });
+        assert.strictEqual(errored.result.isError, true);
+        assert.strictEqual(errored.result.content[0].text, 'catch message');
     });
 });
 
@@ -1541,5 +1929,46 @@ describe('telemetry identity', () => {
         await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'ping' } }), mockRes());
         assert.strictEqual(events[1].user, 'unknown');
         assert.strictEqual(events[1].client, 'unknown');
+    });
+});
+
+
+describe('notifications and endpoint limits', () => {
+    // MCP-PROTO-4
+    it('acknowledges authenticated cancellation and unknown notifications with 202 and no warning', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18160 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            for (const method of ['notifications/cancelled', 'notifications/something-new']) {
+                const res = await fetch('http://127.0.0.1:18160/mcp/test', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json', authorization: 'Bearer test-token' },
+                    body: JSON.stringify({ jsonrpc: '2.0', method, params: { requestId: 'none' } })
+                });
+                assert.strictEqual(res.status, 202);
+                assert.strictEqual(await res.text(), '');
+            }
+            assert.deepStrictEqual(server.warnings, []);
+        } finally { await new Promise(resolve => server.emit('close', resolve)); }
+    });
+
+    // MCP-LIFE-2
+    it('rejects endpoint tool timeout and concurrency values outside their bounds and keeps the defaults', () => {
+        for (const config of [{ toolTimeoutMs: 999 }, { toolTimeoutMs: 600001 }, { toolTimeoutMs: 'abc' }]) {
+            const { server } = createRuntime({ ...config });
+            assert.match(server.configError, /Tool Timeout/);
+            assert.strictEqual(server.toolTimeoutMs, 30000);
+        }
+        for (const config of [{ maxConcurrentCalls: 0 }, { maxConcurrentCalls: 1025 }, { maxConcurrentCalls: 1.5 }]) {
+            const { server } = createRuntime({ ...config });
+            assert.match(server.configError, /Max Concurrent Calls/);
+            assert.strictEqual(server.maxConcurrentCalls, 32);
+        }
+        const bounds = createRuntime({ toolTimeoutMs: 1000, maxConcurrentCalls: 1024 }).server;
+        assert.strictEqual(bounds.configError, undefined);
+        assert.strictEqual(bounds.toolTimeoutMs, 1000);
+        const defaults = createRuntime().server;
+        assert.strictEqual(defaults.toolTimeoutMs, 30000);
+        assert.strictEqual(defaults.maxConcurrentCalls, 32);
     });
 });

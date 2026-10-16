@@ -2,7 +2,7 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
-const axios = require('axios');
+const httpMock = require('./helpers/fetch-mock');
 const { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } = require('jose');
 const {
     authorizeMetadata,
@@ -11,6 +11,7 @@ const {
     completeAuthorization,
     exchangeClientCode,
     isPrivateHost,
+    oidcDiscovery,
     protectedResourceMetadata,
     sha256Base64Url,
     verifyIdToken,
@@ -55,6 +56,7 @@ function authNodeWithCode(record) {
 }
 
 describe('mcp auth token exchange', () => {
+    // MCP-KEEP-2
     it('rejects private client metadata hosts before network access', async () => {
         assert.strictEqual(isPrivateHost('127.0.0.1'), true);
         assert.strictEqual(isPrivateHost('192.168.1.10'), true);
@@ -99,8 +101,8 @@ describe('mcp auth token exchange', () => {
     });
 
     it('bridges authorize and callback through OIDC discovery and userinfo', async () => {
-        const originalGet = axios.get;
-        const originalPost = axios.post;
+        const originalGet = httpMock.get;
+        const originalPost = httpMock.post;
         const { publicKey, privateKey } = await generateKeyPair('RS256');
         const publicJwk = await exportJWK(publicKey);
         publicJwk.kid = 'test-key';
@@ -137,7 +139,7 @@ describe('mcp auth token exchange', () => {
             authConfig: auth
         };
 
-        axios.get = async url => {
+        httpMock.get = async url => {
             if (url === 'https://client.example.test/metadata.json') {
                 return { data: { client_id: url, redirect_uris: ['https://client.example.test/callback'] } };
             }
@@ -155,7 +157,7 @@ describe('mcp auth token exchange', () => {
             }
             throw new Error('Unexpected GET ' + url);
         };
-        axios.post = async url => {
+        httpMock.post = async url => {
             assert.strictEqual(url, 'https://issuer.example.test/token');
             return { data: { access_token: 'placeholder-access-token', id_token: await signIdToken(store.state.value.nonce) } };
         };
@@ -196,8 +198,8 @@ describe('mcp auth token exchange', () => {
             assert.strictEqual(store.state.deleted, true);
             assert.deepStrictEqual(store.code.value.groups, ['team-a']);
             assert.deepStrictEqual(store.code.value.scopes, ['openid', 'profile']);
-            const matchingUserInfo = axios.get;
-            axios.get = async url => url === 'https://issuer.example.test/userinfo'
+            const matchingUserInfo = httpMock.get;
+            httpMock.get = async url => url === 'https://issuer.example.test/userinfo'
                 ? { data: { sub: 'different-subject', groups: ['team-a'] } }
                 : matchingUserInfo(url);
             store.code = null;
@@ -208,8 +210,8 @@ describe('mcp auth token exchange', () => {
             }, mockRes(), node), /UserInfo subject mismatch/);
             assert.strictEqual(store.code, null);
         } finally {
-            axios.get = originalGet;
-            axios.post = originalPost;
+            httpMock.get = originalGet;
+            httpMock.post = originalPost;
         }
     });
 
@@ -271,6 +273,7 @@ describe('mcp auth token exchange', () => {
         assert.strictEqual(auth.state.access.claims.resource, 'https://mcp.example.test/mcp/test');
     });
 
+    // MCP-KEEP-2
     it('rejects an authorization code when PKCE verification fails', async () => {
         const auth = authNodeWithCode({
             client_id: 'https://client.example.test/metadata.json',
@@ -323,5 +326,61 @@ describe('provider denial', () => {
         const forged = await redirectTo({ error: 'access_denied', state: 'missing' });
         assert.strictEqual(forged.statusCode, 400);
         assert.strictEqual(forged.location, undefined);
+    });
+});
+
+// MCP-DEP-1
+describe('identity provider fetch limits', () => {
+    it('rejects a 3xx redirect from the identity provider instead of following it', async () => {
+        const originalGet = httpMock.get;
+        try {
+            httpMock.get = async () => ({ status: 302, headers: { location: 'https://attacker.example.test/' } });
+            await assert.rejects(
+                () => clientMetadata({ allowedClientHosts: 'client.example.test' }, 'https://client.example.test/metadata.json'),
+                /Unexpected redirect/
+            );
+        } finally { httpMock.get = originalGet; }
+    });
+
+    // MCP-KEEP-2
+    it('rejects a client metadata document that exceeds the 8KiB CIMD limit', async () => {
+        const originalGet = httpMock.get;
+        try {
+            httpMock.get = async () => ({ data: { client_id: 'https://client.example.test/metadata.json', padding: 'x'.repeat(8192) } });
+            await assert.rejects(
+                () => clientMetadata({ allowedClientHosts: 'client.example.test' }, 'https://client.example.test/metadata.json'),
+                /exceeds size limit/
+            );
+        } finally { httpMock.get = originalGet; }
+    });
+
+    it('rejects an oversized declared content-length before reading the body', async () => {
+        const originalGet = httpMock.get;
+        try {
+            httpMock.get = async () => ({ data: { client_id: 'https://client.example.test/metadata.json' },
+                headers: { 'content-type': 'application/json', 'content-length': '999999' } });
+            await assert.rejects(
+                () => clientMetadata({ allowedClientHosts: 'client.example.test' }, 'https://client.example.test/metadata.json'),
+                /exceeds size limit/
+            );
+        } finally { httpMock.get = originalGet; }
+    });
+
+    it('rejects an OIDC discovery document that exceeds the 64KiB limit', async () => {
+        const originalGet = httpMock.get;
+        try {
+            httpMock.get = async () => ({ data: {
+                issuer: 'https://issuer.example.test/oidc',
+                authorization_endpoint: 'https://issuer.example.test/authorize',
+                token_endpoint: 'https://issuer.example.test/token',
+                userinfo_endpoint: 'https://issuer.example.test/userinfo',
+                jwks_uri: 'https://issuer.example.test/jwks',
+                padding: 'x'.repeat(65536)
+            } });
+            await assert.rejects(
+                () => oidcDiscovery({ issuerUrl: 'https://issuer.example.test/oidc' }),
+                /exceeds size limit/
+            );
+        } finally { httpMock.get = originalGet; }
     });
 });

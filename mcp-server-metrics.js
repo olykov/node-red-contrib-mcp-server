@@ -1,5 +1,7 @@
 'use strict';
 
+const { message } = require('./lib/messages');
+
 module.exports = function (RED)
 {
     function MCPServerMetricsNode(config)
@@ -10,7 +12,7 @@ module.exports = function (RED)
 
         if (!runtime || typeof runtime.subscribeToolTelemetry !== 'function')
         {
-            node.status({ fill: 'red', shape: 'ring', text: 'runtime unavailable' });
+            node.status({ fill: 'red', shape: 'ring', text: message(node, 'mcp-server-metrics', 'mcp-server-metrics.status.runtimeUnavailable') });
             node.error('MCP runtime is required for metrics');
             return;
         }
@@ -22,12 +24,12 @@ module.exports = function (RED)
 
         if (!unsubscribe)
         {
-            node.status({ fill: 'red', shape: 'ring', text: 'duplicate' });
+            node.status({ fill: 'red', shape: 'ring', text: message(node, 'mcp-server-metrics', 'mcp-server-metrics.status.duplicate') });
             node.error('Only one MCP Server Metrics node is allowed per runtime');
             return;
         }
 
-        node.status({ fill: 'green', shape: 'dot', text: 'listening' });
+        node.status({ fill: 'green', shape: 'dot', text: message(node, 'mcp-server-metrics', 'mcp-server-metrics.status.listening') });
         node.on('close', unsubscribe);
     }
 

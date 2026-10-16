@@ -32,6 +32,7 @@ const tab = {
 };
 
 describe('lib/admin-tools', () => {
+    // MCP-KEEP-5
     it('exposes only read-only bounded navigation', () => {
         const { tools } = build({});
         assert.deepEqual(tools.TOOLS.map(tool => tool.name), ['get_flow']);
@@ -501,6 +502,7 @@ describe('lib/admin-tools', () => {
         await assert.rejects(() => tools.callTool('get_flow', { mode: 'tab_summary', id: 'tab1' }), /inspection wire limit/);
     });
 
+    // MCP-KEEP-5
     it('sends only GET requests to loopback admin API with the configured token', async () => {
         delete process.env.NODE_RED_ADMIN_API_TOKEN;
         const { tools, calls } = build({ 'GET /flow/tab1': () => ({ status: 200, body: tab }) });
@@ -516,6 +518,8 @@ describe('lib/admin-tools', () => {
             id: 'tab1', nodes: [], configs: [{
                 id: 'cfg1', type: 'service-config', name: 'Primary', host: 'example.test', port: 1234,
                 enabled: false, options: { retry: [1, 2], apiKey: 'nested-secret' }, password: 'ordinary-property',
+                privateKey: 'private-key-secret', tls_private_key: 'tls-private-key-secret',
+                passphrase: 'passphrase-secret',
                 url: 'redis://user:url-secret@example.test:6379/0', env: [{ name: 'API', type: 'str', value: 'env-secret' }],
                 credentials: { username: 'credential-text', password: 'credential-password' }
             }]
@@ -528,13 +532,19 @@ describe('lib/admin-tools', () => {
         assert.deepEqual({ ...response.structuredContent.config.properties }, {
             name: 'Primary', host: 'example.test', port: 1234, enabled: false,
             options: { retry: [1, 2], apiKey: '[REDACTED]' }, password: '[REDACTED]',
+            privateKey: '[REDACTED]', tls_private_key: '[REDACTED]', passphrase: '[REDACTED]',
             url: 'redis://[REDACTED]@example.test:6379/0', env: [{ name: 'API', type: 'str', value: '[REDACTED]' }]
         });
-        assert.deepEqual([...response.structuredContent.config.redactedProperties].sort(), ['env', 'options.apiKey', 'password', 'url']);
-        for (const secret of ['nested-secret', 'ordinary-property', 'url-secret', 'env-secret'])
+        assert.deepEqual([...response.structuredContent.config.redactedProperties].sort(), [
+            'env', 'options.apiKey', 'passphrase', 'password', 'privateKey', 'tls_private_key', 'url'
+        ]);
+        for (const secret of [
+            'nested-secret', 'ordinary-property', 'private-key-secret', 'tls-private-key-secret',
+            'passphrase-secret', 'url-secret', 'env-secret'
+        ])
             assert.ok(!JSON.stringify(response).includes(secret), secret);
         assert.equal(response.structuredContent.config.credentials, '[REDACTED]');
-        assert.equal(response.structuredContent.totalProperties, 8);
+        assert.equal(response.structuredContent.totalProperties, 11);
         assert.ok(!JSON.stringify(response).includes('credential-text'));
         assert.ok(!JSON.stringify(response).includes('credential-password'));
         assert.equal(response.content[0].text, JSON.stringify(response.structuredContent));

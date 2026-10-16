@@ -1,0 +1,60 @@
+{
+    "mcp-redis": {
+        "label": {
+            "paletteLabel": "MCP Auth Storage",
+            "name": "Name",
+            "namePlaceholder": "Optional display name",
+            "mode": "Mode",
+            "modeMemory": "Memory",
+            "modeEnv": "Redis URL from environment",
+            "modeManual": "Manual Redis settings",
+            "memoryNote": "Memory storage is for local development only. Restarting Node-RED clears pending authorization state and issued access tokens.",
+            "urlEnv": "URL Env",
+            "urlEnvPlaceholder": "MCP_REDIS_URL",
+            "host": "Host",
+            "hostPlaceholder": "127.0.0.1",
+            "port": "Port",
+            "portPlaceholder": "6379",
+            "db": "DB",
+            "dbPlaceholder": "0",
+            "tls": "TLS",
+            "username": "Username",
+            "password": "Password",
+            "passwordEnv": "Password Env",
+            "passwordEnvPlaceholder": "Optional MCP_* environment variable",
+            "keyPrefix": "Key Prefix",
+            "keyPrefixPlaceholder": "mcp_auth:"
+        }
+    },
+    "mcp-auth": {
+        "label": {
+            "paletteLabel": "MCP Auth",
+            "defaultLabel": "MCP OIDC Auth",
+            "name": "Name",
+            "namePlaceholder": "Optional display name",
+            "slug": "Slug",
+            "tabMicrosoft": "Microsoft Entra ID",
+            "tabOidc": "OIDC",
+            "redirectUrlAvailable": "Redirect URL: https://<nodered>/oauth/__slug__/callback",
+            "redirectUrlUnavailable": "Redirect URL: unavailable (invalid slug)",
+            "issuerUrl": "Issuer URL",
+            "clientId": "Client ID",
+            "clientSecret": "Client Secret",
+            "refreshKey": "Refresh Key",
+            "refreshKeyPlaceholder": "openssl rand -hex 32",
+            "secretEnv": "Secret Env",
+            "secretEnvPlaceholder": "Optional MCP_* environment variable",
+            "groupClaim": "Group Claim",
+            "groupClaimPlaceholder": "groups",
+            "userClaim": "User Claim",
+            "userClaimPlaceholder": "email",
+            "tenantId": "Tenant ID",
+            "clientHosts": "Client Hosts",
+            "clientHostsPlaceholder": "chat.example.com, client.example.com",
+            "storage": "Storage",
+            "accessTokenTtl": "Access TTL",
+            "refreshTokenTtl": "Refresh TTL",
+            "sessionTtl": "Session TTL"
+        }
+    }
+}

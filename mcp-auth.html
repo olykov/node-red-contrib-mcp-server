@@ -35,7 +35,7 @@
         },
         paletteLabel: 'MCP Auth Storage',
         label: function() {
-            return this.name || 'MCP Auth Storage';
+            return this.name || this._('mcp-redis.label.paletteLabel');
         },
         oneditprepare: function() {
             function updateMode() {
@@ -85,9 +85,10 @@
         },
         paletteLabel: 'MCP Auth',
         label: function() {
-            return this.name || 'MCP OIDC Auth';
+            return this.name || this._('mcp-auth.label.defaultLabel');
         },
         oneditprepare: function() {
+            var node = this;
             var tabs = RED.tabs.create({
                 id: 'mcp-auth-provider-tabs',
                 onchange: function(tab) {
@@ -96,15 +97,15 @@
                     $('#mcp-auth-' + tab.id).show();
                 }
             });
-            tabs.addTab({ id: 'microsoft', label: 'Microsoft Entra ID' });
-            tabs.addTab({ id: 'oidc', label: 'OIDC' });
+            tabs.addTab({ id: 'microsoft', label: node._('mcp-auth.label.tabMicrosoft') });
+            tabs.addTab({ id: 'oidc', label: node._('mcp-auth.label.tabOidc') });
             tabs.activateTab(this.provider || 'oidc');
 
             function updateRedirectUrl() {
                 var slug = $('#node-config-input-oauthSlug').val();
                 var text = /^[a-z][a-z0-9-]{0,62}$/.test(slug || '') ?
-                    'Redirect URL: https://<nodered>/oauth/' + slug + '/callback' :
-                    'Redirect URL: unavailable (invalid slug)';
+                    node._('mcp-auth.label.redirectUrlAvailable', { slug: slug }) :
+                    node._('mcp-auth.label.redirectUrlUnavailable');
                 $('#mcp-auth-redirect-url').text(text);
             }
             $('#node-config-input-oauthSlug').on('input', updateRedirectUrl);
@@ -116,66 +117,65 @@
 
 <script type="text/html" data-template-name="mcp-redis">
     <div class="form-row">
-        <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
-        <input type="text" id="node-config-input-name" placeholder="Optional display name">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-redis.label.name"></span></label>
+        <input type="text" id="node-config-input-name" data-i18n="[placeholder]mcp-redis.label.namePlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-mode"><i class="fa fa-database"></i> Mode</label>
+        <label for="node-config-input-mode"><i class="fa fa-database"></i> <span data-i18n="mcp-redis.label.mode"></span></label>
         <select id="node-config-input-mode" style="width: 70%;">
-            <option value="memory">Memory</option>
-            <option value="env">Redis URL from environment</option>
-            <option value="manual">Manual Redis settings</option>
+            <option value="memory" data-i18n="mcp-redis.label.modeMemory"></option>
+            <option value="env" data-i18n="mcp-redis.label.modeEnv"></option>
+            <option value="manual" data-i18n="mcp-redis.label.modeManual"></option>
         </select>
     </div>
-    <div class="form-tips mcp-redis-memory-note">
-        Memory storage is for local development only. Restarting Node-RED clears pending authorization state and issued access tokens.
-    </div>
+    <div class="form-tips mcp-redis-memory-note" data-i18n="mcp-redis.label.memoryNote"></div>
     <div class="form-row mcp-redis-env-row">
-        <label for="node-config-input-redisUrlEnv"><i class="fa fa-terminal"></i> URL Env</label>
-        <input type="text" id="node-config-input-redisUrlEnv" placeholder="MCP_REDIS_URL">
+        <label for="node-config-input-redisUrlEnv"><i class="fa fa-terminal"></i> <span data-i18n="mcp-redis.label.urlEnv"></span></label>
+        <input type="text" id="node-config-input-redisUrlEnv" data-i18n="[placeholder]mcp-redis.label.urlEnvPlaceholder">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-host"><i class="fa fa-server"></i> Host</label>
-        <input type="text" id="node-config-input-host" placeholder="127.0.0.1">
+        <label for="node-config-input-host"><i class="fa fa-server"></i> <span data-i18n="mcp-redis.label.host"></span></label>
+        <input type="text" id="node-config-input-host" data-i18n="[placeholder]mcp-redis.label.hostPlaceholder">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-port"><i class="fa fa-plug"></i> Port</label>
-        <input type="text" id="node-config-input-port" placeholder="6379">
+        <label for="node-config-input-port"><i class="fa fa-plug"></i> <span data-i18n="mcp-redis.label.port"></span></label>
+        <input type="text" id="node-config-input-port" data-i18n="[placeholder]mcp-redis.label.portPlaceholder">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-db"><i class="fa fa-list-ol"></i> DB</label>
-        <input type="text" id="node-config-input-db" placeholder="0">
+        <label for="node-config-input-db"><i class="fa fa-list-ol"></i> <span data-i18n="mcp-redis.label.db"></span></label>
+        <input type="text" id="node-config-input-db" data-i18n="[placeholder]mcp-redis.label.dbPlaceholder">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-tls"><i class="fa fa-lock"></i> TLS</label>
+        <label for="node-config-input-tls"><i class="fa fa-lock"></i> <span data-i18n="mcp-redis.label.tls"></span></label>
         <input type="checkbox" id="node-config-input-tls" style="width: auto;">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-username"><i class="fa fa-user"></i> Username</label>
+        <label for="node-config-input-username"><i class="fa fa-user"></i> <span data-i18n="mcp-redis.label.username"></span></label>
         <input type="text" id="node-config-input-username">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-password"><i class="fa fa-key"></i> Password</label>
+        <label for="node-config-input-password"><i class="fa fa-key"></i> <span data-i18n="mcp-redis.label.password"></span></label>
         <input type="password" id="node-config-input-password" autocomplete="off">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-passwordEnv"><i class="fa fa-terminal"></i> Password Env</label>
-        <input type="text" id="node-config-input-passwordEnv" placeholder="Optional MCP_* environment variable">
+        <label for="node-config-input-passwordEnv"><i class="fa fa-terminal"></i> <span data-i18n="mcp-redis.label.passwordEnv"></span></label>
+        <input type="text" id="node-config-input-passwordEnv" data-i18n="[placeholder]mcp-redis.label.passwordEnvPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-keyPrefix"><i class="fa fa-key"></i> Key Prefix</label>
-        <input type="text" id="node-config-input-keyPrefix" placeholder="mcp_auth:">
+        <label for="node-config-input-keyPrefix"><i class="fa fa-key"></i> <span data-i18n="mcp-redis.label.keyPrefix"></span></label>
+        <input type="text" id="node-config-input-keyPrefix" data-i18n="[placeholder]mcp-redis.label.keyPrefixPlaceholder">
     </div>
 </script>
 
+
 <script type="text/html" data-template-name="mcp-auth">
     <div class="form-row">
-        <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
-        <input type="text" id="node-config-input-name" placeholder="Optional display name">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-auth.label.name"></span></label>
+        <input type="text" id="node-config-input-name" data-i18n="[placeholder]mcp-auth.label.namePlaceholder">
     </div>
     <input type="hidden" id="node-config-input-provider">
     <div class="form-row">
-        <label for="node-config-input-oauthSlug"><i class="fa fa-link"></i> Slug</label>
+        <label for="node-config-input-oauthSlug"><i class="fa fa-link"></i> <span data-i18n="mcp-auth.label.slug"></span></label>
         <input type="text" id="node-config-input-oauthSlug" maxlength="63" autocomplete="off">
         <div id="mcp-auth-redirect-url" style="margin-left: 100px; margin-top: 6px; font-size: 12px; overflow-wrap: anywhere;"></div>
     </div>
@@ -184,136 +184,74 @@
     </div>
     <div id="mcp-auth-oidc" class="mcp-auth-provider-panel">
     <div class="form-row">
-        <label for="node-config-input-issuerUrl"><i class="fa fa-link"></i> Issuer URL</label>
+        <label for="node-config-input-issuerUrl"><i class="fa fa-link"></i> <span data-i18n="mcp-auth.label.issuerUrl"></span></label>
         <input type="text" id="node-config-input-issuerUrl" placeholder="https://idp.example.com/oidc/app">
     </div>
     <div class="form-row">
-        <label for="node-config-input-clientId"><i class="fa fa-id-card"></i> Client ID</label>
+        <label for="node-config-input-clientId"><i class="fa fa-id-card"></i> <span data-i18n="mcp-auth.label.clientId"></span></label>
         <input type="text" id="node-config-input-clientId">
     </div>
     <div class="form-row">
-        <label for="node-config-input-clientSecret"><i class="fa fa-key"></i> Client Secret</label>
+        <label for="node-config-input-clientSecret"><i class="fa fa-key"></i> <span data-i18n="mcp-auth.label.clientSecret"></span></label>
         <input type="password" id="node-config-input-clientSecret" autocomplete="off">
     </div>
     <div class="form-row">
-        <label for="node-config-input-oidcRefreshKey"><i class="fa fa-key"></i> Refresh Key</label>
-        <input type="password" id="node-config-input-oidcRefreshKey" autocomplete="off" placeholder="openssl rand -hex 32">
+        <label for="node-config-input-oidcRefreshKey"><i class="fa fa-key"></i> <span data-i18n="mcp-auth.label.refreshKey"></span></label>
+        <input type="password" id="node-config-input-oidcRefreshKey" autocomplete="off" data-i18n="[placeholder]mcp-auth.label.refreshKeyPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-clientSecretEnv"><i class="fa fa-terminal"></i> Secret Env</label>
-        <input type="text" id="node-config-input-clientSecretEnv" placeholder="Optional MCP_* environment variable">
+        <label for="node-config-input-clientSecretEnv"><i class="fa fa-terminal"></i> <span data-i18n="mcp-auth.label.secretEnv"></span></label>
+        <input type="text" id="node-config-input-clientSecretEnv" data-i18n="[placeholder]mcp-auth.label.secretEnvPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-groupClaim"><i class="fa fa-users"></i> Group Claim</label>
-        <input type="text" id="node-config-input-groupClaim" placeholder="groups">
+        <label for="node-config-input-groupClaim"><i class="fa fa-users"></i> <span data-i18n="mcp-auth.label.groupClaim"></span></label>
+        <input type="text" id="node-config-input-groupClaim" data-i18n="[placeholder]mcp-auth.label.groupClaimPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-userClaim"><i class="fa fa-user"></i> User Claim</label>
-        <input type="text" id="node-config-input-userClaim" placeholder="email">
+        <label for="node-config-input-userClaim"><i class="fa fa-user"></i> <span data-i18n="mcp-auth.label.userClaim"></span></label>
+        <input type="text" id="node-config-input-userClaim" data-i18n="[placeholder]mcp-auth.label.userClaimPlaceholder">
     </div>
     </div>
     <div id="mcp-auth-microsoft" class="mcp-auth-provider-panel" style="display: none;">
         <div class="form-row">
-            <label for="node-config-input-microsoftTenantId"><i class="fa fa-building"></i> Tenant ID</label>
+            <label for="node-config-input-microsoftTenantId"><i class="fa fa-building"></i> <span data-i18n="mcp-auth.label.tenantId"></span></label>
             <input type="text" id="node-config-input-microsoftTenantId">
         </div>
         <div class="form-row">
-            <label for="node-config-input-microsoftClientId"><i class="fa fa-id-card"></i> Client ID</label>
+            <label for="node-config-input-microsoftClientId"><i class="fa fa-id-card"></i> <span data-i18n="mcp-auth.label.clientId"></span></label>
             <input type="text" id="node-config-input-microsoftClientId">
         </div>
         <div class="form-row">
-            <label for="node-config-input-microsoftClientSecret"><i class="fa fa-key"></i> Client Secret</label>
+            <label for="node-config-input-microsoftClientSecret"><i class="fa fa-key"></i> <span data-i18n="mcp-auth.label.clientSecret"></span></label>
             <input type="password" id="node-config-input-microsoftClientSecret" autocomplete="off">
         </div>
         <div class="form-row">
-            <label for="node-config-input-microsoftRefreshKey"><i class="fa fa-key"></i> Refresh Key</label>
-            <input type="password" id="node-config-input-microsoftRefreshKey" autocomplete="off" placeholder="openssl rand -hex 32">
+            <label for="node-config-input-microsoftRefreshKey"><i class="fa fa-key"></i> <span data-i18n="mcp-auth.label.refreshKey"></span></label>
+            <input type="password" id="node-config-input-microsoftRefreshKey" autocomplete="off" data-i18n="[placeholder]mcp-auth.label.refreshKeyPlaceholder">
         </div>
         <div class="form-row">
-            <label for="node-config-input-microsoftClientSecretEnv"><i class="fa fa-terminal"></i> Secret Env</label>
-            <input type="text" id="node-config-input-microsoftClientSecretEnv" placeholder="Optional MCP_* environment variable">
+            <label for="node-config-input-microsoftClientSecretEnv"><i class="fa fa-terminal"></i> <span data-i18n="mcp-auth.label.secretEnv"></span></label>
+            <input type="text" id="node-config-input-microsoftClientSecretEnv" data-i18n="[placeholder]mcp-auth.label.secretEnvPlaceholder">
         </div>
     </div>
     <div class="form-row">
-        <label for="node-config-input-allowedClientHosts"><i class="fa fa-globe"></i> Client Hosts</label>
-        <input type="text" id="node-config-input-allowedClientHosts" placeholder="chat.example.com, client.example.com">
+        <label for="node-config-input-allowedClientHosts"><i class="fa fa-globe"></i> <span data-i18n="mcp-auth.label.clientHosts"></span></label>
+        <input type="text" id="node-config-input-allowedClientHosts" data-i18n="[placeholder]mcp-auth.label.clientHostsPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-redis"><i class="fa fa-database"></i> Storage</label>
+        <label for="node-config-input-redis"><i class="fa fa-database"></i> <span data-i18n="mcp-auth.label.storage"></span></label>
         <input type="text" id="node-config-input-redis">
     </div>
     <div class="form-row">
-        <label for="node-config-input-accessTokenTtl"><i class="fa fa-clock-o"></i> Access TTL</label>
+        <label for="node-config-input-accessTokenTtl"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-auth.label.accessTokenTtl"></span></label>
         <input type="text" id="node-config-input-accessTokenTtl" placeholder="900">
     </div>
     <div class="form-row">
-        <label for="node-config-input-refreshTokenTtl"><i class="fa fa-clock-o"></i> Refresh TTL</label>
+        <label for="node-config-input-refreshTokenTtl"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-auth.label.refreshTokenTtl"></span></label>
         <input type="text" id="node-config-input-refreshTokenTtl" placeholder="604800">
     </div>
     <div class="form-row">
-        <label for="node-config-input-sessionTtl"><i class="fa fa-clock-o"></i> Session TTL</label>
+        <label for="node-config-input-sessionTtl"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-auth.label.sessionTtl"></span></label>
         <input type="text" id="node-config-input-sessionTtl" placeholder="1814400">
     </div>
-</script>
-
-<script type="text/html" data-help-name="mcp-redis">
-    <p>Storage for MCP authorization state, authorization codes, access tokens and refresh sessions.</p>
-    <h3>Details</h3>
-    <dl>
-        <dt>Mode</dt>
-        <dd><code>Memory</code> for local tests only: every restart or deploy clears all sessions, so
-        users sign in again. <code>Redis URL from environment</code> or
-        <code>Manual Redis settings</code> keep sessions across restarts.</dd>
-        <dt>URL Env</dt>
-        <dd>Environment variable holding the Redis URL, default <code>MCP_REDIS_URL</code>.</dd>
-        <dt>Host, Port, DB, TLS, Username</dt>
-        <dd>Manual Redis connection settings.</dd>
-        <dt>Password, Password Env</dt>
-        <dd>Redis password as a credential, or the name of an environment variable that holds it.</dd>
-        <dt>Environment variable names</dt>
-        <dd>Must start with <code>MCP_</code>, so a configuration cannot read other process secrets.</dd>
-        <dt>Key Prefix</dt>
-        <dd>Prefix for every stored key.</dd>
-    </dl>
-    <p>Connection errors are reported as warnings at most once a minute.</p>
-</script>
-
-<script type="text/html" data-help-name="mcp-auth">
-    <p>OAuth authorization for MCP endpoints, backed by Microsoft Entra ID or another OIDC provider.</p>
-    <h3>Details</h3>
-    <p>The selected provider tab is active. Secrets are stored as credentials or read from
-    environment variables whose names start with <code>MCP_</code>. An invalid configuration is reported in the log and every endpoint that
-    uses it refuses to start.</p>
-    <dl>
-        <dt>Slug</dt>
-        <dd>Stable OAuth route name. Register
-        <code>https://your-nodered-host/oauth/your-slug/callback</code> with the provider. Slugs
-        must be unique across separate auth configurations on the same listener or base URL.</dd>
-        <dt>Microsoft Entra ID</dt>
-        <dd>Single-tenant v2 issuer from Tenant ID; roles from the verified ID token; scopes
-        <code>openid profile email</code>. At least one app role is required.</dd>
-        <dt>OIDC</dt>
-        <dd>Configured issuer, UserInfo groups and scopes <code>openid profile email groups</code>.</dd>
-        <dt>Refresh Key</dt>
-        <dd>64 hex characters (<code>openssl rand -hex 32</code>) that encrypt stored provider
-        refresh tokens. Without it no refresh tokens are issued.</dd>
-        <dt>Client Hosts</dt>
-        <dd>Hosts allowed to serve MCP client metadata documents, matched exactly, for example
-        <code>claude.ai</code>; use <code>*.example.com</code> to allow subdomains.</dd>
-        <dt>Storage</dt>
-        <dd>MCP auth storage; use Redis for sessions that must survive restarts.</dd>
-        <dt>Access TTL, Refresh TTL, Session TTL</dt>
-        <dd>Seconds. Access tokens last at most 15 minutes, refresh sessions expire after at most 7 idle
-        days and at most 21 days in total; refresh never extends the total. An identical refresh
-        retry within 30 seconds gets the same result; provider outages answer
-        <code>temporarily_unavailable</code> without revoking the session.</dd>
-    </dl>
-    <p>Sessions belong to the provider identity and slug, not to this node's ID: a replacement
-    node with the same settings keeps users signed in. Changing provider, issuer, client ID,
-    group claim or slug, or switching storage, ends all existing sessions.</p>
-    <h3>References</h3>
-    <ul>
-        <li><a href="https://datatracker.ietf.org/doc/html/rfc6749">RFC 6749 OAuth 2.0</a></li>
-        <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol authorization</a></li>
-    </ul>
 </script>

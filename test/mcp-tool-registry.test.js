@@ -100,6 +100,94 @@ describe('mcp-tool-registry', () => {
         assert.strictEqual(registry.listenerCount('input'), 0);
         assert.deepStrictEqual(emitted, []);
     });
+
+    // MCP-VAL-1
+    it('marks invalid tool names and never registers them', () => {
+        const { registry, emitted } = buildRegistry({
+            toolName: 'Read-Status',
+            toolSchema: '{"type":"object","properties":{}}'
+        });
+        registry.registerTool();
+        assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
+        assert.match(registry.warnings[0], /lowercase/);
+        assert.deepStrictEqual(emitted, []);
+    });
+
+    // MCP-VAL-2
+    it('marks malformed input schemas as invalid', () => {
+        const { registry, emitted } = buildRegistry({
+            toolName: 'read_status',
+            toolSchema: '{"type":"array"}'
+        });
+        registry.registerTool();
+        assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
+        assert.match(registry.warnings[0], /type "object"/);
+        assert.deepStrictEqual(emitted, []);
+    });
+
+    // MCP-VAL-2
+    it('marks malformed output schemas as invalid', () => {
+        const { registry, emitted } = buildRegistry({
+            toolName: 'read_status',
+            toolSchema: '{"type":"object","properties":{}}',
+            outputSchema: 'not json'
+        });
+        registry.registerTool();
+        assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
+        assert.match(registry.warnings[0], /valid JSON/);
+        assert.deepStrictEqual(emitted, []);
+    });
+
+    // MCP-LIFE-2
+    it('rejects a tool timeout outside the supported range', () => {
+        const { registry, emitted } = buildRegistry({
+            toolName: 'read_status',
+            toolSchema: '{"type":"object","properties":{}}',
+            timeoutMs: 999
+        });
+        registry.registerTool();
+        assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
+        assert.match(registry.warnings[0], /between 1000 and 600000/);
+        assert.deepStrictEqual(emitted, []);
+    });
+
+    // MCP-LIFE-2
+    it('rejects a tool timeout that exceeds its endpoint timeout', () => {
+        const { registry, emitted } = buildRegistry({
+            toolName: 'read_status',
+            toolSchema: '{"type":"object","properties":{}}',
+            endpoint: '/mcp/ops',
+            timeoutMs: 60000
+        }, [{ type: 'mcp-flow-server', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops', toolTimeoutMs: 30000 }]);
+        registry.registerTool();
+        assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
+        assert.match(registry.warnings.at(-1), /cannot exceed its MCP endpoint timeout/);
+        assert.deepStrictEqual(emitted, []);
+    });
+
+    it('accepts a tool timeout within its endpoint timeout and exposes it on the tool definition', () => {
+        const { registry, emitted } = buildRegistry({
+            toolName: 'read_status',
+            toolSchema: '{"type":"object","properties":{}}',
+            endpoint: '/mcp/ops',
+            timeoutMs: 5000
+        }, [{ type: 'mcp-flow-server', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops', toolTimeoutMs: 30000 }]);
+        registry.registerTool();
+        assert.strictEqual(emitted[0].tool.timeoutMs, 5000);
+    });
+
+    // MCP-VAL-3
+    it('validates tool call arguments against the compiled input schema', () => {
+        const { registry, emitted } = buildRegistry({
+            toolName: 'read_status',
+            toolSchema: '{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}'
+        });
+        registry.registerTool();
+        const tool = emitted[0].tool;
+        assert.doesNotThrow(() => tool.validateArguments({ id: 'a' }));
+        assert.throws(() => tool.validateArguments({}), /Arguments do not match input schema/);
+        assert.throws(() => tool.validateArguments('not-an-object'), /Arguments do not match input schema/);
+    });
 });
 
 describe('registry lifecycle', () => {

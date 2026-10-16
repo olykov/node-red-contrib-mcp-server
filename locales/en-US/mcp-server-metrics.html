@@ -1,0 +1,33 @@
+<script type="text/html" data-help-name="mcp-server-metrics">
+    <p>Emits one message after each tool call on the selected MCP runtime, including failed calls.</p>
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>topic <span class="property-type">string</span></dt>
+        <dd>Always <code>mcp-tool-telemetry</code>.</dd>
+        <dt>payload.endpoint <span class="property-type">string</span></dt>
+        <dd>MCP name of the endpoint.</dd>
+        <dt>payload.tool <span class="property-type">string</span></dt>
+        <dd>Tool name, or <code>unknown</code>.</dd>
+        <dt>payload.mode <span class="property-type">string</span></dt>
+        <dd><code>flow</code>, an admin-tool mode, or <code>unknown</code>.</dd>
+        <dt>payload.user <span class="property-type">string</span></dt>
+        <dd>Caller e-mail (or subject), or <code>unknown</code> when the call was not authenticated.</dd>
+        <dt>payload.client <span class="property-type">string</span></dt>
+        <dd>MCP client: <code>claude</code>, <code>codex</code>, <code>chatgpt</code>, another client host, or <code>unknown</code>.</dd>
+        <dt>payload.status <span class="property-type">string</span></dt>
+        <dd><code>success</code> or <code>failed</code>.</dd>
+        <dt>payload.durationMs <span class="property-type">number</span></dt>
+        <dd>Call duration in milliseconds.</dd>
+        <dt>payload.responseBytes <span class="property-type">number | null</span></dt>
+        <dd>Response size when known.</dd>
+        <dt class="optional">payload.scannedNodes <span class="property-type">number | null</span></dt>
+        <dd>Admin-tool scan size.</dd>
+        <dt class="optional">payload.cached <span class="property-type">boolean | null</span></dt>
+        <dd>Whether an admin-tool result came from cache.</dd>
+    </dl>
+    <h3>Details</h3>
+    <p>Use one metrics node per runtime. The payload never contains tool arguments, results,
+    credentials or flow content. <code>user</code> is personal data: use it as a metric label only
+    while the set of users is small, and keep the metrics store access-controlled. Connect the output to metric writer nodes; this node does not
+    expose a metrics endpoint.</p>
+</script>

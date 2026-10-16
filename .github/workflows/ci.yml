@@ -5,6 +5,7 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -15,6 +16,7 @@ jobs:
     strategy:
       matrix:
         node: [22, 24]
+        node-red: ['5.0', '5']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,6 +24,19 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - run: npm install --no-save --package-lock=false node-red@${{ matrix.node-red }}
       - run: npm run lint
+      - run: npm run check:spec
       - run: npm run coverage
       - run: npm audit --omit=dev
+
+  smoke-tarball:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run smoke:pack

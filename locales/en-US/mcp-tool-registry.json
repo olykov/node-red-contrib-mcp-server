@@ -1,0 +1,42 @@
+{
+    "mcp-tool-registry": {
+        "label": {
+            "paletteLabel": "MCP Tool",
+            "name": "Name",
+            "namePlaceholder": "Human-readable tool name",
+            "toolName": "Tool Name",
+            "toolNamePlaceholder": "my_custom_tool",
+            "toolDescription": "Description",
+            "toolDescriptionPlaceholder": "Describe what this tool does",
+            "endpoint": "Endpoint",
+            "endpointSelectPrompt": "Select MCP endpoint...",
+            "endpointShared": "Shared (All MCPs)",
+            "timeoutMs": "Tool Timeout (ms)",
+            "timeoutTip": "Leave at 0 to use the endpoint timeout. A custom timeout cannot exceed the endpoint timeout.",
+            "annotationsHeading": "Annotations",
+            "behavior": "Behavior",
+            "behaviorUnspecified": "Unspecified",
+            "behaviorRead": "Read only",
+            "behaviorWrite": "Add only",
+            "behaviorDestructive": "Change / Delete / Send",
+            "worldAccess": "Scope",
+            "worldAccessUnspecified": "Unspecified",
+            "worldAccessClosed": "Fixed target",
+            "worldAccessOpen": "Open-ended",
+            "inputSchema": "Input Schema",
+            "outputSchema": "Output Schema",
+            "formatJsonButton": "Format JSON Fields",
+            "toolNameValidation": "Tool name must be 1-64 lowercase letters, numbers, or underscores and start with a letter.",
+            "inputSchemaInvalid": "Input schema invalid JSON",
+            "outputSchemaInvalid": "Output schema invalid JSON",
+            "formatSuccess": "JSON fields formatted"
+        },
+        "status": {
+            "unregistered": "unregistered",
+            "invalid": "invalid",
+            "duplicate": "duplicate",
+            "registered": "registered",
+            "shared": "shared"
+        }
+    }
+}
