@@ -31,6 +31,15 @@ describe('tool-validation input schema', () => {
     });
 
     // MCP-VAL-3
+    it('accepts valid 2020-12 schemas that strict lint rules would flag', () => {
+        const schema = { type: 'object', properties: { items: { type: 'array' }, cursor: { type: ['string', 'null'] } },
+            oneOf: [{ not: { required: ['error'] } }, { required: ['error'] }] };
+        assert.doesNotThrow(() => compileOutputSchema(schema));
+        assert.doesNotThrow(() => compileInputSchema(schema));
+        assert.throws(() => compileInputSchema({ type: 'object', propertees: {} }), /not a valid JSON Schema/);
+    });
+
+    // MCP-VAL-3
     it('rejects oversized schemas', () => {
         const big = { type: 'object', properties: {} };
         for (let index = 0; index < 5000; index++) big.properties['p' + index] = { type: 'string' };
