@@ -29,13 +29,13 @@ describe('trusted proxy CIDR matching', () => {
 // MCP-PKG-4
 describe('message catalogs', () => {
     it('resolves status texts from the shipped catalog', () => {
-        assert.strictEqual(message(null, 'mcp-tool-registry', 'mcp-tool-registry.status.endpointError'), 'endpoint error');
-        assert.strictEqual(message(null, 'mcp-tool-registry', 'mcp-tool-registry.status.duplicate'), 'duplicate');
-        assert.strictEqual(message(null, 'mcp-server-metrics', 'mcp-server-metrics.status.listening'), 'listening');
+        assert.strictEqual(message(null, 'nr-mcp-tool', 'nr-mcp-tool.status.endpointError'), 'endpoint error');
+        assert.strictEqual(message(null, 'nr-mcp-tool', 'nr-mcp-tool.status.duplicate'), 'duplicate');
+        assert.strictEqual(message(null, 'nr-mcp-metrics', 'nr-mcp-metrics.status.listening'), 'listening');
     });
 
     it('prefers the Node-RED translation and falls back to the key when missing', () => {
-        assert.strictEqual(message({ _: () => 'translated' }, 'mcp-flow-server', 'mcp-flow-server.status.error'), 'translated');
-        assert.strictEqual(message(null, 'mcp-flow-server', 'mcp-flow-server.status.nope'), 'mcp-flow-server.status.nope');
+        assert.strictEqual(message({ _: () => 'translated' }, 'nr-mcp-endpoint', 'nr-mcp-endpoint.status.error'), 'translated');
+        assert.strictEqual(message(null, 'nr-mcp-endpoint', 'nr-mcp-endpoint.status.nope'), 'nr-mcp-endpoint.status.nope');
     });
 });

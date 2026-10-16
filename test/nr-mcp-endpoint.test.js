@@ -39,14 +39,14 @@ function createRuntime(config = {}) {
             },
             registerType(name, ctor, options) {
                 // Test defaults for settings that production requires (Base URL, endpoint groups).
-                const defaults = { 'mcp-runtime': { publicBaseUrl: 'https://mcp.example.test' },
-                    'mcp-flow-server': { allowedGroups: 'test-group' } }[name];
+                const defaults = { 'nr-mcp-runtime': { publicBaseUrl: 'https://mcp.example.test' },
+                    'nr-mcp-endpoint': { allowedGroups: 'test-group' } }[name];
                 types[name] = function (cfg) {
                     const merged = defaults ? { ...defaults, ...cfg } : cfg;
                     configs.push({ ...merged, type: name });
                     const instance = new ctor(merged);
-                    if (name === 'mcp-runtime') RED.mcpRuntimes.push(instance);
-                    if ((name === 'mcp-runtime' || name === 'mcp-flow-server') && merged.id) nodeMap[merged.id] = instance;
+                    if (name === 'nr-mcp-runtime') RED.mcpRuntimes.push(instance);
+                    if ((name === 'nr-mcp-runtime' || name === 'nr-mcp-endpoint') && merged.id) nodeMap[merged.id] = instance;
                     return instance;
                 };
                 types['options:' + name] = options;
@@ -56,22 +56,21 @@ function createRuntime(config = {}) {
         },
         httpAdmin: { get() {} }
     };
-    delete require.cache[require.resolve('../mcp-flow-server')];
-    require('../mcp-flow-server')(RED);
-    require('../mcp-server-metrics')(RED);
-    delete require.cache[require.resolve('../mcp-tool-registry')];
-    require('../mcp-tool-registry')(RED);
+    delete require.cache[require.resolve('../nr-mcp-endpoint')];
+    require('../nr-mcp-endpoint')(RED);
+    require('../nr-mcp-metrics')(RED);
+    delete require.cache[require.resolve('../nr-mcp-tool')];
+    require('../nr-mcp-tool')(RED);
     RED.types = types;
     RED.delivered = [];
     RED.cancelled = [];
     const runtimeConfig = Object.assign({
         id: 'runtime-1',
-        runtimeName: 'test-runtime',
         serverPort: 18001,
         bindHost: '127.0.0.1',
         publicBaseUrl: 'https://mcp.example.test'
     }, config.__runtime || {});
-    const runtimeNode = new types['mcp-runtime'](runtimeConfig);
+    const runtimeNode = new types['nr-mcp-runtime'](runtimeConfig);
     nodeMap[runtimeConfig.id] = runtimeNode;
     const nodeConfig = Object.assign({
         id: 'endpoint-1',
@@ -81,7 +80,7 @@ function createRuntime(config = {}) {
         serverPath: '/mcp/test',
         allowedGroups: 'test-group',
     }, config);
-    const server = new types['mcp-flow-server'](nodeConfig);
+    const server = new types['nr-mcp-endpoint'](nodeConfig);
     return { RED, types, server, nodeMap, runtimeNode };
 }
 
@@ -112,7 +111,7 @@ function registerTool(RED, tool) {
 }
 
 function respond(RED, msg) {
-    const node = new RED.types['mcp-tool-response']({ id: 'response-' + RED.delivered.length });
+    const node = new RED.types['nr-mcp-tool-response']({ id: 'response-' + RED.delivered.length });
     return new Promise(resolve => node.emit('input', msg, () => {}, resolve));
 }
 
@@ -134,7 +133,7 @@ function mockReq(body, headers = {}, remoteAddress = '127.0.0.1') {
     });
 }
 
-describe('upstream mcp-flow-server local extensions', () => {
+describe('upstream nr-mcp-endpoint local extensions', () => {
     it('keeps upstream registry tools and advertises _meta.securitySchemes', () => {
         const { RED, server } = buildServer();
         registerTool(RED, {
@@ -183,7 +182,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('serves registry annotations through the MCP tools/list request', async () => {
         const { types, server } = buildServer();
-        new types['mcp-tool-registry']({
+        new types['nr-mcp-tool']({
             id: 'registry-1',
             toolName: 'read_status',
             scope: 'endpoint',
@@ -209,9 +208,9 @@ describe('upstream mcp-flow-server local extensions', () => {
     it('omits duplicate endpoint tools and restores the remaining owner on unregister', async () => {
         const { types, server, runtimeNode } = buildServer();
         server.initializeServer();
-        const first = new types['mcp-tool-registry']({ id: 'duplicate-a', toolName: 'same_tool',
+        const first = new types['nr-mcp-tool']({ id: 'duplicate-a', toolName: 'same_tool',
             scope: 'endpoint', endpoint: server.id, toolSchema: '{"type":"object","properties":{}}' });
-        const second = new types['mcp-tool-registry']({ id: 'duplicate-b', toolName: 'same_tool',
+        const second = new types['nr-mcp-tool']({ id: 'duplicate-b', toolName: 'same_tool',
             scope: 'endpoint', endpoint: server.id, toolSchema: '{"type":"object","properties":{}}' });
 
         assert.deepStrictEqual(server.registeredTools().map(tool => tool.name), []);
@@ -321,7 +320,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             serverPath: '/mcp/a',
             __runtime: { id: 'runtime-shared', serverPort: 18005 }
         });
-        const serverB = new runtime.types['mcp-flow-server']({
+        const serverB = new runtime.types['nr-mcp-endpoint']({
             id: 'endpoint-b',
             runtime: 'runtime-shared',
             auth: 'default-auth',
@@ -344,21 +343,20 @@ describe('upstream mcp-flow-server local extensions', () => {
             serverPath: '/mcp/a',
             __runtime: { id: 'runtime-a', serverPort: 18006, bindHost: '127.0.0.1' }
         });
-        const runtimeB = new runtime.types['mcp-runtime']({
+        const runtimeB = new runtime.types['nr-mcp-runtime']({
             id: 'runtime-b',
-            runtimeName: 'runtime-b',
             serverPort: 18006,
             bindHost: '127.0.0.1'
         });
         runtime.nodeMap['runtime-b'] = runtimeB;
-        const serverB = new runtime.types['mcp-flow-server']({
+        const serverB = new runtime.types['nr-mcp-endpoint']({
             id: 'endpoint-b',
             runtime: 'runtime-b',
             auth: 'default-auth',
             serverName: 'b',
             serverPath: '/mcp/b'
         });
-        const tool = new runtime.types['mcp-tool-registry']({ id: 'tool-b', toolName: 'tool_b', scope: 'endpoint',
+        const tool = new runtime.types['nr-mcp-tool']({ id: 'tool-b', toolName: 'tool_b', scope: 'endpoint',
             endpoint: 'endpoint-b', toolSchema: '{"type":"object","properties":{}}' });
         await new Promise((resolve, reject) => runtime.server.startServer(error => error ? reject(error) : resolve()));
         try {
@@ -477,7 +475,7 @@ describe('upstream mcp-flow-server local extensions', () => {
                 credentials: { adminToken: 'configured-value' }
             }
         });
-        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         const response = mockRes();
         await server.handleToolCall({ id: 1, params: { name: 'get_flow', arguments: {} } }, response);
 
@@ -503,7 +501,7 @@ describe('upstream mcp-flow-server local extensions', () => {
                 credentials: { adminToken: 'configured-value' }
             }
         });
-        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         const response = mockRes();
         await server.handleToolCall({
             id: 1,
@@ -525,7 +523,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             description: 'Sample',
             inputSchema: { type: 'object', properties: {} }
         });
-        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         const response = mockRes();
         const pending = server.handleMcpHttpRequest(mockReq({
             jsonrpc: '2.0', id: 1, method: 'tools/call',
@@ -609,7 +607,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             description: 'Sample',
             inputSchema: { type: 'object', properties: {} }
         });
-        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         server.executeToolFlow = async () => ({
             isError: true, content: [{ type: 'text', text: 'private-failure' }]
         });
@@ -668,7 +666,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             description: 'Write',
             inputSchema: { type: 'object', properties: {} }
         });
-        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         const request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'write_tool', arguments: {} } };
 
         const unauthenticated = mockRes();
@@ -694,7 +692,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             description: 'Sample',
             inputSchema: { type: 'object', properties: {} }
         });
-        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         server.executeToolFlow = async () => { throw new Error('Tool execution timeout'); };
         const response = mockRes();
         await server.handleMcpHttpRequest(mockReq({
@@ -710,7 +708,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('collects tool calls from every endpoint on the selected runtime', async () => {
         const runtime = createRuntime({ id: 'endpoint-a', serverName: 'alpha' });
-        const serverB = new runtime.types['mcp-flow-server']({
+        const serverB = new runtime.types['nr-mcp-endpoint']({
             id: 'endpoint-b',
             runtime: runtime.runtimeNode.id,
             auth: 'default-auth',
@@ -722,7 +720,7 @@ describe('upstream mcp-flow-server local extensions', () => {
             description: 'Shared',
             inputSchema: { type: 'object', properties: {} }
         });
-        const metrics = new runtime.types['mcp-server-metrics']({
+        const metrics = new runtime.types['nr-mcp-metrics']({
             id: 'metrics-1', runtime: runtime.runtimeNode.id
         });
         runtime.server.executeToolFlow = async () => ({ ok: true });
@@ -738,8 +736,8 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('allows only one metrics source per runtime and releases its subscription on close', async () => {
         const { runtimeNode, types } = buildServer();
-        const first = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
-        const duplicate = new types['mcp-server-metrics']({ id: 'metrics-2', runtime: runtimeNode.id });
+        const first = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const duplicate = new types['nr-mcp-metrics']({ id: 'metrics-2', runtime: runtimeNode.id });
         assert.deepStrictEqual(duplicate.errors, ['Only one MCP Server Metrics node is allowed per runtime']);
 
         runtimeNode.publishToolTelemetry({ tool: 'get_flow' });
@@ -747,7 +745,7 @@ describe('upstream mcp-flow-server local extensions', () => {
         assert.equal(duplicate.sent.length, 0);
 
         first.emit('close');
-        const replacement = new types['mcp-server-metrics']({ id: 'metrics-3', runtime: runtimeNode.id });
+        const replacement = new types['nr-mcp-metrics']({ id: 'metrics-3', runtime: runtimeNode.id });
         runtimeNode.publishToolTelemetry({ tool: 'get_flow' });
         assert.equal(first.sent.length, 1);
         assert.equal(replacement.sent.length, 1);
@@ -759,7 +757,7 @@ describe('upstream mcp-flow-server local extensions', () => {
 
     it('reports a missing metrics runtime without subscribing', () => {
         const { types } = buildServer();
-        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: 'missing' });
+        const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: 'missing' });
         assert.deepStrictEqual(metrics.errors, ['MCP runtime is required for metrics']);
         assert.equal(metrics.sent.length, 0);
     });
@@ -774,7 +772,7 @@ describe('upstream mcp-flow-server local extensions', () => {
                 credentials: { adminToken: 'configured-value' }
             }
         });
-        const metrics = new types['mcp-server-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
+        const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         metrics.send = () => { throw new Error('metrics unavailable'); };
         const response = mockRes();
         await server.handleToolCall({ id: 1, params: { name: 'get_flow', arguments: {} } }, response);
@@ -1316,7 +1314,7 @@ describe('automatic runtime startup without CORS', () => {
         const context = createRuntime({ __runtime: {
             serverPort: 18116, allowedOrigins: 'https://browser.example.test'
         } });
-        const second = new context.types['mcp-flow-server']({ id: 'endpoint-second',
+        const second = new context.types['nr-mcp-endpoint']({ id: 'endpoint-second',
             runtime: context.runtimeNode.id, auth: 'default-auth', serverPath: '/mcp/second' });
         const endpoints = [context.server, second];
         const start = async () => {
@@ -1375,7 +1373,7 @@ describe('automatic runtime startup without CORS', () => {
         RED.events.emit('flows:started');
         await new Promise(resolve => server.emit('close', resolve));
         assert.equal(server.isRunning, false);
-        const replacement = new types['mcp-flow-server']({ id: 'replacement', runtime: runtimeNode.id,
+        const replacement = new types['nr-mcp-endpoint']({ id: 'replacement', runtime: runtimeNode.id,
             auth: 'default-auth', serverPath: '/mcp/test' });
         try {
             await new Promise((resolve, reject) => replacement.startServer(error => error ? reject(error) : resolve()));
@@ -1437,7 +1435,7 @@ describe('stable OAuth routes', () => {
 
     function endpoint(context, authNode, id, path, runtimeId = 'runtime-1') {
         context.nodeMap[authNode.id] = authNode;
-        return new context.types['mcp-flow-server']({ id, auth: authNode.id,
+        return new context.types['nr-mcp-endpoint']({ id, auth: authNode.id,
             runtime: runtimeId, serverPath: path, serverName: id });
     }
 
@@ -1487,7 +1485,7 @@ describe('stable OAuth routes', () => {
         const duplicate = endpoint(context, auth('different-auth'), 'duplicate', '/mcp/duplicate');
         assert.throws(() => duplicate.initializeServer(), /OAuth slug already registered/);
         assert.strictEqual(context.server.portState.routes.has('/mcp/duplicate'), false);
-        context.nodeMap['runtime-other'] = new context.types['mcp-runtime']({ id: 'runtime-other',
+        context.nodeMap['runtime-other'] = new context.types['nr-mcp-runtime']({ id: 'runtime-other',
             serverPort: 18113, publicBaseUrl: 'https://mcp.example.test/' });
         const crossPort = endpoint(context, auth('cross-port-auth'), 'cross-port', '/mcp/other', 'runtime-other');
         assert.throws(() => crossPort.initializeServer(), /OAuth slug already registered/);
@@ -1523,8 +1521,8 @@ describe('stable OAuth routes', () => {
 describe('Creating Nodes review fixes', () => {
     it('registers the runtime admin token as a password credential', () => {
         const { types } = createRuntime();
-        assert.deepStrictEqual(types['options:mcp-runtime'], { credentials: { adminToken: { type: 'password' } } });
-        const runtime = new types['mcp-runtime']({ id: 'runtime-cred', credentials: { adminToken: 'from-editor' } });
+        assert.deepStrictEqual(types['options:nr-mcp-runtime'], { credentials: { adminToken: { type: 'password' } } });
+        const runtime = new types['nr-mcp-runtime']({ id: 'runtime-cred', credentials: { adminToken: 'from-editor' } });
         assert.strictEqual(runtime.adminToken, 'from-editor');
     });
 
@@ -1538,11 +1536,11 @@ describe('Creating Nodes review fixes', () => {
         const RED = { events: new EventEmitter(), nodes: { registerType() {} },
             auth: { needsPermission: permission => Object.assign(() => {}, { permission }) },
             httpAdmin: { get(path, ...chain) { handlers[path] = chain; } } };
-        delete require.cache[require.resolve('../mcp-flow-server')];
-        require('../mcp-flow-server')(RED);
-        const chain = handlers['/mcp-flow-servers'];
+        delete require.cache[require.resolve('../nr-mcp-endpoint')];
+        require('../nr-mcp-endpoint')(RED);
+        const chain = handlers['/nr-mcp-endpoints'];
         assert.strictEqual(chain.length, 2);
-        assert.strictEqual(chain[0].permission, 'mcp-flow-server.read');
+        assert.strictEqual(chain[0].permission, 'nr-mcp-endpoint.read');
     });
 
     // MCP-NODE-3
@@ -1612,13 +1610,13 @@ describe('Creating Nodes review fixes', () => {
 describe('3.0 configuration rules', () => {
     it('binds Endpoint tools to the endpoint node id so a redeployed endpoint keeps them', () => {
         const { RED, types, server, runtimeNode } = buildServer({ id: 'stable-endpoint', serverPath: '/mcp/stable' });
-        new types['mcp-tool-registry']({ id: 'tool-1', toolName: 'stable_tool', scope: 'endpoint', endpoint: 'stable-endpoint',
+        new types['nr-mcp-tool']({ id: 'tool-1', toolName: 'stable_tool', scope: 'endpoint', endpoint: 'stable-endpoint',
             toolSchema: '{"type":"object","properties":{}}' });
-        const replacement = new types['mcp-flow-server']({ id: 'stable-endpoint', runtime: runtimeNode.id,
+        const replacement = new types['nr-mcp-endpoint']({ id: 'stable-endpoint', runtime: runtimeNode.id,
             auth: 'default-auth', serverPath: '/mcp/renamed' });
-        const other = new types['mcp-flow-server']({ id: 'other-endpoint', runtime: runtimeNode.id,
+        const other = new types['nr-mcp-endpoint']({ id: 'other-endpoint', runtime: runtimeNode.id,
             auth: 'default-auth', serverPath: '/mcp/stable' });
-        assert.ok(RED.types['mcp-tool-response']);
+        assert.ok(RED.types['nr-mcp-tool-response']);
         assert.deepStrictEqual(server.registeredTools().map(tool => tool.name), ['stable_tool']);
         assert.deepStrictEqual(replacement.registeredTools().map(tool => tool.name), ['stable_tool']);
         assert.deepStrictEqual(other.registeredTools(), []);

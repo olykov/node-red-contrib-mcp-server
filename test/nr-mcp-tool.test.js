@@ -9,12 +9,12 @@ function buildRegistry(config = {}, nodes = {}) {
     const events = new EventEmitter();
     const emitted = [];
     const runtime = {
-        id: 'test-runtime', type: 'mcp-runtime',
+        id: 'test-runtime', type: 'nr-mcp-runtime',
         registerTool: tool => emitted.push({ event: 'register', tool }),
         unregisterTool: registeredBy => emitted.push({ event: 'unregister', tool: { registeredBy } })
     };
     const nodeList = (Array.isArray(nodes) ? nodes : Object.values(nodes))
-        .map(node => node.type === 'mcp-flow-server' && node.runtime === undefined ? { ...node, runtime } : node);
+        .map(node => node.type === 'nr-mcp-endpoint' && node.runtime === undefined ? { ...node, runtime } : node);
     const RED = {
         events,
         nodes: {
@@ -36,13 +36,13 @@ function buildRegistry(config = {}, nodes = {}) {
             eachNode(callback) { for (const node of [runtime, ...nodeList]) callback(node); }
         }
     };
-    delete require.cache[require.resolve('../mcp-tool-registry')];
-    require('../mcp-tool-registry')(RED);
-    const registry = new types['mcp-tool-registry']({ scope: 'shared', runtime: runtime.id, ...config });
+    delete require.cache[require.resolve('../nr-mcp-tool')];
+    require('../nr-mcp-tool')(RED);
+    const registry = new types['nr-mcp-tool']({ scope: 'shared', runtime: runtime.id, ...config });
     return { registry, emitted };
 }
 
-describe('mcp-tool-registry', () => {
+describe('nr-mcp-tool', () => {
     it('registers an Endpoint tool in the runtime of the selected endpoint', () => {
         const { registry, emitted } = buildRegistry({
             toolName: 'read_status',
@@ -50,7 +50,7 @@ describe('mcp-tool-registry', () => {
             scope: 'endpoint',
             endpoint: 'endpoint-1',
             toolSchema: '{"type":"object","properties":{}}'
-        }, [{ type: 'mcp-flow-server', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops' }]);
+        }, [{ type: 'nr-mcp-endpoint', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops' }]);
 
         assert.strictEqual(registry.isRegistered, true);
         assert.strictEqual(emitted[0].event, 'register');
@@ -178,7 +178,7 @@ describe('mcp-tool-registry', () => {
             scope: 'endpoint',
             endpoint: 'endpoint-1',
             timeoutMs: 60000
-        }, [{ type: 'mcp-flow-server', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops', toolTimeoutMs: 30000 }]);
+        }, [{ type: 'nr-mcp-endpoint', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops', toolTimeoutMs: 30000 }]);
         assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
         assert.match(registry.warnings.at(-1), /cannot exceed its MCP endpoint timeout/);
         assert.deepStrictEqual(emitted, []);
@@ -191,7 +191,7 @@ describe('mcp-tool-registry', () => {
             scope: 'endpoint',
             endpoint: 'endpoint-1',
             timeoutMs: 5000
-        }, [{ type: 'mcp-flow-server', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops', toolTimeoutMs: 30000 }]);
+        }, [{ type: 'nr-mcp-endpoint', id: 'endpoint-1', serverName: 'ops', serverPath: '/mcp/ops', toolTimeoutMs: 30000 }]);
         assert.strictEqual(emitted[0].tool.timeoutMs, 5000);
     });
 
@@ -224,7 +224,7 @@ describe('registry lifecycle', () => {
         for (const config of [{ scope: '' }, { scope: 'endpoint', endpoint: '' }, { scope: 'endpoint', endpoint: 'missing' },
             { scope: 'shared', runtime: '' }, { scope: 'endpoint', endpoint: 'orphan-endpoint' }]) {
             const { registry, emitted } = buildRegistry({ toolName: 'orphan_tool', toolSchema: '{"type":"object","properties":{}}', ...config },
-                [{ type: 'mcp-flow-server', id: 'orphan-endpoint', runtime: null }]);
+                [{ type: 'nr-mcp-endpoint', id: 'orphan-endpoint', runtime: null }]);
             assert.deepStrictEqual(emitted, [], JSON.stringify(config));
             assert.strictEqual(registry.statuses.at(-1).text, 'invalid');
         }

@@ -202,12 +202,12 @@ module.exports = function (RED)
         });
     }
 
-    RED.nodes.registerType('mcp-redis', MCPRedisConfigNode, {
+    RED.nodes.registerType('nr-mcp-auth-storage', MCPRedisConfigNode, {
         credentials: {
             password: { type: 'password' }
         }
     });
-    RED.nodes.registerType('mcp-auth', MCPAuthConfigNode, {
+    RED.nodes.registerType('nr-mcp-auth', MCPAuthConfigNode, {
         credentials: {
             clientSecret: { type: 'password' },
             microsoftClientSecret: { type: 'password' },

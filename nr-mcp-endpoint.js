@@ -411,7 +411,6 @@ module.exports = function (RED)
         RED.nodes.createNode(this, config);
         const node = this;
         node.name = config.name || '';
-        node.runtimeName = config.runtimeName || node.name || 'mcp-runtime';
         node.serverPort = Number(config.serverPort || 8001);
         node.publicBaseUrl = config.publicBaseUrl || '';
         node.bindHost = typeof config.bindHost === 'string' ? config.bindHost.trim() : '';
@@ -1091,16 +1090,16 @@ module.exports = function (RED)
         });
     }
 
-    RED.nodes.registerType('mcp-runtime', MCPRuntimeNode, {
+    RED.nodes.registerType('nr-mcp-runtime', MCPRuntimeNode, {
         credentials: {
             adminToken: { type: 'password' }
         }
     });
-    RED.nodes.registerType('mcp-flow-server', MCPFlowServerNode);
+    RED.nodes.registerType('nr-mcp-endpoint', MCPFlowServerNode);
 
     const readPermission = RED.auth && typeof RED.auth.needsPermission === 'function' ?
-        [RED.auth.needsPermission('mcp-flow-server.read')] : [];
-    RED.httpAdmin.get('/mcp-flow-servers', ...readPermission, function (req, res)
+        [RED.auth.needsPermission('nr-mcp-endpoint.read')] : [];
+    RED.httpAdmin.get('/nr-mcp-endpoints', ...readPermission, function (req, res)
     {
         const servers = [];
         for (const key of serverInstances.keys())

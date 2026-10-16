@@ -32,9 +32,9 @@ function runtime() {
         registerType(name, ctor) { types[name] = ctor; },
         getNode(id) { return nodes[id]; }
     } };
-    require('../mcp-auth')(RED);
-    nodes.storage = new types['mcp-redis']({ id: 'storage', mode: 'memory' });
-    return config => new types['mcp-auth']({ id: 'auth-test', redis: 'storage', ...config });
+    require('../nr-mcp-auth')(RED);
+    nodes.storage = new types['nr-mcp-auth-storage']({ id: 'storage', mode: 'memory' });
+    return config => new types['nr-mcp-auth']({ id: 'auth-test', redis: 'storage', ...config });
 }
 
 function response() {
@@ -357,8 +357,8 @@ describe('native loopback redirects', () => {
 });
 
 describe('auth provider editor', () => {
-    const html = fs.readFileSync(require.resolve('../mcp-auth.html'), 'utf8');
-    const catalog = JSON.parse(fs.readFileSync(require.resolve('../locales/en-US/mcp-auth.json'), 'utf8'));
+    const html = fs.readFileSync(require.resolve('../nr-mcp-auth.html'), 'utf8');
+    const catalog = JSON.parse(fs.readFileSync(require.resolve('../locales/en-US/nr-mcp-auth.json'), 'utf8'));
     function translate(key, params) {
         const value = key.split('.').reduce((obj, part) => obj && obj[part], catalog);
         if (typeof value !== 'string') return key;
@@ -386,7 +386,7 @@ describe('auth provider editor', () => {
     });
 
     it('validates against the provider tab selected in the open dialog', () => {
-        const definition = definitions['mcp-auth'];
+        const definition = definitions['nr-mcp-auth'];
         values['#node-config-input-provider'] = 'microsoft';
         assert.equal(definition.defaults.microsoftTenantId.validate.call({ provider: 'oidc' }, ''), false);
         assert.equal(definition.defaults.issuerUrl.validate.call({ provider: 'oidc' }, ''), true);
@@ -396,7 +396,7 @@ describe('auth provider editor', () => {
     });
 
     it('selects, persists and reopens either provider tab without losing inactive values', () => {
-        const definition = definitions['mcp-auth'];
+        const definition = definitions['nr-mcp-auth'];
         values['#node-config-input-clientId'] = 'oidc-client';
         values['#node-config-input-microsoftClientId'] = client;
         definition.oneditprepare.call({ provider: 'microsoft', _: translate });
@@ -416,7 +416,7 @@ describe('auth provider editor', () => {
     });
 
     it('validates only active settings and declares both secrets as credentials', () => {
-        const definition = definitions['mcp-auth'];
+        const definition = definitions['nr-mcp-auth'];
         delete values['#node-config-input-provider'];
         assert.equal(definition.defaults.issuerUrl.validate.call({ provider: 'microsoft' }, ''), true);
         assert.equal(definition.defaults.issuerUrl.validate.call({ provider: 'oidc' }, 'http://idp.example.test'), false);
@@ -432,7 +432,7 @@ describe('auth provider editor', () => {
 
     it('updates the redirect template from the typed slug without reading a runtime', () => {
         values['#node-config-input-oauthSlug'] = 'first-login';
-        definitions['mcp-auth'].oneditprepare.call({ id: 'auth', _: translate });
+        definitions['nr-mcp-auth'].oneditprepare.call({ id: 'auth', _: translate });
         assert.equal(values['#mcp-auth-redirect-url'], 'Redirect URL: https://<nodered>/oauth/first-login/callback');
         values['#node-config-input-oauthSlug'] = 'second-login';
         handlers['#node-config-input-oauthSlug:input']();
@@ -457,10 +457,10 @@ describe('auth configuration reporting', () => {
                 target.id = config.id; target.credentials = {}; target.status = () => {}; target.error = () => {}; target.warn = () => {}; },
             registerType(name, ctor) { types[name] = ctor; },
             getNode(id) { return id === 'auth' ? node : id === 'runtime' ? runtimeNode : null; } } };
-        delete require.cache[require.resolve('../mcp-flow-server')];
-        require('../mcp-flow-server')(RED);
-        const runtimeNode = new types['mcp-runtime']({ id: 'runtime', serverPort: 18130 });
-        const endpoint = new types['mcp-flow-server']({ id: 'endpoint', runtime: 'runtime', auth: 'auth', serverPath: '/mcp/x' });
+        delete require.cache[require.resolve('../nr-mcp-endpoint')];
+        require('../nr-mcp-endpoint')(RED);
+        const runtimeNode = new types['nr-mcp-runtime']({ id: 'runtime', serverPort: 18130 });
+        const endpoint = new types['nr-mcp-endpoint']({ id: 'endpoint', runtime: 'runtime', auth: 'auth', serverPath: '/mcp/x' });
         assert.throws(() => endpoint.initializeServer(), /MCP auth configuration is invalid: .*HTTPS/);
     });
 
@@ -499,12 +499,12 @@ describe('environment variable names', () => {
                 node.id = config.id; node.credentials = config.credentials || {};
                 node.error = message => (node.errorLog = node.errorLog || []).push(message); },
             registerType(name, ctor) { types[name] = ctor; }, getNode(id) { return nodes[id]; } } };
-        require('../mcp-auth')(RED);
-        nodes.storage = new types['mcp-redis']({ id: 'storage', mode: 'env', redisUrlEnv: 'REDIS_URL' });
+        require('../nr-mcp-auth')(RED);
+        nodes.storage = new types['nr-mcp-auth-storage']({ id: 'storage', mode: 'env', redisUrlEnv: 'REDIS_URL' });
         assert.match(nodes.storage.configError, /URL Env must be .*MCP_/);
         assert.throws(() => nodes.storage.createStorage(), /storage configuration is invalid/);
-        const auth = new types['mcp-auth']({ id: 'auth', redis: 'storage', ...microsoft });
+        const auth = new types['nr-mcp-auth']({ id: 'auth', redis: 'storage', ...microsoft });
         assert.match(auth.configError, /^storage: /);
-        assert.strictEqual(new types['mcp-redis']({ id: 'default', mode: 'env' }).redisUrlEnv, 'MCP_REDIS_URL');
+        assert.strictEqual(new types['nr-mcp-auth-storage']({ id: 'default', mode: 'env' }).redisUrlEnv, 'MCP_REDIS_URL');
     });
 });

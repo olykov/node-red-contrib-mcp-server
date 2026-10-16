@@ -1,6 +1,6 @@
 
-<script type="text/html" data-help-name="mcp-runtime">
-    <p>Local MCP HTTP listener shared by one or more MCP Server endpoints.</p>
+<script type="text/html" data-help-name="nr-mcp-runtime">
+    <p>Local MCP HTTP listener shared by one or more MCP endpoints.</p>
     <h3>Details</h3>
     <p>Several endpoints may share one runtime port when their MCP paths differ.
     The runtime also hosts the OAuth routes of the auth configurations used by its endpoints.</p>
@@ -36,7 +36,7 @@
         <dt>Admin Path</dt>
         <dd>Exact MCP path allowed to expose the read-only admin tools.</dd>
     </dl>
-    <p>Admin tools are exposed only when a token and Admin Path are set and an MCP Server on this
+    <p>Admin tools are exposed only when a token and Admin Path are set and an MCP Endpoint on this
     runtime uses exactly that path.</p>
     <p>Older configurations without Bind Host continue listening on all interfaces and emit a
     warning. Set an explicit address to silence that warning.</p>
@@ -46,7 +46,7 @@
     </ul>
 </script>
 
-<script type="text/html" data-help-name="mcp-flow-server">
+<script type="text/html" data-help-name="nr-mcp-endpoint">
     <p>Configuration of one MCP endpoint on a selected runtime. MCP Tool nodes select it and their
     flows answer its tool calls.</p>
     <h3>Details</h3>

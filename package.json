@@ -43,10 +43,10 @@
   "node-red": {
     "version": ">=5.0.0 <6.0.0",
     "nodes": {
-      "mcp-auth": "mcp-auth.js",
-      "mcp-flow-server": "mcp-flow-server.js",
-      "mcp-server-metrics": "mcp-server-metrics.js",
-      "mcp-tool-registry": "mcp-tool-registry.js"
+      "nr-mcp-auth": "nr-mcp-auth.js",
+      "nr-mcp-endpoint": "nr-mcp-endpoint.js",
+      "nr-mcp-metrics": "nr-mcp-metrics.js",
+      "nr-mcp-tool": "nr-mcp-tool.js"
     }
   },
   "dependencies": {

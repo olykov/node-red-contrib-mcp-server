@@ -10,7 +10,7 @@
         return input.length && input.val() ? input.val() : node.provider;
     }
 
-    RED.nodes.registerType('mcp-redis', {
+    RED.nodes.registerType('nr-mcp-auth-storage', {
         category: 'config',
         defaults: {
             name: { value: '' },
@@ -35,7 +35,7 @@
         },
         paletteLabel: 'MCP Auth Storage',
         label: function() {
-            return this.name || this._('mcp-redis.label.paletteLabel');
+            return this.name || this._('nr-mcp-auth-storage.label.paletteLabel');
         },
         oneditprepare: function() {
             function updateMode() {
@@ -49,7 +49,7 @@
         }
     });
 
-    RED.nodes.registerType('mcp-auth', {
+    RED.nodes.registerType('nr-mcp-auth', {
         category: 'config',
         defaults: {
             name: { value: '' },
@@ -72,7 +72,7 @@
             allowedClientHosts: { value: '', required: true },
             groupClaim: { value: 'groups' },
             userClaim: { value: 'email' },
-            redis: { value: '', type: 'mcp-redis', required: true },
+            redis: { value: '', type: 'nr-mcp-auth-storage', required: true },
             accessTokenTtl: { value: 900, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 900; } },
             refreshTokenTtl: { value: 604800, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 604800; } },
             sessionTtl: { value: 1814400, validate: function(v) { return Number.isInteger(Number(v)) && v > 0 && v <= 1814400; } }
@@ -85,7 +85,7 @@
         },
         paletteLabel: 'MCP Auth',
         label: function() {
-            return this.name || this._('mcp-auth.label.defaultLabel');
+            return this.name || this._('nr-mcp-auth.label.defaultLabel');
         },
         oneditprepare: function() {
             var node = this;
@@ -97,15 +97,15 @@
                     $('#mcp-auth-' + tab.id).show();
                 }
             });
-            tabs.addTab({ id: 'microsoft', label: node._('mcp-auth.label.tabMicrosoft') });
-            tabs.addTab({ id: 'oidc', label: node._('mcp-auth.label.tabOidc') });
+            tabs.addTab({ id: 'microsoft', label: node._('nr-mcp-auth.label.tabMicrosoft') });
+            tabs.addTab({ id: 'oidc', label: node._('nr-mcp-auth.label.tabOidc') });
             tabs.activateTab(this.provider || 'oidc');
 
             function updateRedirectUrl() {
                 var slug = $('#node-config-input-oauthSlug').val();
                 var text = /^[a-z][a-z0-9-]{0,62}$/.test(slug || '') ?
-                    node._('mcp-auth.label.redirectUrlAvailable', { slug: slug }) :
-                    node._('mcp-auth.label.redirectUrlUnavailable');
+                    node._('nr-mcp-auth.label.redirectUrlAvailable', { slug: slug }) :
+                    node._('nr-mcp-auth.label.redirectUrlUnavailable');
                 $('#mcp-auth-redirect-url').text(text);
             }
             $('#node-config-input-oauthSlug').on('input', updateRedirectUrl);
@@ -115,67 +115,67 @@
 })();
 </script>
 
-<script type="text/html" data-template-name="mcp-redis">
+<script type="text/html" data-template-name="nr-mcp-auth-storage">
     <div class="form-row">
-        <label for="node-config-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-redis.label.name"></span></label>
-        <input type="text" id="node-config-input-name" data-i18n="[placeholder]mcp-redis.label.namePlaceholder">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> <span data-i18n="nr-mcp-auth-storage.label.name"></span></label>
+        <input type="text" id="node-config-input-name" data-i18n="[placeholder]nr-mcp-auth-storage.label.namePlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-mode"><i class="fa fa-database"></i> <span data-i18n="mcp-redis.label.mode"></span></label>
+        <label for="node-config-input-mode"><i class="fa fa-database"></i> <span data-i18n="nr-mcp-auth-storage.label.mode"></span></label>
         <select id="node-config-input-mode" style="width: 70%;">
-            <option value="memory" data-i18n="mcp-redis.label.modeMemory"></option>
-            <option value="env" data-i18n="mcp-redis.label.modeEnv"></option>
-            <option value="manual" data-i18n="mcp-redis.label.modeManual"></option>
+            <option value="memory" data-i18n="nr-mcp-auth-storage.label.modeMemory"></option>
+            <option value="env" data-i18n="nr-mcp-auth-storage.label.modeEnv"></option>
+            <option value="manual" data-i18n="nr-mcp-auth-storage.label.modeManual"></option>
         </select>
     </div>
-    <div class="form-tips mcp-redis-memory-note" data-i18n="mcp-redis.label.memoryNote"></div>
+    <div class="form-tips mcp-redis-memory-note" data-i18n="nr-mcp-auth-storage.label.memoryNote"></div>
     <div class="form-row mcp-redis-env-row">
-        <label for="node-config-input-redisUrlEnv"><i class="fa fa-terminal"></i> <span data-i18n="mcp-redis.label.urlEnv"></span></label>
-        <input type="text" id="node-config-input-redisUrlEnv" data-i18n="[placeholder]mcp-redis.label.urlEnvPlaceholder">
+        <label for="node-config-input-redisUrlEnv"><i class="fa fa-terminal"></i> <span data-i18n="nr-mcp-auth-storage.label.urlEnv"></span></label>
+        <input type="text" id="node-config-input-redisUrlEnv" data-i18n="[placeholder]nr-mcp-auth-storage.label.urlEnvPlaceholder">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-host"><i class="fa fa-server"></i> <span data-i18n="mcp-redis.label.host"></span></label>
-        <input type="text" id="node-config-input-host" data-i18n="[placeholder]mcp-redis.label.hostPlaceholder">
+        <label for="node-config-input-host"><i class="fa fa-server"></i> <span data-i18n="nr-mcp-auth-storage.label.host"></span></label>
+        <input type="text" id="node-config-input-host" data-i18n="[placeholder]nr-mcp-auth-storage.label.hostPlaceholder">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-port"><i class="fa fa-plug"></i> <span data-i18n="mcp-redis.label.port"></span></label>
-        <input type="text" id="node-config-input-port" data-i18n="[placeholder]mcp-redis.label.portPlaceholder">
+        <label for="node-config-input-port"><i class="fa fa-plug"></i> <span data-i18n="nr-mcp-auth-storage.label.port"></span></label>
+        <input type="text" id="node-config-input-port" data-i18n="[placeholder]nr-mcp-auth-storage.label.portPlaceholder">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-db"><i class="fa fa-list-ol"></i> <span data-i18n="mcp-redis.label.db"></span></label>
-        <input type="text" id="node-config-input-db" data-i18n="[placeholder]mcp-redis.label.dbPlaceholder">
+        <label for="node-config-input-db"><i class="fa fa-list-ol"></i> <span data-i18n="nr-mcp-auth-storage.label.db"></span></label>
+        <input type="text" id="node-config-input-db" data-i18n="[placeholder]nr-mcp-auth-storage.label.dbPlaceholder">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-tls"><i class="fa fa-lock"></i> <span data-i18n="mcp-redis.label.tls"></span></label>
+        <label for="node-config-input-tls"><i class="fa fa-lock"></i> <span data-i18n="nr-mcp-auth-storage.label.tls"></span></label>
         <input type="checkbox" id="node-config-input-tls" style="width: auto;">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-username"><i class="fa fa-user"></i> <span data-i18n="mcp-redis.label.username"></span></label>
+        <label for="node-config-input-username"><i class="fa fa-user"></i> <span data-i18n="nr-mcp-auth-storage.label.username"></span></label>
         <input type="text" id="node-config-input-username">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-password"><i class="fa fa-key"></i> <span data-i18n="mcp-redis.label.password"></span></label>
+        <label for="node-config-input-password"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-auth-storage.label.password"></span></label>
         <input type="password" id="node-config-input-password" autocomplete="off">
     </div>
     <div class="form-row mcp-redis-manual-row">
-        <label for="node-config-input-passwordEnv"><i class="fa fa-terminal"></i> <span data-i18n="mcp-redis.label.passwordEnv"></span></label>
-        <input type="text" id="node-config-input-passwordEnv" data-i18n="[placeholder]mcp-redis.label.passwordEnvPlaceholder">
+        <label for="node-config-input-passwordEnv"><i class="fa fa-terminal"></i> <span data-i18n="nr-mcp-auth-storage.label.passwordEnv"></span></label>
+        <input type="text" id="node-config-input-passwordEnv" data-i18n="[placeholder]nr-mcp-auth-storage.label.passwordEnvPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-keyPrefix"><i class="fa fa-key"></i> <span data-i18n="mcp-redis.label.keyPrefix"></span></label>
-        <input type="text" id="node-config-input-keyPrefix" data-i18n="[placeholder]mcp-redis.label.keyPrefixPlaceholder">
+        <label for="node-config-input-keyPrefix"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-auth-storage.label.keyPrefix"></span></label>
+        <input type="text" id="node-config-input-keyPrefix" data-i18n="[placeholder]nr-mcp-auth-storage.label.keyPrefixPlaceholder">
     </div>
 </script>
 
 
-<script type="text/html" data-template-name="mcp-auth">
+<script type="text/html" data-template-name="nr-mcp-auth">
     <div class="form-row">
-        <label for="node-config-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-auth.label.name"></span></label>
-        <input type="text" id="node-config-input-name" data-i18n="[placeholder]mcp-auth.label.namePlaceholder">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> <span data-i18n="nr-mcp-auth.label.name"></span></label>
+        <input type="text" id="node-config-input-name" data-i18n="[placeholder]nr-mcp-auth.label.namePlaceholder">
     </div>
     <input type="hidden" id="node-config-input-provider">
     <div class="form-row">
-        <label for="node-config-input-oauthSlug"><i class="fa fa-link"></i> <span data-i18n="mcp-auth.label.slug"></span></label>
+        <label for="node-config-input-oauthSlug"><i class="fa fa-link"></i> <span data-i18n="nr-mcp-auth.label.slug"></span></label>
         <input type="text" id="node-config-input-oauthSlug" maxlength="63" autocomplete="off">
         <div id="mcp-auth-redirect-url" style="margin-left: 100px; margin-top: 6px; font-size: 12px; overflow-wrap: anywhere;"></div>
     </div>
@@ -184,74 +184,74 @@
     </div>
     <div id="mcp-auth-oidc" class="mcp-auth-provider-panel">
     <div class="form-row">
-        <label for="node-config-input-issuerUrl"><i class="fa fa-link"></i> <span data-i18n="mcp-auth.label.issuerUrl"></span></label>
+        <label for="node-config-input-issuerUrl"><i class="fa fa-link"></i> <span data-i18n="nr-mcp-auth.label.issuerUrl"></span></label>
         <input type="text" id="node-config-input-issuerUrl" placeholder="https://idp.example.com/oidc/app">
     </div>
     <div class="form-row">
-        <label for="node-config-input-clientId"><i class="fa fa-id-card"></i> <span data-i18n="mcp-auth.label.clientId"></span></label>
+        <label for="node-config-input-clientId"><i class="fa fa-id-card"></i> <span data-i18n="nr-mcp-auth.label.clientId"></span></label>
         <input type="text" id="node-config-input-clientId">
     </div>
     <div class="form-row">
-        <label for="node-config-input-clientSecret"><i class="fa fa-key"></i> <span data-i18n="mcp-auth.label.clientSecret"></span></label>
+        <label for="node-config-input-clientSecret"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-auth.label.clientSecret"></span></label>
         <input type="password" id="node-config-input-clientSecret" autocomplete="off">
     </div>
     <div class="form-row">
-        <label for="node-config-input-oidcRefreshKey"><i class="fa fa-key"></i> <span data-i18n="mcp-auth.label.refreshKey"></span></label>
-        <input type="password" id="node-config-input-oidcRefreshKey" autocomplete="off" data-i18n="[placeholder]mcp-auth.label.refreshKeyPlaceholder">
+        <label for="node-config-input-oidcRefreshKey"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-auth.label.refreshKey"></span></label>
+        <input type="password" id="node-config-input-oidcRefreshKey" autocomplete="off" data-i18n="[placeholder]nr-mcp-auth.label.refreshKeyPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-clientSecretEnv"><i class="fa fa-terminal"></i> <span data-i18n="mcp-auth.label.secretEnv"></span></label>
-        <input type="text" id="node-config-input-clientSecretEnv" data-i18n="[placeholder]mcp-auth.label.secretEnvPlaceholder">
+        <label for="node-config-input-clientSecretEnv"><i class="fa fa-terminal"></i> <span data-i18n="nr-mcp-auth.label.secretEnv"></span></label>
+        <input type="text" id="node-config-input-clientSecretEnv" data-i18n="[placeholder]nr-mcp-auth.label.secretEnvPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-groupClaim"><i class="fa fa-users"></i> <span data-i18n="mcp-auth.label.groupClaim"></span></label>
-        <input type="text" id="node-config-input-groupClaim" data-i18n="[placeholder]mcp-auth.label.groupClaimPlaceholder">
+        <label for="node-config-input-groupClaim"><i class="fa fa-users"></i> <span data-i18n="nr-mcp-auth.label.groupClaim"></span></label>
+        <input type="text" id="node-config-input-groupClaim" data-i18n="[placeholder]nr-mcp-auth.label.groupClaimPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-userClaim"><i class="fa fa-user"></i> <span data-i18n="mcp-auth.label.userClaim"></span></label>
-        <input type="text" id="node-config-input-userClaim" data-i18n="[placeholder]mcp-auth.label.userClaimPlaceholder">
+        <label for="node-config-input-userClaim"><i class="fa fa-user"></i> <span data-i18n="nr-mcp-auth.label.userClaim"></span></label>
+        <input type="text" id="node-config-input-userClaim" data-i18n="[placeholder]nr-mcp-auth.label.userClaimPlaceholder">
     </div>
     </div>
     <div id="mcp-auth-microsoft" class="mcp-auth-provider-panel" style="display: none;">
         <div class="form-row">
-            <label for="node-config-input-microsoftTenantId"><i class="fa fa-building"></i> <span data-i18n="mcp-auth.label.tenantId"></span></label>
+            <label for="node-config-input-microsoftTenantId"><i class="fa fa-building"></i> <span data-i18n="nr-mcp-auth.label.tenantId"></span></label>
             <input type="text" id="node-config-input-microsoftTenantId">
         </div>
         <div class="form-row">
-            <label for="node-config-input-microsoftClientId"><i class="fa fa-id-card"></i> <span data-i18n="mcp-auth.label.clientId"></span></label>
+            <label for="node-config-input-microsoftClientId"><i class="fa fa-id-card"></i> <span data-i18n="nr-mcp-auth.label.clientId"></span></label>
             <input type="text" id="node-config-input-microsoftClientId">
         </div>
         <div class="form-row">
-            <label for="node-config-input-microsoftClientSecret"><i class="fa fa-key"></i> <span data-i18n="mcp-auth.label.clientSecret"></span></label>
+            <label for="node-config-input-microsoftClientSecret"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-auth.label.clientSecret"></span></label>
             <input type="password" id="node-config-input-microsoftClientSecret" autocomplete="off">
         </div>
         <div class="form-row">
-            <label for="node-config-input-microsoftRefreshKey"><i class="fa fa-key"></i> <span data-i18n="mcp-auth.label.refreshKey"></span></label>
-            <input type="password" id="node-config-input-microsoftRefreshKey" autocomplete="off" data-i18n="[placeholder]mcp-auth.label.refreshKeyPlaceholder">
+            <label for="node-config-input-microsoftRefreshKey"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-auth.label.refreshKey"></span></label>
+            <input type="password" id="node-config-input-microsoftRefreshKey" autocomplete="off" data-i18n="[placeholder]nr-mcp-auth.label.refreshKeyPlaceholder">
         </div>
         <div class="form-row">
-            <label for="node-config-input-microsoftClientSecretEnv"><i class="fa fa-terminal"></i> <span data-i18n="mcp-auth.label.secretEnv"></span></label>
-            <input type="text" id="node-config-input-microsoftClientSecretEnv" data-i18n="[placeholder]mcp-auth.label.secretEnvPlaceholder">
+            <label for="node-config-input-microsoftClientSecretEnv"><i class="fa fa-terminal"></i> <span data-i18n="nr-mcp-auth.label.secretEnv"></span></label>
+            <input type="text" id="node-config-input-microsoftClientSecretEnv" data-i18n="[placeholder]nr-mcp-auth.label.secretEnvPlaceholder">
         </div>
     </div>
     <div class="form-row">
-        <label for="node-config-input-allowedClientHosts"><i class="fa fa-globe"></i> <span data-i18n="mcp-auth.label.clientHosts"></span></label>
-        <input type="text" id="node-config-input-allowedClientHosts" data-i18n="[placeholder]mcp-auth.label.clientHostsPlaceholder">
+        <label for="node-config-input-allowedClientHosts"><i class="fa fa-globe"></i> <span data-i18n="nr-mcp-auth.label.clientHosts"></span></label>
+        <input type="text" id="node-config-input-allowedClientHosts" data-i18n="[placeholder]nr-mcp-auth.label.clientHostsPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-redis"><i class="fa fa-database"></i> <span data-i18n="mcp-auth.label.storage"></span></label>
+        <label for="node-config-input-redis"><i class="fa fa-database"></i> <span data-i18n="nr-mcp-auth.label.storage"></span></label>
         <input type="text" id="node-config-input-redis">
     </div>
     <div class="form-row">
-        <label for="node-config-input-accessTokenTtl"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-auth.label.accessTokenTtl"></span></label>
+        <label for="node-config-input-accessTokenTtl"><i class="fa fa-clock-o"></i> <span data-i18n="nr-mcp-auth.label.accessTokenTtl"></span></label>
         <input type="text" id="node-config-input-accessTokenTtl" placeholder="900">
     </div>
     <div class="form-row">
-        <label for="node-config-input-refreshTokenTtl"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-auth.label.refreshTokenTtl"></span></label>
+        <label for="node-config-input-refreshTokenTtl"><i class="fa fa-clock-o"></i> <span data-i18n="nr-mcp-auth.label.refreshTokenTtl"></span></label>
         <input type="text" id="node-config-input-refreshTokenTtl" placeholder="604800">
     </div>
     <div class="form-row">
-        <label for="node-config-input-sessionTtl"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-auth.label.sessionTtl"></span></label>
+        <label for="node-config-input-sessionTtl"><i class="fa fa-clock-o"></i> <span data-i18n="nr-mcp-auth.label.sessionTtl"></span></label>
         <input type="text" id="node-config-input-sessionTtl" placeholder="1814400">
     </div>
 </script>

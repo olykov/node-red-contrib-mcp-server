@@ -1,11 +1,9 @@
 {
-    "mcp-runtime": {
+    "nr-mcp-runtime": {
         "label": {
             "paletteLabel": "MCP Runtime",
             "name": "Name",
             "namePlaceholder": "Optional display name",
-            "runtimeName": "Runtime Name",
-            "runtimeNamePlaceholder": "mcp-runtime",
             "port": "Port",
             "portPlaceholder": "8001",
             "baseUrl": "Base URL",
@@ -31,12 +29,12 @@
             "adminCa": "Admin API CA",
             "adminEndpointPath": "Admin Path",
             "adminEndpointPathPlaceholder": "/mcp/admin",
-            "adminToolsNote": "Admin tools require an Admin Token or Admin Token Env and an Admin Endpoint Path matching an MCP Server. HTTPS uses normal certificate verification; provide a private CA certificate when needed."
+            "adminToolsNote": "Admin tools require an Admin Token or Admin Token Env and an Admin Endpoint Path matching an MCP Endpoint. HTTPS uses normal certificate verification; provide a private CA certificate when needed."
         }
     },
-    "mcp-flow-server": {
+    "nr-mcp-endpoint": {
         "label": {
-            "paletteLabel": "MCP Server",
+            "paletteLabel": "MCP Endpoint",
             "name": "Name",
             "namePlaceholder": "Optional display name",
             "runtime": "Runtime",

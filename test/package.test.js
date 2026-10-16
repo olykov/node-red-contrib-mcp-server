@@ -7,7 +7,7 @@ const { resolve } = require('node:path');
 const EventEmitter = require('node:events');
 const manifest = require('../package.json');
 
-// MCP-PKG-1
+// MCP-PKG-1, MCP-NAME-1
 it('loads only the supported flow-serving palette nodes', () => {
     const registered = [];
     const RED = {
@@ -21,8 +21,9 @@ it('loads only the supported flow-serving palette nodes', () => {
         assert.ok(existsSync(resolve(__dirname, '..', file.replace(/\.js$/, '.html'))));
         require('../' + file)(RED);
     }
-    assert.deepEqual(registered.sort(), ['mcp-auth', 'mcp-flow-server', 'mcp-redis',
-        'mcp-runtime', 'mcp-server-metrics', 'mcp-tool-registry', 'mcp-tool-response']);
+    assert.deepEqual(registered.sort(), ['nr-mcp-auth', 'nr-mcp-auth-storage', 'nr-mcp-endpoint',
+        'nr-mcp-metrics', 'nr-mcp-runtime', 'nr-mcp-tool', 'nr-mcp-tool-response']);
+    assert.ok(registered.every(type => type.startsWith('nr-mcp-')), 'every node type carries the nr-mcp- prefix');
     for (const name of ['mcp-client', 'mcp-server']) {
         for (const extension of ['js', 'html']) {
             assert.equal(existsSync(resolve(__dirname, '..', name + '.' + extension)), false);
@@ -60,18 +61,18 @@ it('declares accurate package metadata and ships the example instead of tests', 
 it('ships an example flow whose nodes satisfy the current editor contracts', () => {
     const flow = require('../examples/flow-based-mcp-server-example.json');
     const byId = new Map(flow.map(node => [node.id, node]));
-    const server = flow.find(node => node.type === 'mcp-flow-server');
-    assert.strictEqual(byId.get(server.runtime).type, 'mcp-runtime');
-    assert.strictEqual(byId.get(server.auth).type, 'mcp-auth');
-    assert.strictEqual(byId.get(byId.get(server.auth).redis).type, 'mcp-redis');
+    const server = flow.find(node => node.type === 'nr-mcp-endpoint');
+    assert.strictEqual(byId.get(server.runtime).type, 'nr-mcp-runtime');
+    assert.strictEqual(byId.get(server.auth).type, 'nr-mcp-auth');
+    assert.strictEqual(byId.get(byId.get(server.auth).redis).type, 'nr-mcp-auth-storage');
     assert.strictEqual(server.serverPort, undefined);
     assert.strictEqual(server.wires, undefined);
     assert.strictEqual(server.z, undefined);
-    for (const tool of flow.filter(node => node.type === 'mcp-tool-registry')) {
+    for (const tool of flow.filter(node => node.type === 'nr-mcp-tool')) {
         assert.strictEqual(tool.scope, 'endpoint');
         assert.strictEqual(tool.endpoint, server.id);
         let next = byId.get(tool.wires[0][0]);
-        while (next.type !== 'mcp-tool-response') next = byId.get(next.wires[0][0]);
+        while (next.type !== 'nr-mcp-tool-response') next = byId.get(next.wires[0][0]);
         assert.match(tool.toolName, /^[a-z][a-z0-9_]*$/);
         JSON.parse(tool.toolSchema);
     }
@@ -80,7 +81,7 @@ it('ships an example flow whose nodes satisfy the current editor contracts', () 
             if (field.endsWith('Env') && value) assert.match(value, /^MCP_[A-Z0-9_]+$/, node.id + '.' + field);
         }
     }
-    assert.equal(flow.find(node => node.type === 'mcp-redis').redisUrlEnv, 'MCP_REDIS_URL');
+    assert.equal(flow.find(node => node.type === 'nr-mcp-auth-storage').redisUrlEnv, 'MCP_REDIS_URL');
     for (const node of flow) {
         for (const port of node.wires || []) for (const target of port) assert.ok(byId.has(target), target);
         if (node.z) assert.strictEqual(byId.get(node.z).type, 'tab');

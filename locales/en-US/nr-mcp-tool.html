@@ -1,4 +1,4 @@
-<script type="text/html" data-help-name="mcp-tool-registry">
+<script type="text/html" data-help-name="nr-mcp-tool">
     <p>Registers one MCP tool for one endpoint or for every endpoint of a runtime and starts its flow on each call.</p>
     <h3>Outputs</h3>
     <ol class="node-ports">
@@ -39,8 +39,8 @@
         <dt>Tool Name</dt>
         <dd>MCP tool name: lowercase letters, digits and underscores, starting with a letter.</dd>
         <dt>Scope</dt>
-        <dd><code>Endpoint</code> offers the tool on the selected MCP Server only; <code>Shared</code>
-        offers it on every MCP Server of the selected runtime. An Endpoint tool replaces a Shared tool
+        <dd><code>Endpoint</code> offers the tool on the selected MCP Endpoint only; <code>Shared</code>
+        offers it on every MCP Endpoint of the selected runtime. An Endpoint tool replaces a Shared tool
         with the same name on its endpoint. Without a Scope or the selected node the tool is
         <code>invalid</code>.</dd>
         <dt>Tool Timeout</dt>
@@ -61,7 +61,7 @@
         <li><a href="https://modelcontextprotocol.io/specification">Model Context Protocol specification</a></li>
     </ul>
 </script>
-<script type="text/html" data-help-name="mcp-tool-response">
+<script type="text/html" data-help-name="nr-mcp-tool-response">
     <p>Returns the result of an MCP tool flow to the client.</p>
     <h3>Inputs</h3>
     <dl class="message-properties">

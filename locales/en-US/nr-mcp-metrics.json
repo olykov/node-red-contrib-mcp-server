@@ -1,9 +1,9 @@
 {
-    "mcp-server-metrics": {
+    "nr-mcp-metrics": {
         "label": {
             "name": "MCP Metrics",
             "nameField": "Name",
-            "namePlaceholder": "MCP Server Metrics",
+            "namePlaceholder": "MCP Metrics",
             "runtime": "Runtime"
         },
         "status": {

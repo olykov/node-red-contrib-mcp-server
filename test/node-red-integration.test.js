@@ -9,10 +9,10 @@ const { mcpFetch } = require('./helpers/mcp-request');
 helper.init(require.resolve('node-red'));
 
 function registerPackageNodes(RED) {
-    require('../mcp-auth')(RED);
-    require('../mcp-flow-server')(RED);
-    require('../mcp-server-metrics')(RED);
-    require('../mcp-tool-registry')(RED);
+    require('../nr-mcp-auth')(RED);
+    require('../nr-mcp-endpoint')(RED);
+    require('../nr-mcp-metrics')(RED);
+    require('../nr-mcp-tool')(RED);
 }
 
 async function unusedPort() {
@@ -45,20 +45,40 @@ describe('Node-RED runtime integration', () => {
         await helper.stopServer();
     });
 
+    // MCP-NAME-1
+    it('loads next to the upstream node-red-contrib-mcp-server node types', async () => {
+        const upstreamTypes = ['mcp-server', 'mcp-client', 'mcp-tool', 'mcp-flow-server', 'mcp-tool-registry'];
+        function registerUpstreamTypes(RED) {
+            for (const type of upstreamTypes) RED.nodes.registerType(type, function (config) { RED.nodes.createNode(this, config); });
+        }
+        try {
+            await helper.load([registerUpstreamTypes, registerPackageNodes], [
+                { id: 'up-tab', type: 'tab', label: 'Upstream' },
+                ...upstreamTypes.map(type => ({ id: 'up-' + type, type, z: 'up-tab', wires: [] })),
+                { id: 'own-runtime', type: 'nr-mcp-runtime', serverPort: await unusedPort(), bindHost: '127.0.0.1',
+                    publicBaseUrl: 'http://127.0.0.1' }
+            ]);
+            for (const type of upstreamTypes) assert.equal(helper.getNode('up-' + type).type, type);
+            assert.equal(helper.getNode('own-runtime').type, 'nr-mcp-runtime');
+        } finally {
+            await helper.unload();
+        }
+    });
+
     // MCP-NODE-4, MCP-NODE-5
     it('lists tools right after deploy and reopens the runtime port exactly once on redeploy', async () => {
         const http = require('node:http');
         const port = await unusedPort();
         const flows = [
             { id: 'rt-tab', type: 'tab', label: 'Runtime' },
-            { id: 'rt-runtime', type: 'mcp-runtime', name: 'Runtime', runtimeName: 'runtime', serverPort: port,
+            { id: 'rt-runtime', type: 'nr-mcp-runtime', name: 'Runtime', serverPort: port,
                 bindHost: '127.0.0.1', publicBaseUrl: 'http://127.0.0.1:' + port },
-            { id: 'rt-storage', type: 'mcp-redis', mode: 'memory' },
-            { id: 'rt-auth', type: 'mcp-auth', oauthSlug: 'runtime-login', provider: 'oidc', issuerUrl: 'https://idp.example.test',
+            { id: 'rt-storage', type: 'nr-mcp-auth-storage', mode: 'memory' },
+            { id: 'rt-auth', type: 'nr-mcp-auth', oauthSlug: 'runtime-login', provider: 'oidc', issuerUrl: 'https://idp.example.test',
                 clientId: 'client', allowedClientHosts: 'client.example.test', redis: 'rt-storage' },
-            { id: 'rt-endpoint', type: 'mcp-flow-server', runtime: 'rt-runtime', auth: 'rt-auth',
+            { id: 'rt-endpoint', type: 'nr-mcp-endpoint', runtime: 'rt-runtime', auth: 'rt-auth',
                 serverName: 'runtime', serverPath: '/mcp/runtime', allowedGroups: 'runtime-users' },
-            ...['alpha', 'beta'].map(name => ({ id: 'rt-' + name, type: 'mcp-tool-registry', z: 'rt-tab', toolName: name,
+            ...['alpha', 'beta'].map(name => ({ id: 'rt-' + name, type: 'nr-mcp-tool', z: 'rt-tab', toolName: name,
                 scope: 'endpoint', endpoint: 'rt-endpoint', toolSchema: '{"type":"object","properties":{}}', wires: [[]] }))
         ];
         const listen = http.Server.prototype.listen;
@@ -99,29 +119,29 @@ describe('Node-RED runtime integration', () => {
         const port = await unusedPort();
         const flows = [
             { id: 'it-tab', type: 'tab', label: 'Integration' },
-            { id: 'it-runtime', type: 'mcp-runtime', name: 'Integration runtime', runtimeName: 'integration',
+            { id: 'it-runtime', type: 'nr-mcp-runtime', name: 'Integration runtime',
                 serverPort: port, bindHost: '127.0.0.1', publicBaseUrl: 'http://127.0.0.1:' + port,
                 allowedOrigins: 'https://trusted.example.test',
                 adminPort: '', adminEndpointPath: '' },
-            { id: 'it-storage', type: 'mcp-redis', name: 'Integration storage', mode: 'memory',
+            { id: 'it-storage', type: 'nr-mcp-auth-storage', name: 'Integration storage', mode: 'memory',
                 redisUrlEnv: 'MCP_REDIS_URL', host: '127.0.0.1', port: 6379, db: 0, tls: false,
                 username: '', passwordEnv: '', keyPrefix: 'mcp_auth:' },
-            { id: 'it-auth', type: 'mcp-auth', name: 'Integration auth', oauthSlug: 'integration',
+            { id: 'it-auth', type: 'nr-mcp-auth', name: 'Integration auth', oauthSlug: 'integration',
                 provider: 'oidc', issuerUrl: 'https://idp.example.test', clientId: 'integration-client',
                 clientSecretEnv: '', microsoftTenantId: '', microsoftClientId: '', microsoftClientSecretEnv: '',
                 allowedClientHosts: 'client.example.test', groupClaim: 'groups', userClaim: 'email',
                 redis: 'it-storage', accessTokenTtl: 900, refreshTokenTtl: 604800, sessionTtl: 1814400 },
-            { id: 'it-endpoint', type: 'mcp-flow-server', name: 'Integration endpoint',
+            { id: 'it-endpoint', type: 'nr-mcp-endpoint', name: 'Integration endpoint',
                 runtime: 'it-runtime', auth: 'it-auth', serverName: 'integration',
                 serverPath: '/mcp/integration', allowedGroups: 'integration-users' },
-            { id: 'it-tool', type: 'mcp-tool-registry', z: 'it-tab', name: 'Integration tool',
+            { id: 'it-tool', type: 'nr-mcp-tool', z: 'it-tab', name: 'Integration tool',
                 toolName: 'integration_tool', toolDescription: 'A test tool', scope: 'endpoint', endpoint: 'it-endpoint',
                 toolBehavior: 'read', worldAccess: 'closed',
                 toolSchema: '{"type":"object","properties":{}}', outputSchema: '', timeoutMs: 1000,
                 cancelOutput: true, outputs: 2, wires: [['it-output'], ['it-cancel']] },
             { id: 'it-output', type: 'helper', z: 'it-tab', wires: [] },
             { id: 'it-cancel', type: 'helper', z: 'it-tab', wires: [] },
-            { id: 'it-response', type: 'mcp-tool-response', z: 'it-tab', wires: [] }
+            { id: 'it-response', type: 'nr-mcp-tool-response', z: 'it-tab', wires: [] }
         ];
 
         await helper.load(registerPackageNodes, flows, {
@@ -136,7 +156,7 @@ describe('Node-RED runtime integration', () => {
         await waitFor(() => endpoint.isRunning);
         assert.equal(endpoint.httpServer.address().address, '127.0.0.1');
 
-        const adminListing = await helper.request().get('/mcp-flow-servers').expect(200);
+        const adminListing = await helper.request().get('/nr-mcp-endpoints').expect(200);
         assert.ok(adminListing.body.servers.some(item => item.endpointId === 'it-endpoint'));
 
         auth.readAccessToken = async token => token === 'integration-token' ?

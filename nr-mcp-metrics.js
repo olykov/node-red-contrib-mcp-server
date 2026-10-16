@@ -12,7 +12,7 @@ module.exports = function (RED)
 
         if (!runtime || typeof runtime.subscribeToolTelemetry !== 'function')
         {
-            node.status({ fill: 'red', shape: 'ring', text: message(node, 'mcp-server-metrics', 'mcp-server-metrics.status.runtimeUnavailable') });
+            node.status({ fill: 'red', shape: 'ring', text: message(node, 'nr-mcp-metrics', 'nr-mcp-metrics.status.runtimeUnavailable') });
             node.error('MCP runtime is required for metrics');
             return;
         }
@@ -24,14 +24,14 @@ module.exports = function (RED)
 
         if (!unsubscribe)
         {
-            node.status({ fill: 'red', shape: 'ring', text: message(node, 'mcp-server-metrics', 'mcp-server-metrics.status.duplicate') });
+            node.status({ fill: 'red', shape: 'ring', text: message(node, 'nr-mcp-metrics', 'nr-mcp-metrics.status.duplicate') });
             node.error('Only one MCP Server Metrics node is allowed per runtime');
             return;
         }
 
-        node.status({ fill: 'green', shape: 'dot', text: message(node, 'mcp-server-metrics', 'mcp-server-metrics.status.listening') });
+        node.status({ fill: 'green', shape: 'dot', text: message(node, 'nr-mcp-metrics', 'nr-mcp-metrics.status.listening') });
         node.on('close', unsubscribe);
     }
 
-    RED.nodes.registerType('mcp-server-metrics', MCPServerMetricsNode);
+    RED.nodes.registerType('nr-mcp-metrics', MCPServerMetricsNode);
 };

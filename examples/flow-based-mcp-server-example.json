@@ -18,9 +18,8 @@
     },
     {
         "id": "mcp-example-runtime",
-        "type": "mcp-runtime",
+        "type": "nr-mcp-runtime",
         "name": "MCP example runtime",
-        "runtimeName": "mcp-example",
         "serverPort": 8001,
         "publicBaseUrl": "https://nodered.example.com",
         "adminPort": "",
@@ -28,7 +27,7 @@
     },
     {
         "id": "mcp-example-storage",
-        "type": "mcp-redis",
+        "type": "nr-mcp-auth-storage",
         "name": "MCP example storage",
         "mode": "memory",
         "redisUrlEnv": "MCP_REDIS_URL",
@@ -42,7 +41,7 @@
     },
     {
         "id": "mcp-example-auth",
-        "type": "mcp-auth",
+        "type": "nr-mcp-auth",
         "name": "MCP example auth",
         "oauthSlug": "example-login",
         "provider": "oidc",
@@ -62,7 +61,7 @@
     },
     {
         "id": "mcp-example-server",
-        "type": "mcp-flow-server",
+        "type": "nr-mcp-endpoint",
         "name": "Example endpoint",
         "runtime": "mcp-example-runtime",
         "auth": "mcp-example-auth",
@@ -74,7 +73,7 @@
     },
     {
         "id": "mcp-example-tool",
-        "type": "mcp-tool-registry",
+        "type": "nr-mcp-tool",
         "z": "mcp-example-tab",
         "name": "Add numbers",
         "toolName": "add_numbers",
@@ -119,7 +118,7 @@
     },
     {
         "id": "mcp-example-response",
-        "type": "mcp-tool-response",
+        "type": "nr-mcp-tool-response",
         "z": "mcp-example-tab",
         "name": "",
         "x": 600,

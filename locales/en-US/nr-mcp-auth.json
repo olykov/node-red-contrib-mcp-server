@@ -1,5 +1,5 @@
 {
-    "mcp-redis": {
+    "nr-mcp-auth-storage": {
         "label": {
             "paletteLabel": "MCP Auth Storage",
             "name": "Name",
@@ -26,7 +26,7 @@
             "keyPrefixPlaceholder": "mcp_auth:"
         }
     },
-    "mcp-auth": {
+    "nr-mcp-auth": {
         "label": {
             "paletteLabel": "MCP Auth",
             "defaultLabel": "MCP OIDC Auth",

@@ -1,5 +1,5 @@
 <script type="text/javascript">
-    RED.nodes.registerType('mcp-tool-registry', {
+    RED.nodes.registerType('nr-mcp-tool', {
         category: 'mcp',
         color: '#E9967A',
         defaults: {
@@ -7,11 +7,11 @@
             toolName: { value: '', required: true, validate: RED.validators.regex(/^[a-z][a-z0-9_]{0,63}$/) },
             toolDescription: { value: '' },
             scope: { value: '', required: true, validate: function(v) { return v === 'endpoint' || v === 'shared'; } },
-            endpoint: { value: '', type: 'mcp-flow-server', required: false, validate: function(v) {
+            endpoint: { value: '', type: 'nr-mcp-endpoint', required: false, validate: function(v) {
                 var scope = $('#node-input-scope').length ? $('#node-input-scope').val() : this.scope;
                 return scope !== 'endpoint' || (!!v && v !== '_ADD_');
             } },
-            runtime: { value: '', type: 'mcp-runtime', required: false, validate: function(v) {
+            runtime: { value: '', type: 'nr-mcp-runtime', required: false, validate: function(v) {
                 var scope = $('#node-input-scope').length ? $('#node-input-scope').val() : this.scope;
                 return scope !== 'shared' || (!!v && v !== '_ADD_');
             } },
@@ -36,12 +36,12 @@
         inputs: 0,
         outputs: 1,
         outputLabels: function(index) {
-            return this._(index ? 'mcp-tool-registry.label.cancelOutputLabel' : 'mcp-tool-registry.label.callOutputLabel');
+            return this._(index ? 'nr-mcp-tool.label.cancelOutputLabel' : 'nr-mcp-tool.label.callOutputLabel');
         },
         paletteLabel: 'MCP Tool',
         icon: 'font-awesome/fa-wrench',
         label: function() {
-            return this.name || this.toolName || this._('mcp-tool-registry.label.paletteLabel');
+            return this.name || this.toolName || this._('nr-mcp-tool.label.paletteLabel');
         },
         labelStyle: function() {
             return this.name ? 'node_label_italic' : '';
@@ -82,9 +82,9 @@
             }
 
             $('#format-json-fields-btn').on('click', function() {
-                var inputOk = formatJsonField(node.schemaEditors.toolSchema, node._('mcp-tool-registry.label.inputSchemaInvalid') + ':', false);
-                var outputOk = formatJsonField(node.schemaEditors.outputSchema, node._('mcp-tool-registry.label.outputSchemaInvalid') + ':', true);
-                if (inputOk && outputOk) RED.notify(node._('mcp-tool-registry.label.formatSuccess'), 'success');
+                var inputOk = formatJsonField(node.schemaEditors.toolSchema, node._('nr-mcp-tool.label.inputSchemaInvalid') + ':', false);
+                var outputOk = formatJsonField(node.schemaEditors.outputSchema, node._('nr-mcp-tool.label.outputSchemaInvalid') + ':', true);
+                if (inputOk && outputOk) RED.notify(node._('nr-mcp-tool.label.formatSuccess'), 'success');
             });
 
             $('#node-input-toolName').on('input', function() {
@@ -92,7 +92,7 @@
                 var isValid = /^[a-z][a-z0-9_]{0,63}$/.test(toolName);
                 if (toolName && !isValid) {
                     $(this).addClass('input-error');
-                    $('#tool-name-validation').show().text(node._('mcp-tool-registry.label.toolNameValidation'));
+                    $('#tool-name-validation').show().text(node._('nr-mcp-tool.label.toolNameValidation'));
                 } else {
                     $(this).removeClass('input-error');
                     $('#tool-name-validation').hide();
@@ -116,7 +116,7 @@
             delete this.schemaEditors;
         }
     });
-    RED.nodes.registerType('mcp-tool-response', {
+    RED.nodes.registerType('nr-mcp-tool-response', {
         category: 'mcp',
         color: '#E9967A',
         defaults: {
@@ -128,7 +128,7 @@
         paletteLabel: 'MCP Tool Response',
         icon: 'font-awesome/fa-reply',
         label: function() {
-            return this.name || this._('mcp-tool-response.label.paletteLabel');
+            return this.name || this._('nr-mcp-tool-response.label.paletteLabel');
         },
         labelStyle: function() {
             return this.name ? 'node_label_italic' : '';
@@ -136,86 +136,86 @@
     });
 </script>
 
-<script type="text/html" data-template-name="mcp-tool-response">
+<script type="text/html" data-template-name="nr-mcp-tool-response">
     <div class="form-row">
-        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-tool-response.label.name"></span></label>
+        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="nr-mcp-tool-response.label.name"></span></label>
         <input type="text" id="node-input-name">
     </div>
 </script>
 
-<script type="text/html" data-template-name="mcp-tool-registry">
+<script type="text/html" data-template-name="nr-mcp-tool">
     <div class="form-row">
-        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="mcp-tool-registry.label.name"></span></label>
-        <input type="text" id="node-input-name" data-i18n="[placeholder]mcp-tool-registry.label.namePlaceholder">
+        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="nr-mcp-tool.label.name"></span></label>
+        <input type="text" id="node-input-name" data-i18n="[placeholder]nr-mcp-tool.label.namePlaceholder">
     </div>
 
     <div class="form-row">
-        <label for="node-input-toolName"><i class="fa fa-cog"></i> <span data-i18n="mcp-tool-registry.label.toolName"></span></label>
-        <input type="text" id="node-input-toolName" data-i18n="[placeholder]mcp-tool-registry.label.toolNamePlaceholder">
+        <label for="node-input-toolName"><i class="fa fa-cog"></i> <span data-i18n="nr-mcp-tool.label.toolName"></span></label>
+        <input type="text" id="node-input-toolName" data-i18n="[placeholder]nr-mcp-tool.label.toolNamePlaceholder">
         <div id="tool-name-validation" class="mcp-tool-registry-validation"></div>
     </div>
 
     <div class="form-row">
-        <label for="node-input-toolDescription"><i class="fa fa-info-circle"></i> <span data-i18n="mcp-tool-registry.label.toolDescription"></span></label>
-        <textarea id="node-input-toolDescription" rows="4" style="width: 70%; resize: vertical;" data-i18n="[placeholder]mcp-tool-registry.label.toolDescriptionPlaceholder"></textarea>
+        <label for="node-input-toolDescription"><i class="fa fa-info-circle"></i> <span data-i18n="nr-mcp-tool.label.toolDescription"></span></label>
+        <textarea id="node-input-toolDescription" rows="4" style="width: 70%; resize: vertical;" data-i18n="[placeholder]nr-mcp-tool.label.toolDescriptionPlaceholder"></textarea>
     </div>
 
     <div class="form-row">
-        <label for="node-input-scope"><i class="fa fa-sitemap"></i> <span data-i18n="mcp-tool-registry.label.scope"></span></label>
+        <label for="node-input-scope"><i class="fa fa-sitemap"></i> <span data-i18n="nr-mcp-tool.label.scope"></span></label>
         <select id="node-input-scope" style="width: 70%;">
-            <option value="" data-i18n="mcp-tool-registry.label.scopeSelect"></option>
-            <option value="endpoint" data-i18n="mcp-tool-registry.label.scopeEndpoint"></option>
-            <option value="shared" data-i18n="mcp-tool-registry.label.scopeShared"></option>
+            <option value="" data-i18n="nr-mcp-tool.label.scopeSelect"></option>
+            <option value="endpoint" data-i18n="nr-mcp-tool.label.scopeEndpoint"></option>
+            <option value="shared" data-i18n="nr-mcp-tool.label.scopeShared"></option>
         </select>
     </div>
     <div class="form-row mcp-tool-scope-endpoint">
-        <label for="node-input-endpoint"><i class="fa fa-server"></i> <span data-i18n="mcp-tool-registry.label.endpoint"></span></label>
+        <label for="node-input-endpoint"><i class="fa fa-server"></i> <span data-i18n="nr-mcp-tool.label.endpoint"></span></label>
         <input type="text" id="node-input-endpoint">
     </div>
     <div class="form-row mcp-tool-scope-shared">
-        <label for="node-input-runtime"><i class="fa fa-cogs"></i> <span data-i18n="mcp-tool-registry.label.runtime"></span></label>
+        <label for="node-input-runtime"><i class="fa fa-cogs"></i> <span data-i18n="nr-mcp-tool.label.runtime"></span></label>
         <input type="text" id="node-input-runtime">
     </div>
     <div class="form-row">
-        <label for="node-input-timeoutMs"><i class="fa fa-clock-o"></i> <span data-i18n="mcp-tool-registry.label.timeoutMs"></span></label>
+        <label for="node-input-timeoutMs"><i class="fa fa-clock-o"></i> <span data-i18n="nr-mcp-tool.label.timeoutMs"></span></label>
         <input type="number" id="node-input-timeoutMs" min="0" max="600000" step="1">
     </div>
-    <div class="form-tips" data-i18n="mcp-tool-registry.label.timeoutTip"></div>
+    <div class="form-tips" data-i18n="nr-mcp-tool.label.timeoutTip"></div>
     <div class="form-row">
-        <label for="node-input-cancelOutput" data-i18n="mcp-tool-registry.label.cancelOutput"></label>
+        <label for="node-input-cancelOutput" data-i18n="nr-mcp-tool.label.cancelOutput"></label>
         <input type="checkbox" id="node-input-cancelOutput" style="width: auto;">
     </div>
 
     <hr>
-    <h4 data-i18n="mcp-tool-registry.label.annotationsHeading"></h4>
+    <h4 data-i18n="nr-mcp-tool.label.annotationsHeading"></h4>
 
     <div class="form-row">
-        <label for="node-input-toolBehavior"><i class="fa fa-shield"></i> <span data-i18n="mcp-tool-registry.label.behavior"></span></label>
+        <label for="node-input-toolBehavior"><i class="fa fa-shield"></i> <span data-i18n="nr-mcp-tool.label.behavior"></span></label>
         <select id="node-input-toolBehavior" style="width: 70%;">
-            <option value="" data-i18n="mcp-tool-registry.label.behaviorUnspecified"></option>
-            <option value="read" data-i18n="mcp-tool-registry.label.behaviorRead"></option>
-            <option value="write" data-i18n="mcp-tool-registry.label.behaviorWrite"></option>
-            <option value="destructive" data-i18n="mcp-tool-registry.label.behaviorDestructive"></option>
+            <option value="" data-i18n="nr-mcp-tool.label.behaviorUnspecified"></option>
+            <option value="read" data-i18n="nr-mcp-tool.label.behaviorRead"></option>
+            <option value="write" data-i18n="nr-mcp-tool.label.behaviorWrite"></option>
+            <option value="destructive" data-i18n="nr-mcp-tool.label.behaviorDestructive"></option>
         </select>
     </div>
 
     <div class="form-row">
-        <label for="node-input-worldAccess"><i class="fa fa-globe"></i> <span data-i18n="mcp-tool-registry.label.worldAccess"></span></label>
+        <label for="node-input-worldAccess"><i class="fa fa-globe"></i> <span data-i18n="nr-mcp-tool.label.worldAccess"></span></label>
         <select id="node-input-worldAccess" style="width: 70%;">
-            <option value="" data-i18n="mcp-tool-registry.label.worldAccessUnspecified"></option>
-            <option value="closed" data-i18n="mcp-tool-registry.label.worldAccessClosed"></option>
-            <option value="open" data-i18n="mcp-tool-registry.label.worldAccessOpen"></option>
+            <option value="" data-i18n="nr-mcp-tool.label.worldAccessUnspecified"></option>
+            <option value="closed" data-i18n="nr-mcp-tool.label.worldAccessClosed"></option>
+            <option value="open" data-i18n="nr-mcp-tool.label.worldAccessOpen"></option>
         </select>
     </div>
 
     <div class="form-row">
-        <label for="node-input-toolSchema-editor" style="display: block; width: auto;"><i class="fa fa-code"></i> <span data-i18n="mcp-tool-registry.label.inputSchema"></span></label>
+        <label for="node-input-toolSchema-editor" style="display: block; width: auto;"><i class="fa fa-code"></i> <span data-i18n="nr-mcp-tool.label.inputSchema"></span></label>
         <div style="height: 220px; min-height: 120px;" class="node-text-editor" id="node-input-toolSchema-editor"></div>
         <input type="hidden" id="node-input-toolSchema">
     </div>
 
     <div class="form-row">
-        <label for="node-input-outputSchema-editor" style="display: block; width: auto;"><i class="fa fa-code"></i> <span data-i18n="mcp-tool-registry.label.outputSchema"></span></label>
+        <label for="node-input-outputSchema-editor" style="display: block; width: auto;"><i class="fa fa-code"></i> <span data-i18n="nr-mcp-tool.label.outputSchema"></span></label>
         <div style="height: 220px; min-height: 120px;" class="node-text-editor" id="node-input-outputSchema-editor"></div>
         <input type="hidden" id="node-input-outputSchema">
     </div>
@@ -223,7 +223,7 @@
     <div class="form-row">
         <label></label>
         <button type="button" id="format-json-fields-btn" class="red-ui-button">
-            <i class="fa fa-magic"></i> <span data-i18n="mcp-tool-registry.label.formatJsonButton"></span>
+            <i class="fa fa-magic"></i> <span data-i18n="nr-mcp-tool.label.formatJsonButton"></span>
         </button>
     </div>
 

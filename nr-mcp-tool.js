@@ -4,7 +4,7 @@ module.exports = function (RED)
     const { compileInputSchema, compileOutputSchema } = require('./lib/tool-validation');
     const { message } = require('./lib/messages');
     const executions = require('./lib/executions');
-    const statusText = (node, key) => message(node, 'mcp-tool-registry', 'mcp-tool-registry.status.' + key);
+    const statusText = (node, key) => message(node, 'nr-mcp-tool', 'nr-mcp-tool.status.' + key);
 
     function toolAnnotations(behavior, worldAccess)
     {
@@ -151,6 +151,6 @@ module.exports = function (RED)
         });
     }
 
-    RED.nodes.registerType('mcp-tool-registry', MCPToolRegistryNode);
-    RED.nodes.registerType('mcp-tool-response', MCPToolResponseNode);
+    RED.nodes.registerType('nr-mcp-tool', MCPToolRegistryNode);
+    RED.nodes.registerType('nr-mcp-tool-response', MCPToolResponseNode);
 };

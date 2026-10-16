@@ -1,5 +1,5 @@
 {
-    "mcp-tool-registry": {
+    "nr-mcp-tool": {
         "label": {
             "paletteLabel": "MCP Tool",
             "name": "Name",
@@ -46,7 +46,7 @@
             "endpointError": "endpoint error"
         }
     },
-    "mcp-tool-response": {
+    "nr-mcp-tool-response": {
         "label": {
             "paletteLabel": "MCP Tool Response",
             "name": "Name"

@@ -39,9 +39,9 @@ function authNode(options = {}, withRefreshKey = true) {
             node.error = message => (node.errorLog = node.errorLog || []).push(message);
         }, registerType(name, ctor) { types[name] = ctor; }, getNode(id) { return nodes[id]; }
     } };
-    require('../mcp-auth')(RED);
-    nodes.storage = new types['mcp-redis']({ id: 'storage', mode: 'memory' });
-    const node = new types['mcp-auth']({ id: 'auth-test', redis: 'storage', provider: 'microsoft',
+    require('../nr-mcp-auth')(RED);
+    nodes.storage = new types['nr-mcp-auth-storage']({ id: 'storage', mode: 'memory' });
+    const node = new types['nr-mcp-auth']({ id: 'auth-test', redis: 'storage', provider: 'microsoft',
         oauthSlug: 'test-login', microsoftTenantId: tenant, microsoftClientId: client,
         credentials: { microsoftClientSecret: 'provider-test-secret', clientSecret: 'provider-test-secret',
             ...(withRefreshKey ? { microsoftRefreshKey: key, oidcRefreshKey: key } : {}) },
@@ -535,9 +535,9 @@ describe('rotating refresh tokens', () => {
                 node.send = node.status = node.log = node.error = node.warn = () => {};
             }, registerType(name, ctor) { types[name] = ctor; }, getNode(id) { return nodes[id]; }
         } };
-        require('../mcp-flow-server')(RED);
-        nodes.runtime = new types['mcp-runtime']({ id: 'runtime', serverPort: 18115, publicBaseUrl: url });
-        const server = new types['mcp-flow-server']({ id: 'endpoint-1', runtime: 'runtime',
+        require('../nr-mcp-endpoint')(RED);
+        nodes.runtime = new types['nr-mcp-runtime']({ id: 'runtime', serverPort: 18115, publicBaseUrl: url });
+        const server = new types['nr-mcp-endpoint']({ id: 'endpoint-1', runtime: 'runtime',
             serverPath: '/mcp/test', auth: context.auth.id, allowedGroups: 'operators' });
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
         try {

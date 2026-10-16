@@ -245,8 +245,8 @@ describe('lib/admin-tools', () => {
                 rules: [{ t: 'eq', v: 'findOne', vt: 'str' }, { t: 'else' }], checkall: 'true', repair: false, outputs: 2 }],
             ['catch', { scope: ['database'], uncaught: false }],
             ['mongodb4', { mode: 'collection', collection: 'items', operation: 'find', output: 'toArray', maxTimeMS: '5000', handleDocId: false }],
-            ['mcp-flow-server', { serverPath: '/mcp/items', allowedGroups: 'Readers' }],
-            ['mcp-tool-registry', { toolName: 'read_items', scope: 'endpoint', endpoint: 'items-endpoint', toolDescription: 'Read items',
+            ['nr-mcp-endpoint', { serverPath: '/mcp/items', allowedGroups: 'Readers' }],
+            ['nr-mcp-tool', { toolName: 'read_items', scope: 'endpoint', endpoint: 'items-endpoint', toolDescription: 'Read items',
                 toolSchema: JSON.stringify({ type: 'object', properties: { count: { type: 'integer' } } }),
                 outputSchema: JSON.stringify({ type: 'array', items: { type: 'object' } }),
                 toolBehavior: 'read-only', worldAccess: 'closed', timeoutMs: 5000, cancelOutput: true }]
@@ -285,7 +285,7 @@ describe('lib/admin-tools', () => {
             'x-options': { api_key: 'hidden-value', safe: true } });
         const rule = { t: 'eq', v: { safe: 1, secret: 'hidden-value', authorization: 'hidden-value' }, vt: 'json' };
         for (const target of [
-            { id: 'target', type: 'mcp-tool-registry', toolSchema: schema, outputSchema: '{invalid', wires: [] },
+            { id: 'target', type: 'nr-mcp-tool', toolSchema: schema, outputSchema: '{invalid', wires: [] },
             { id: 'target', type: 'switch', rules: [rule], wires: [] }
         ]) {
             const before = JSON.stringify(target);
@@ -309,9 +309,9 @@ describe('lib/admin-tools', () => {
         const cases = [
             { type: 'catch', scope: Array(2001).fill('node') },
             { type: 'switch', rules: [{ t: 'eq', v: '\u00e9'.repeat(17000) }] },
-            { type: 'mcp-tool-registry', toolSchema: JSON.stringify(deep) },
-            { type: 'mcp-flow-server', serverPath: 'a'.repeat(40000) },
-            { type: 'mcp-tool-registry', toolName: 'a'.repeat(30000), toolDescription: 'b'.repeat(30000), toolSchema: 'c'.repeat(30000) }
+            { type: 'nr-mcp-tool', toolSchema: JSON.stringify(deep) },
+            { type: 'nr-mcp-endpoint', serverPath: 'a'.repeat(40000) },
+            { type: 'nr-mcp-tool', toolName: 'a'.repeat(30000), toolDescription: 'b'.repeat(30000), toolSchema: 'c'.repeat(30000) }
         ];
         for (const settings of cases) {
             const target = { id: 'target', ...settings, wires: [] };

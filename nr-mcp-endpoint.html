@@ -1,0 +1,230 @@
+<script type="text/javascript">
+    RED.nodes.registerType('nr-mcp-runtime', {
+        category: 'config',
+        defaults: {
+            name: { value: '' },
+            serverPort: { value: 8001, required: true, validate: function(v) {
+                return RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536;
+            } },
+            publicBaseUrl: { value: '', required: true, validate: RED.validators.regex(/^https?:\/\/[^\/]+/) },
+            bindHost: { value: '127.0.0.1', required: true },
+            allowedOrigins: { value: '', validate: function(v) {
+                return String(v || '').split(/[\s,]+/).filter(Boolean).every(function(value) {
+                    try {
+                        var url = new URL(value);
+                        return ['http:', 'https:'].indexOf(url.protocol) !== -1 && url.origin === value &&
+                            !url.username && !url.password;
+                    } catch (_) { return false; }
+                });
+            } },
+            trustedProxies: { value: '', validate: function(v) {
+                return String(v || '').split(/[\s,]+/).filter(Boolean).every(function(value) {
+                    return /^[0-9a-fA-F:.]+\/\d{1,3}$/.test(value);
+                });
+            } },
+            allowFunctionCode: { value: false },
+            codeGroups: { value: '', validate: function(v) {
+                return !$('#node-config-input-allowFunctionCode').prop('checked') || !!String(v || '').trim();
+            } },
+            adminPort: { value: 1880, required: false, validate: function(v) {
+                return v === '' || (RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536);
+            } },
+            adminTokenEnv: { value: '', validate: function(v) {
+                return !v || /^MCP_[A-Z0-9_]+$/.test(String(v).trim());
+            } },
+            adminCa: { value: '' },
+            adminEndpointPath: { value: '' }
+        },
+        credentials: {
+            adminToken: { type: 'password' }
+        },
+        paletteLabel: 'MCP Runtime',
+        label: function() {
+            return this.name || this._('nr-mcp-runtime.label.paletteLabel');
+        }
+    });
+
+    RED.nodes.registerType('nr-mcp-endpoint', {
+        category: 'config',
+        defaults: {
+            name: { value: '' },
+            runtime: { value: '', type: 'nr-mcp-runtime', required: true },
+            auth: { value: '', type: 'nr-mcp-auth', required: true },
+            serverName: { value: 'node-red-mcp-server', required: true },
+            serverPath: { value: '/mcp', required: true },
+            allowedGroups: { value: '', required: true },
+            toolTimeoutMs: { value: 30000, required: true, validate: function(v) {
+                return RED.validators.number()(v) && Number.isInteger(Number(v)) && v >= 1000 && v <= 600000;
+            } },
+            maxConcurrentCalls: { value: 32, required: true, validate: function(v) {
+                return RED.validators.number()(v) && Number.isInteger(Number(v)) && v >= 1 && v <= 1024;
+            } }
+        },
+        paletteLabel: 'MCP Endpoint',
+        label: function() {
+            return this.name || this.serverPath || this._('nr-mcp-endpoint.label.paletteLabel');
+        },
+        oneditprepare: function() {
+            var node = this;
+            function loadFlowServers() {
+                $.ajax({ url: 'mcp-flow-servers', method: 'GET', timeout: 5000 })
+                    .done(function(data) {
+                        var statusDiv = $('#flow-servers-status').empty();
+                        if (data.servers && data.servers.length > 0) {
+                            $('<h5>').text(node._('nr-mcp-endpoint.label.statusRunningHeading')).appendTo(statusDiv);
+                            var list = $('<ul>').appendTo(statusDiv);
+                            data.servers.forEach(function(server) {
+                                var status = server.isRunning ?
+                                    node._('nr-mcp-endpoint.label.statusRunning') : node._('nr-mcp-endpoint.label.statusStopped');
+                                $('<li>').text(status + ' ' + server.serverName + ' ' + (server.path || '/mcp') +
+                                    ' (port ' + server.port + ') - ' + server.toolCount + ' tools').appendTo(list);
+                            });
+                        } else {
+                            $('<p>').text(node._('nr-mcp-endpoint.label.statusNone')).appendTo(statusDiv);
+                        }
+                    })
+                    .fail(function() {
+                        $('#flow-servers-status').empty().append($('<p>').text(node._('nr-mcp-endpoint.label.statusFetchFailed')));
+                    });
+            }
+
+            $('#refresh-status-btn').on('click', loadFlowServers);
+            setTimeout(loadFlowServers, 500);
+        }
+    });
+</script>
+
+<script type="text/html" data-template-name="nr-mcp-runtime">
+    <div class="form-row">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> <span data-i18n="nr-mcp-runtime.label.name"></span></label>
+        <input type="text" id="node-config-input-name" data-i18n="[placeholder]nr-mcp-runtime.label.namePlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-serverPort"><i class="fa fa-plug"></i> <span data-i18n="nr-mcp-runtime.label.port"></span></label>
+        <input type="text" id="node-config-input-serverPort" data-i18n="[placeholder]nr-mcp-runtime.label.portPlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-publicBaseUrl"><i class="fa fa-link"></i> <span data-i18n="nr-mcp-runtime.label.baseUrl"></span></label>
+        <input type="text" id="node-config-input-publicBaseUrl" data-i18n="[placeholder]nr-mcp-runtime.label.baseUrlPlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-bindHost"><i class="fa fa-sitemap"></i> <span data-i18n="nr-mcp-runtime.label.bindHost"></span></label>
+        <input type="text" id="node-config-input-bindHost" data-i18n="[placeholder]nr-mcp-runtime.label.bindHostPlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-allowedOrigins"><i class="fa fa-globe"></i> <span data-i18n="nr-mcp-runtime.label.allowedOrigins"></span></label>
+        <input type="text" id="node-config-input-allowedOrigins" data-i18n="[placeholder]nr-mcp-runtime.label.allowedOriginsPlaceholder">
+    </div>
+    <div class="form-tips" data-i18n="nr-mcp-runtime.label.allowedOriginsTip"></div>
+    <div class="form-row">
+        <label for="node-config-input-trustedProxies"><i class="fa fa-share-alt"></i> <span data-i18n="nr-mcp-runtime.label.trustedProxies"></span></label>
+        <input type="text" id="node-config-input-trustedProxies" data-i18n="[placeholder]nr-mcp-runtime.label.trustedProxiesPlaceholder">
+    </div>
+    <div class="form-tips" data-i18n="nr-mcp-runtime.label.trustedProxiesTip"></div>
+
+    <hr>
+    <h4 data-i18n="nr-mcp-runtime.label.adminToolsHeading"></h4>
+    <div class="form-row">
+        <label for="node-config-input-allowFunctionCode" data-i18n="nr-mcp-runtime.label.allowFunctionCode"></label>
+        <input type="checkbox" id="node-config-input-allowFunctionCode" style="width: auto;">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-codeGroups"><i class="fa fa-users"></i> <span data-i18n="nr-mcp-runtime.label.codeGroups"></span></label>
+        <input type="text" id="node-config-input-codeGroups" data-i18n="[placeholder]nr-mcp-runtime.label.codeGroupsPlaceholder">
+    </div>
+    <div class="form-tips" data-i18n="nr-mcp-runtime.label.codeGroupsTip"></div>
+
+    <div class="form-row">
+        <label for="node-config-input-adminPort"><i class="fa fa-plug"></i> <span data-i18n="nr-mcp-runtime.label.adminPort"></span></label>
+        <input type="text" id="node-config-input-adminPort" data-i18n="[placeholder]nr-mcp-runtime.label.adminPortPlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-adminToken"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-runtime.label.adminToken"></span></label>
+        <input type="password" id="node-config-input-adminToken" autocomplete="off">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-adminTokenEnv"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-runtime.label.adminTokenEnv"></span></label>
+        <input type="text" id="node-config-input-adminTokenEnv" data-i18n="[placeholder]nr-mcp-runtime.label.adminTokenEnvPlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-adminCa"><i class="fa fa-certificate"></i> <span data-i18n="nr-mcp-runtime.label.adminCa"></span></label>
+        <textarea id="node-config-input-adminCa" rows="4" style="width: 70%; resize: vertical;"></textarea>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-adminEndpointPath"><i class="fa fa-link"></i> <span data-i18n="nr-mcp-runtime.label.adminEndpointPath"></span></label>
+        <input type="text" id="node-config-input-adminEndpointPath" data-i18n="[placeholder]nr-mcp-runtime.label.adminEndpointPathPlaceholder">
+    </div>
+    <div class="form-tips mcp-admin-tools-note" data-i18n="nr-mcp-runtime.label.adminToolsNote"></div>
+</script>
+
+
+<script type="text/html" data-template-name="nr-mcp-endpoint">
+    <div class="form-row">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> <span data-i18n="nr-mcp-endpoint.label.name"></span></label>
+        <input type="text" id="node-config-input-name" data-i18n="[placeholder]nr-mcp-endpoint.label.namePlaceholder">
+    </div>
+
+    <div class="form-row">
+        <label for="node-config-input-runtime"><i class="fa fa-sitemap"></i> <span data-i18n="nr-mcp-endpoint.label.runtime"></span></label>
+        <input type="text" id="node-config-input-runtime">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-auth"><i class="fa fa-lock"></i> <span data-i18n="nr-mcp-endpoint.label.auth"></span></label>
+        <input type="text" id="node-config-input-auth">
+    </div>
+
+    <hr>
+    <h4 data-i18n="nr-mcp-endpoint.label.endpointHeading"></h4>
+
+    <div class="form-row">
+        <label for="node-config-input-serverName"><i class="fa fa-server"></i> <span data-i18n="nr-mcp-endpoint.label.serverName"></span></label>
+        <input type="text" id="node-config-input-serverName" data-i18n="[placeholder]nr-mcp-endpoint.label.serverNamePlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-serverPath"><i class="fa fa-link"></i> <span data-i18n="nr-mcp-endpoint.label.serverPath"></span></label>
+        <input type="text" id="node-config-input-serverPath" data-i18n="[placeholder]nr-mcp-endpoint.label.serverPathPlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-allowedGroups"><i class="fa fa-users"></i> <span data-i18n="nr-mcp-endpoint.label.allowedGroups"></span></label>
+        <input type="text" id="node-config-input-allowedGroups" data-i18n="[placeholder]nr-mcp-endpoint.label.allowedGroupsPlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-toolTimeoutMs"><i class="fa fa-clock-o"></i> <span data-i18n="nr-mcp-endpoint.label.toolTimeoutMs"></span></label>
+        <input type="number" id="node-config-input-toolTimeoutMs" min="1000" max="600000" step="1">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-maxConcurrentCalls"><i class="fa fa-tasks"></i> <span data-i18n="nr-mcp-endpoint.label.maxConcurrentCalls"></span></label>
+        <input type="number" id="node-config-input-maxConcurrentCalls" min="1" max="1024" step="1">
+    </div>
+
+
+    <hr>
+    <div class="form-row">
+        <label></label>
+        <button type="button" id="refresh-status-btn" class="red-ui-button">
+            <i class="fa fa-refresh"></i> <span data-i18n="nr-mcp-endpoint.label.refreshStatusButton"></span>
+        </button>
+    </div>
+
+    <div id="flow-servers-status" class="mcp-flow-server-status" data-i18n="nr-mcp-endpoint.label.statusLoading"></div>
+
+    <style>
+        .mcp-flow-server-status {
+            margin-top: 10px;
+            padding: 10px;
+            color: var(--red-ui-primary-text-color, #333);
+            background: var(--red-ui-secondary-background, #f8f9fa);
+            border-left: 4px solid var(--red-ui-text-color-link, #007bff);
+            font-size: 12px;
+        }
+        .mcp-flow-server-status h5,
+        .mcp-flow-server-status p,
+        .mcp-flow-server-status ul {
+            color: inherit;
+        }
+        .mcp-admin-tools-note {
+            color: var(--red-ui-primary-text-color, #333);
+            background: var(--red-ui-secondary-background, #f8f9fa);
+        }
+    </style>
+</script>

@@ -42,7 +42,7 @@ async function main() {
     const tarball = path.join(packDirectory, packedName);
     const port = await freePort();
     const flow = JSON.parse(fs.readFileSync(path.join(repository, 'examples/flow-based-mcp-server-example.json'), 'utf8'));
-    const runtime = flow.find(node => node.type === 'mcp-runtime');
+    const runtime = flow.find(node => node.type === 'nr-mcp-runtime');
     runtime.serverPort = port;
     runtime.bindHost = '127.0.0.1';
     runtime.publicBaseUrl = 'http://127.0.0.1:' + port;
