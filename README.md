@@ -37,7 +37,6 @@ Local extensions:
 Not included yet:
 
 - Verified interoperability with hosted MCP clients.
-- Removed local compatibility nodes from earlier fork revisions.
 
 ## Architecture
 
@@ -69,97 +68,37 @@ cd ~/.node-red
 npm link @olykov/node-red-mcp-server
 ```
 
-## Upgrading to 3.5
+## Upgrading to 4.0
 
-The package now declares `node-red: ">=5.0.0 <6.0.0"` (was open-ended). Reinstall dependencies:
-`axios` and `node-cache` are gone, replaced by the built-in `fetch` (identity-provider HTTP
-calls) and a plain `Map` (in-memory token/session storage); `ajv` and `ipaddr.js` are new
-dependencies.
+4.0 changes the node contract, so a 3.x flow does not run unchanged. Install 4.0 in the Node-RED
+user directory, then convert the flow file while Node-RED is stopped:
 
-Tool **Input Schema** and **Output Schema** are now compiled with Ajv (JSON Schema 2020-12) when
-the tool registers. A tool with an invalid schema, an invalid name (must match
-`^[a-z][a-z0-9_]{0,63}$`) or a **Tool Timeout** above its endpoint's **Tool Timeout** no longer
-registers; its status turns red (`invalid`) and the reason is logged with `node.warn`. At call
-time, arguments that fail the compiled Input Schema are rejected before the flow runs. To roll
-back a tool that no longer registers, fix its name, schema or timeout, or pin the 3.4.x release.
+```bash
+cd ~/.node-red
+npx nr-mcp-migrate --input flows.json --output flows-4.json
+```
 
-`mcp-runtime` **Admin Token** resolution order changed: the **Admin Token** credential, then
-**Admin Token Env**, then the deprecated `NODE_RED_ADMIN_API_TOKEN` environment variable (which
-now logs a deprecation warning and no longer overrides the credential). Update any deployment
-that relied on `NODE_RED_ADMIN_API_TOKEN` taking priority.
+`nr-mcp-migrate` writes only to a new file and never changes the input. It renames the node
+types, turns endpoints into configuration nodes, sets each tool's Scope and keeps every node ID
+and credential field name, so `flows_cred.json` stays valid without decryption. It prints a JSON
+report `{ input, output, converted, unchanged, manualReview }`; exit code 1 means
+`manualReview` lists nodes that need a manual step, and 2 is a usage or file error. Replace
+`flows.json` with `flows-4.json`, start Node-RED, make the listed changes in the editor and deploy.
 
-Behind a reverse proxy, set **Trusted Proxies** (CIDR list) on `mcp-runtime` so audit log and
-metrics `client` IPs use `X-Forwarded-For` only from those addresses; without it, every client is
-reported by the socket address.
-
-The MCP endpoint advertises `tools.listChanged: false` (the palette does not send
-`notifications/tools/list_changed`); `isError: true` tool results no longer include a
-JSON-RPC `error` object, matching the specification's distinction between protocol errors and
-tool execution errors. `notifications/cancelled` for an in-flight call now frees its concurrency
-slot immediately; a flow response that arrives after cancellation or timeout is dropped with a
-debug log line instead of a `warn` "Orphan response" line. A `restart` command whose 1-second
-timer is still pending when the node closes now calls its deferred `done()` exactly once instead
-of leaving it uncalled.
-
-Editor labels and help panels now come from `locales/en-US/*.json` and `*.html` message
-catalogs instead of inline HTML; non-English translations can be added under `locales/<lang>/`
-without touching the node definitions.
-
-See `README.md` "Kubernetes" below for `bindHost`, `trustedProxies`, `allowedOrigins` and probe
-guidance when running more than one pod. To roll back, pin the 3.4.x release; no other
-configuration changes are required.
-
-## Upgrading to 3.2
-
-`tools/list` now requires a token. Clients that listed tools anonymously must sign in first;
-Claude Code and Codex do this on the HTTP 401. To roll back, pin the 3.1.0 commit.
-
-## Upgrading to 3.4
-
-New runtime nodes bind to `127.0.0.1` by default. Existing runtimes without a saved **Bind
-Host** keep listening on all interfaces for compatibility and log a warning; set the address
-explicitly after upgrade. If a browser-based MCP client connects from an origin different from
-the runtime **Base URL**, add that exact origin to **Allowed Origins**. Requests without an
-`Origin` header are unaffected.
-
-`get_flow` no longer advertises Function code by default. To allow it, enable **Allow Function
-Code** on the runtime and specify **Code Groups**. Only callers in those groups can request the
-code. Function code is passed to the MCP client without secret redaction, so enable this only
-for trusted users. To roll back, restore the previous runtime fields and pin the 3.3.x release.
-
-## Upgrading to 3.1
-
-1. Set the `mcp-runtime` **Base URL**. Endpoints no longer derive OAuth URLs from request
-   headers and do not start without it.
-2. Give every `mcp-flow-server` at least one **Group**. An endpoint without groups no longer
-   admits every identity-provider user; it does not start.
-3. Check **Client Hosts**: entries now match exactly. Use `*.example.com` to allow subdomains.
-   Client metadata documents must contain a `client_id` equal to their URL.
-4. Users sign in once more: sign-in now binds the upstream `state` to the browser with a
-   cookie, so sign-ins started before the upgrade are rejected.
-
-## Upgrading to 3.0
-
-3.0 renames the package and changes three contracts. Before deploying it:
-
-1. Uninstall `node-red-contrib-mcp-server` from the Node-RED user directory and install
-   `@olykov/node-red-mcp-server`; the node types keep their names.
-2. Rename editor-supplied environment variables to the `MCP_` prefix, for example
-   `REDIS_URL` to `MCP_REDIS_URL`, in the runtime environment and in the `mcp-redis` and
-   `mcp-auth` configuration nodes. A configuration with another name is reported as
-   invalid and its endpoints do not start.
-3. Open every `mcp-tool-registry` node and select its endpoint again: tools now bind by
-   MCP path, not by node ID.
-4. The `mcp-flow-server` output now carries only `mcp-tool-execute` messages; the
-   `mcp-server-started`, `mcp-server-stopped` and `status` replies were removed, and the
-   runtime no longer serves `/health`. Endpoint state is shown in the node status.
-
-Existing sessions end once after the upgrade because session storage is no longer keyed by
-the auth node ID; users sign in again.
+| 3.x | 4.0 |
+| --- | --- |
+| Endpoint output, then a `switch` on `payload.toolName` | Wire each `nr-mcp-tool` output to the start of its branch and remove the switch; the report names the switch branch of every tool |
+| Function code reads `msg.payload.arguments`, `msg.payload.executionId` or `msg.payload.toolName` | Arguments are in `msg.payload`; `executionId` and `toolName` are in `msg.mcp` |
+| `msg.topic = 'nr-mcp-tool-response'` wired back to the endpoint | End the flow with `nr-mcp-tool-response`: result in `msg.payload`, error in `msg.mcp.error` |
+| `start`, `stop` and `restart` messages to the endpoint | Deploy, or disable the tool nodes |
+| Tool endpoint chosen by MCP path, or `Shared (All MCPs)` | Scope **Endpoint** with the endpoint node, or **Shared** with the runtime; set by the CLI, chosen manually when the flow is ambiguous |
+| `NODE_RED_ADMIN_API_TOKEN` | Admin Token credential or Admin Token Env |
+| Admin API CA field | `NODE_EXTRA_CA_CERTS` (see Environment Variables) |
+| MCP 2025-06-18 and 2025-11-25 clients | MCP 2026-07-28 only: Claude Code negotiates it for HTTP servers; Codex needs its `mcp_2026_07_28` feature flag |
 
 ## Flow Server Extensions
 
-`mcp-runtime` owns the local HTTP listener: port, bind host, base URL and optional admin API settings. New runtimes bind to loopback; use a reverse proxy or configure an explicit address when remote clients must connect. Endpoints start automatically on Node-RED's `flows:started` event. Browser requests are restricted to the Base URL origin and explicitly allowed origins.
+`nr-mcp-runtime` owns the local HTTP listener: port, bind host, base URL and optional admin API settings. New runtimes bind to loopback; use a reverse proxy or configure an explicit address when remote clients must connect. Endpoints start automatically on Node-RED's `flows:started` event. Browser requests are restricted to the Base URL origin and explicitly allowed origins.
 
 Base URL is required. It is the address clients and their browsers use to reach the MCP runtime,
 directly or through a proxy. It may be VPN-only; public internet exposure is not
@@ -169,9 +108,9 @@ The runtime listener currently serves HTTP. HTTPS must terminate outside that
 listener; removing TLS termination entirely requires separate HTTPS runtime
 support. This is independent of whether the endpoint is VPN-only or internet-facing.
 
-`mcp-redis` defines storage for short-lived authorization state and opaque access tokens. Memory mode is for local development only. Redis-backed modes are intended for shared or restarted runtimes.
+`nr-mcp-auth-storage` defines storage for short-lived authorization state and opaque access tokens. Memory mode is for local development only. Redis-backed modes are intended for shared or restarted runtimes.
 
-`mcp-auth` selects its active identity provider using the Microsoft Entra ID or OIDC tab.
+`nr-mcp-auth` selects its active identity provider using the Microsoft Entra ID or OIDC tab.
 Each provider keeps separate client settings and secrets. Shared settings select storage, client metadata hosts and token TTLs. Provider scopes are fixed in code, not editable fields.
 Secrets are stored as Node-RED credentials or read from environment variables.
 Authorization state and one-time authorization codes expire after a fixed 300
@@ -201,43 +140,43 @@ its unexpired tokens; switching is not a token-revocation mechanism.
 
 Client metadata hosts must be allow-listed. Entries match the host exactly; `*.example.com` allows its subdomains. This prevents the authorization endpoint from fetching arbitrary user-provided URLs during client metadata validation. Private and loopback addresses (including bracketed IPv6 and IPv4-mapped forms) are rejected, documents are limited to 8 KiB, and the document's `client_id` must equal its URL. Host names are not resolved, so allow only hosts you trust.
 
-`mcp-flow-server` is a configuration node that defines one logical MCP endpoint: MCP name, HTTP path and allowed groups. It has no wires and no commands; it starts when flows start. Both runtime and OAuth auth configurations are required. There is no public or inherited authorization mode.
+`nr-mcp-endpoint` is a configuration node that defines one logical MCP endpoint: MCP name, HTTP path and allowed groups. It has no wires and no commands; it starts when flows start. Both runtime and OAuth auth configurations are required. There is no public or inherited authorization mode.
 
 One runtime owns one local port. Multiple endpoints may share that runtime port when their MCP paths differ.
 
-Each `mcp-tool-registry` (MCP Tool) node starts the flow of its tool. A call leaves the node with:
+Each `nr-mcp-tool` (MCP Tool) node starts the flow of its tool. A call leaves the node with:
 
 ```js
 msg.payload = arguments;
 msg.mcp = { executionId, toolName, subject, email, groups, client };
 ```
 
-The flow puts the result in `msg.payload` and ends with an `mcp-tool-response` (MCP Tool Response) node, keeping `msg.mcp`. Set `msg.mcp.error` (string or Error) to return an error result. `msg.payload` can be a standard MCP result object; strings and other values are normalized into text responses. A message without `msg.mcp.executionId` or with an unknown one fails the response node for a Catch node; a response after cancellation or timeout is ignored.
+The flow puts the result in `msg.payload` and ends with an `nr-mcp-tool-response` (MCP Tool Response) node, keeping `msg.mcp`. Set `msg.mcp.error` (string or Error) to return an error result. `msg.payload` can be a standard MCP result object; strings and other values are normalized into text responses. A message without `msg.mcp.executionId` or with an unknown one fails the response node for a Catch node; a response after cancellation or timeout is ignored.
 
 With **Cancel Output** enabled, the MCP Tool node gets a second output that receives `msg.mcp = { executionId, toolName, reason }` when the client closes the request (`cancelled`) or the tool timeout expires (`timeout`).
 
-Configuration nodes have no status of their own: an endpoint that cannot start logs the error and its tools show `endpoint error`. Tool telemetry comes from `mcp-server-metrics`.
+Configuration nodes have no status of their own: an endpoint that cannot start logs the error and its tools show `endpoint error`. Tool telemetry comes from `nr-mcp-metrics`.
 
-`mcp-server-metrics` is a source node with no input and one output. Select the same `mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits one `mcp-tool-telemetry` message for each `tools/call` request across those endpoints, including failed calls and authentication failures. Its payload contains `endpoint`, `tool`, `user`, `client`, `mode`, `status`, `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. `user` is the caller's e-mail (subject when no e-mail is known) and `client` the MCP client (`claude`, `codex`, `chatgpt` or the client host); unauthenticated calls report `unknown`. Unknown and unauthenticated tool names are reported as `unknown` to bound metric cardinality. `user` is personal data: use it as a metric label only while the set of users is small and the metrics store is access-controlled. It does not poll Node-RED or expose a metrics route.
+`nr-mcp-metrics` is a source node with no input and one output. Select the same `nr-mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits one `mcp-tool-telemetry` message for each `tools/call` request across those endpoints, including failed calls and authentication failures. Its payload contains `endpoint`, `tool`, `user`, `client`, `mode`, `status`, `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. `user` is the caller's e-mail (subject when no e-mail is known) and `client` the MCP client (`claude`, `codex`, `chatgpt` or the client host); unauthenticated calls report `unknown`. Unknown and unauthenticated tool names are reported as `unknown` to bound metric cardinality. `user` is personal data: use it as a metric label only while the set of users is small and the metrics store is access-controlled. It does not poll Node-RED or expose a metrics route.
 
 ## Configuration Notes
 
 Tool execution always requires OAuth and checks endpoint roles/groups. Provider scopes are advertised automatically in `securitySchemes` and `_meta.securitySchemes`; custom endpoint/tool scope policies are not supported. `offline_access` is advertised only when refresh is configured.
 
-`mcp-tool-registry` requires a Scope. **Endpoint** offers the tool on the selected `mcp-flow-server` only. **Shared** offers it on every endpoint of the selected `mcp-runtime`. A tool without a Scope or without the selected node is shown as `invalid` and not registered. An Endpoint tool replaces a Shared tool with the same name on its endpoint; two tools with the same name on one level are both shown as `duplicate` and neither is offered.
+`nr-mcp-tool` requires a Scope. **Endpoint** offers the tool on the selected `nr-mcp-endpoint` only. **Shared** offers it on every endpoint of the selected `nr-mcp-runtime`. A tool without a Scope or without the selected node is shown as `invalid` and not registered. An Endpoint tool replaces a Shared tool with the same name on its endpoint; two tools with the same name on one level are both shown as `duplicate` and neither is offered.
 
 Editor-supplied environment variable names (`URL Env`, `Password Env`, `Secret Env`) must start with `MCP_`, so a flow editor cannot point a configuration at other process secrets such as `NODE_RED_CREDENTIAL_SECRET`.
 
 
 The authorization server issuer is the Base URL origin. Authorization responses carry it as `iss`
-(RFC 9207). Keep one `mcp-auth` configuration per runtime port: the root
+(RFC 9207). Keep one `nr-mcp-auth` configuration per runtime port: the root
 `/.well-known/oauth-authorization-server` document answers only while a single configuration
 serves the port.
 
 Deploy with **Modified Nodes** or **Modified Flows**: endpoints are configuration nodes without
 wires, so changing a tool flow never restarts its endpoint; a call that is inside a restarted node
 is lost and times out. Wider restarts follow a change
-to a shared configuration node (`mcp-runtime`, `mcp-auth`, `mcp-redis`: every endpoint that uses
+to a shared configuration node (`nr-mcp-runtime`, `nr-mcp-auth`, `nr-mcp-auth-storage`: every endpoint that uses
 it), a subflow (all its instances), tab environment variables (the whole tab) and global
 environment variables (a full deploy). Stopping an endpoint fails its pending tool calls;
 requests already being answered, such as `get_flow` or a token exchange, finish in the
@@ -249,6 +188,11 @@ flow runs; a tool whose Input or Output Schema fails to compile, or whose Tool T
 its endpoint's Tool Timeout, does not register.
 
 Admin tools expose read-only `get_flow` only when the selected runtime has Admin Port, Admin Token, and Admin Endpoint Path configured, and the endpoint path exactly matches that Admin Endpoint Path.
+
+Function code is not returned by default. **Allow Function Code** on the runtime together with
+**Code Groups** lets callers in those groups request it with `includeCode`. The code goes to the
+MCP client and into the context of its language model; secrets written in Function code are not
+redacted, so enable it only for trusted users.
 
 ### Inspecting Node-RED flows
 
@@ -281,8 +225,8 @@ Use `includeConfig: true` with `mode: "node"` to inspect supported execution set
 | `switch` | Property/type, rules, check-all, repair and outputs |
 | `catch` | Scoped node IDs and uncaught setting |
 | `mongodb4` | Operation mode, collection, operation, output, timeout and ID handling |
-| `mcp-flow-server` | Route and allowed groups |
-| `mcp-tool-registry` | Description, input/output schemas, endpoint, behavior and world access |
+| `nr-mcp-endpoint` | Route and allowed groups |
+| `nr-mcp-tool` | Description, input/output schemas, Scope, endpoint, runtime, timeout, cancel output, behavior and open world |
 
 Settings retain their configured types; absent fields are not filled with inferred defaults.
 `node.configSupported` identifies supported types. Values over 32 KiB, excessive nested structures
@@ -304,14 +248,15 @@ request carries `MCP-Protocol-Version`, `Mcp-Method` (and `Mcp-Name` for `tools/
 body and `_meta`; a mismatch is `400` with `-32020`, any other revision is `400` with `-32022` and
 the supported versions. Every request, `server/discover` included, needs a valid token; without
 one the endpoint answers HTTP 401 with `WWW-Authenticate` pointing to the protected resource
-metadata, which starts sign-in in MCP clients (MCP authorization spec). Closing the connection
+metadata, which starts sign-in in MCP clients (MCP authorization spec). Claude Code negotiates
+2026-07-28 for HTTP servers; Codex needs its `mcp_2026_07_28` feature flag. Closing the connection
 cancels a running tool call. GET and DELETE answer 405. Tools advertise `securitySchemes` and the
 matching `_meta.securitySchemes`.
 
 All tool calls validate credentials before flow or admin execution. Missing, invalid or
 expired tokens return HTTP 401 with `WWW-Authenticate`. Endpoint role and resource failures
 remain HTTP 403. Unresolved required auth
-configuration fails closed, and an invalid `mcp-auth` configuration is reported
+configuration fails closed, and an invalid `nr-mcp-auth` configuration is reported
 in the log and stops its endpoints from starting. GET on an MCP path requires
 authentication (HTTP 401 with `WWW-Authenticate`) and otherwise answers 405; the
 legacy SSE stream was removed, so only JSON-RPC POST is served. If the provider
@@ -426,7 +371,7 @@ deployment.
 
 ## Kubernetes
 
-The MCP listener runs inside the Node-RED pod on the `mcp-runtime` port, separate from the
+The MCP listener runs inside the Node-RED pod on the `nr-mcp-runtime` port, separate from the
 editor port. Expose it through a Service port and route only the MCP and OAuth paths to it:
 
 - each MCP endpoint path (POST);
@@ -440,7 +385,7 @@ editor port. Expose it through a Service port and route only the MCP and OAuth p
 | **Base URL** | The public origin that clients use |
 | **Trusted Proxies** | CIDR ranges of the ingress, load balancer and mesh proxies, so the audit log and metrics record the real client address |
 | **Allowed Origins** | Origins of browser-based MCP clients other than the Base URL origin, if any |
-| `mcp-redis` | Redis mode. Memory mode keeps authorization state and opaque access tokens in process memory, so a second pod, a restarted pod or a rolling update loses sessions and tokens issued by another pod |
+| `nr-mcp-auth-storage` | Redis mode. Memory mode keeps authorization state and opaque access tokens in process memory, so a second pod, a restarted pod or a rolling update loses sessions and tokens issued by another pod |
 | Retries on `/oauth/*/token` | Off in the ingress and mesh, or only on connect failures: a retried authorization code or refresh token counts as reuse, and reuse revokes the session |
 | Route timeout | Longer than **Tool Timeout** |
 
@@ -474,21 +419,9 @@ endpoint; `terminationGracePeriodSeconds` must exceed the pause.
 
 | Variable | Used by | Notes |
 | --- | --- | --- |
-| `MCP_REDIS_URL` (default name) | `mcp-redis` in env mode | Any `MCP_*` name can be configured. |
-| `MCP_*` | `mcp-redis` Password Env, `mcp-auth` Secret Env | Names outside `MCP_` are rejected. |
+| `MCP_REDIS_URL` (default name) | `nr-mcp-auth-storage` in env mode | Any `MCP_*` name can be configured. |
+| `MCP_*` | `nr-mcp-auth-storage` Password Env, `nr-mcp-auth` Secret Env | Names outside `MCP_` are rejected. |
 | `NODE_EXTRA_CA_CERTS` | `get_flow` Admin API calls | Optional, unset by default. Needed only when Node-RED itself serves HTTPS (`https` in `settings.js`) with a certificate from a private CA: point it at that CA file. Behind a reverse proxy the Admin API is reached over plain HTTP and needs nothing. The Admin API address comes from `uiHost` and `uiPort` in `settings.js` (loopback when `uiHost` is unset or a wildcard). |
-
-## Rollback
-
-Production pins the palette by commit. To roll back, pin the previous commit and redeploy,
-then undo the configuration that the newer version required:
-
-- 3.2 -> 3.1: no configuration change.
-- 3.1 -> 3.0: no configuration change is required; Base URL, Groups and exact Client Hosts
-  remain valid. Users sign in again.
-- 3.0 -> 2.x: install `node-red-contrib-mcp-server` instead of `@olykov/node-red-mcp-server`,
-  restore `REDIS_URL` in `mcp-redis`, re-select registry endpoints (2.x binds by node ID),
-  and sign in again.
 
 ## Verification
 
@@ -503,7 +436,7 @@ npm audit --omit=dev
 
 `npm run coverage` runs the tests and fails below 90% lines, 80% branches or 85% functions.
 GitHub Actions (`.github/workflows/ci.yml`) runs the same checks on Node.js 22 and 24 for every
-push to `main`, release tag and pull request.
+push to `main` and every pull request.
 
 Run source scans before publishing to confirm that sensitive material and environment-specific names are absent.
 

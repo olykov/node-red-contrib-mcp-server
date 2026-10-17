@@ -2,27 +2,21 @@
 
 ## Supported Versions
 
-Security fixes are released for the latest published `3.x` release of
-`@olykov/node-red-mcp-server`. Older releases do not receive patches; please
-upgrade to the latest version before reporting an issue.
+Security fixes are released for the latest published `4.x` release of
+`@olykov/node-red-mcp-server`. Older releases do not receive patches.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 3.x     | :white_check_mark: |
-| < 3.0   | :x:                |
+| 4.x     | :white_check_mark: |
+| < 4.0   | :x:                |
 
 ## Reporting a Vulnerability
 
 Please **do not** open a public GitHub issue for security vulnerabilities.
 
-Instead, report suspected vulnerabilities privately using one of the
-following channels:
-
-- [GitHub Security Advisories](https://github.com/olykov/node-red-contrib-mcp-server/security/advisories/new)
-  for this repository (preferred).
-- Open a [private security issue](https://github.com/olykov/node-red-contrib-mcp-server/issues/new)
-  only if the advisory form above is unavailable, and mark it clearly as
-  security-sensitive so maintainers can restrict visibility.
+Instead, report suspected vulnerabilities privately through
+[GitHub Private Vulnerability Reporting](https://github.com/olykov/node-red-contrib-mcp-server/security/advisories/new)
+for this repository.
 
 Please include:
 

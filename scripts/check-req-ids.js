@@ -1,9 +1,8 @@
 'use strict';
 
-// Verifies every requirement ID in docs/spec.md for the released sections (3, 4 and the
-// section 6 invariants) has either a test reference (`// MCP-XXX-N` in test/**/*.js) or a
-// review mark (an entry in REVIEW.md). Section 5 (the 4.0 contract) is excluded until that
-// release starts.
+// Verifies every requirement ID in docs/spec.md (sections 3, 4 and 5 and the section 6
+// invariants) has either a test reference (`// MCP-XXX-N` in test/**/*.js) or a review mark
+// (an entry in REVIEW.md).
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -13,9 +12,7 @@ const specPath = path.join(repository, 'docs', 'spec.md');
 const reviewPath = path.join(repository, 'REVIEW.md');
 const testDirectory = path.join(repository, 'test');
 
-// Sections whose requirements must already have a test or review mark. Section 5 (4.0) is
-// intentionally excluded: it is still in design and not yet implemented.
-const ENFORCED_SECTIONS = new Set(['3', '4', '6']);
+const ENFORCED_SECTIONS = new Set(['3', '4', '5', '6']);
 
 function parseSpec(markdown) {
     const lines = markdown.split('\n');

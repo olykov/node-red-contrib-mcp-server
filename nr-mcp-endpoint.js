@@ -411,7 +411,7 @@ module.exports = function (RED)
         node.serverPort = Number(config.serverPort || 8001);
         node.publicBaseUrl = config.publicBaseUrl || '';
         node.bindHost = typeof config.bindHost === 'string' ? config.bindHost.trim() : '';
-        if (!node.bindHost) node.warn('MCP runtime bindHost is not set; listening on all interfaces for backward compatibility');
+        if (!node.bindHost) node.warn('MCP runtime bindHost is not set; listening on all interfaces');
         node.allowedOrigins = parseGroupList(config.allowedOrigins || '').map(origin);
         if (node.allowedOrigins.some(value => !value))
         {

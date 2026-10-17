@@ -250,11 +250,11 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
     });
 
     // MCP-NET-2
-    it('preserves all-interface binding for legacy runtimes and warns once', () => {
+    it('listens on all interfaces and warns once when Bind Host is empty', () => {
         const { runtimeNode } = buildServer({ __runtime: { bindHost: '' } });
         assert.equal(runtimeNode.bindHost, '');
         assert.deepStrictEqual(runtimeNode.warnings, [
-            'MCP runtime bindHost is not set; listening on all interfaces for backward compatibility'
+            'MCP runtime bindHost is not set; listening on all interfaces'
         ]);
     });
 

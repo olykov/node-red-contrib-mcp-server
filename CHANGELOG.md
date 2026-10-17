@@ -4,6 +4,28 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
+## 4.0.0 - Unreleased
+
+Breaking release; convert 3.x flows with `nr-mcp-migrate` (README "Upgrading to 4.0").
+
+- Protocol: MCP 2026-07-28 only. No `initialize`; `server/discover`, `resultType`, cache hints,
+  `MCP-Protocol-Version`/`Mcp-Method`/`Mcp-Name` checks (`-32020`), unsupported revisions `-32022`.
+  Every request needs a token. Closing the connection cancels a running tool call.
+- Nodes: types use the `nr-mcp-` prefix (`nr-mcp-runtime`, `nr-mcp-endpoint`, `nr-mcp-tool`,
+  `nr-mcp-tool-response`, `nr-mcp-metrics`, `nr-mcp-auth`, `nr-mcp-auth-storage`) and install next
+  to the upstream package. A call leaves `nr-mcp-tool` with the arguments in `msg.payload` and the
+  call data in `msg.mcp`; `nr-mcp-tool-response` answers. An optional second tool output receives
+  cancellation and timeout. Tools need a Scope: Endpoint or Shared.
+- Endpoint: a configuration node without wires; `start`, `stop` and `restart` are removed.
+  Endpoint failures show as `endpoint error` on its tools.
+- Runtime: owns the listener and the tool registry; tools register synchronously, a runtime
+  redeploy closes and opens its port once. `runtimeName`, the Admin API CA field and the
+  `NODE_RED_ADMIN_API_TOKEN` fallback are removed.
+- Migration: `nr-mcp-migrate --input --output` converts a 3.x flow, keeps node ids and credential
+  field names and lists the routing nodes that need manual changes.
+- Fixes: group names split only on commas and new lines; tool schemas valid under JSON Schema
+  2020-12 are no longer rejected by Ajv lint rules; the annotation label is Open World.
+
 ## 3.5.0 - 2026-10-17
 
 - Dependencies: `ipaddr.js` is no longer a direct dependency; Trusted Proxies matching uses

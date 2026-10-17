@@ -40,8 +40,8 @@
         <dd>64 hex characters (<code>openssl rand -hex 32</code>) that encrypt stored provider
         refresh tokens. Without it no refresh tokens are issued.</dd>
         <dt>Client Hosts</dt>
-        <dd>Hosts allowed
-        <code>claude.ai</code>; use <code>*.example.com</code> to allow subdomains.</dd>
+        <dd>Hosts allowed to serve client metadata documents, for example <code>claude.ai</code>;
+        entries match exactly, <code>*.example.com</code> allows subdomains.</dd>
         <dt>Storage</dt>
         <dd>MCP auth storage; use Redis for sessions that must survive restarts.</dd>
         <dt>Access TTL, Refresh TTL, Session TTL</dt>
