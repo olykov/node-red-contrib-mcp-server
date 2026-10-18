@@ -23,8 +23,8 @@ describe('migrateFlow', () => {
         const report = migrateFlow(input);
         const byId = new Map(report.flow.map(node => [node.id, node]));
         assert.deepEqual(report.flow.map(node => node.id), input.map(node => node.id));
-        assert.equal(report.converted, 9);
-        assert.equal(report.unchanged, input.length - 9);
+        assert.equal(report.converted, 10);
+        assert.equal(report.unchanged, input.length - 10);
         assert.ok(report.flow.every(node => !String(node.type).startsWith('mcp-')));
 
         const runtime = byId.get('runtime');
@@ -43,12 +43,16 @@ describe('migrateFlow', () => {
         assert.equal(endpoint.toolTimeoutMs, 60000);
         assert.equal(byId.get('endpoint-ops').toolTimeoutMs, 30000);
         assert.equal(byId.get('endpoint-ops').maxConcurrentCalls, 32);
+        assert.equal(byId.get('endpoint-ops').allowedGroups, 'Ops, Admins, Auditors');
+        assert.equal(endpoint.allowedGroups, 'Sales');
+        assert.equal(runtime.codeGroups, 'Code, Readers');
         assert.deepEqual(byId.get('group-sales').nodes, ['tool-list']);
 
         assert.deepEqual(pick(byId.get('tool-list'), ['type', 'scope', 'endpoint', 'runtime', 'outputs', 'wires', 'timeoutMs']),
             { type: 'nr-mcp-tool', scope: 'endpoint', endpoint: 'endpoint-sales', runtime: '', outputs: 1, wires: [[]], timeoutMs: 5000 });
         assert.deepEqual(pick(byId.get('tool-shared'), ['scope', 'endpoint', 'runtime']), { scope: 'shared', endpoint: '', runtime: 'runtime' });
         assert.deepEqual(pick(byId.get('tool-orphan'), ['scope', 'endpoint']), { scope: 'endpoint', endpoint: '' });
+        assert.deepEqual(pick(byId.get('tool-unbound'), ['scope', 'endpoint', 'runtime']), { scope: 'shared', endpoint: '', runtime: 'runtime' });
 
         assert.deepEqual(byId.get('restart').wires, [[]]);
         assert.deepEqual(byId.get('answers-in').wires, [[]]);
@@ -59,7 +63,9 @@ describe('migrateFlow', () => {
     it('lists every routing node and setting that needs a manual step', () => {
         const report = migrateFlow(fixture());
         assert.deepEqual(report.manualReview.map(item => item.id).sort(), ['answers-in', 'calls-out', 'list-items', 'restart',
-            'route-list', 'runtime', 'runtime', 'tool-list', 'tool-orphan', 'tool-orphan', 'tool-shared'].sort());
+            'route-list', 'runtime', 'runtime', 'tool-list', 'tool-orphan', 'tool-orphan', 'tool-shared', 'tool-unbound',
+            'catch-endpoint'].sort());
+        assert.match(actions(report, 'catch-endpoint')[0], /scope includes an endpoint/);
         assert.match(actions(report, 'tool-list')[0], /Wire this tool to its flow, the branch of switch route-list/);
         assert.match(actions(report, 'route-list')[0], /Remove this switch/);
         assert.match(actions(report, 'calls-out')[0], /received tool calls from endpoint endpoint-sales/);

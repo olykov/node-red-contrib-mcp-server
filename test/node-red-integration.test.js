@@ -60,11 +60,12 @@ describe('Node-RED runtime integration', () => {
             assert.equal(helper.getNode('tool-list').isRegistered, true);
             assert.equal(helper.getNode('tool-shared').isRegistered, true);
             assert.equal(helper.getNode('tool-orphan').isRegistered, false);
+            assert.equal(helper.getNode('tool-unbound').isRegistered, true);
             const list = await mcpFetch('http://127.0.0.1:' + port + '/mcp/sales', {
                 method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer migrated' },
                 body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
             });
-            assert.deepEqual((await list.json()).result.tools.map(tool => tool.name), ['list_items', 'ping']);
+            assert.deepEqual((await list.json()).result.tools.map(tool => tool.name), ['list_items', 'ping', 'unbound']);
         } finally {
             await helper.unload();
         }
