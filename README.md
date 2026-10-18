@@ -89,9 +89,10 @@ report `{ input, output, converted, unchanged, manualReview }`; exit code 1 mean
 | --- | --- |
 | Endpoint output, then a `switch` on `payload.toolName` | Wire each `nr-mcp-tool` output to the start of its branch and remove the switch; the report names the switch branch of every tool |
 | Function code reads `msg.payload.arguments`, `msg.payload.executionId` or `msg.payload.toolName` | Arguments are in `msg.payload`; `executionId` and `toolName` are in `msg.mcp` |
-| `msg.topic = 'nr-mcp-tool-response'` wired back to the endpoint | End the flow with `nr-mcp-tool-response`: result in `msg.payload`, error in `msg.mcp.error` |
+| `msg.topic = 'mcp-tool-response'` wired back to the endpoint | End the flow with `nr-mcp-tool-response`: result in `msg.payload`, error in `msg.mcp.error` |
 | `start`, `stop` and `restart` messages to the endpoint | Deploy, or disable the tool nodes |
 | Tool endpoint chosen by MCP path, or `Shared (All MCPs)` | Scope **Endpoint** with the endpoint node, or **Shared** with the runtime; set by the CLI, chosen manually when the flow is ambiguous |
+| Groups and Code Groups separated by spaces | Separate them with commas: a group name may contain spaces, so `Sales Ops` is one group; the report lists such fields |
 | `NODE_RED_ADMIN_API_TOKEN` | Admin Token credential or Admin Token Env |
 | Admin API CA field | `NODE_EXTRA_CA_CERTS` (see Environment Variables) |
 | MCP 2025-06-18 and 2025-11-25 clients | MCP 2026-07-28 only: Claude Code negotiates it for HTTP servers; Codex needs its `mcp_2026_07_28` feature flag |
