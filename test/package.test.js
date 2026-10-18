@@ -89,6 +89,21 @@ it('ships an example flow whose nodes satisfy the current editor contracts', () 
     assert.ok(flow.some(node => node.type === 'comment'));
 });
 
+it('points every editor request at an admin route the package registers', () => {
+    const { readFileSync } = require('node:fs');
+    const routes = new Set();
+    const RED = { events: new EventEmitter(), nodes: { registerType() {} },
+        httpAdmin: { get(route) { routes.add(route); }, post(route) { routes.add(route); } } };
+    const requested = [];
+    for (const file of Object.values(manifest['node-red'].nodes)) {
+        require('../' + file)(RED);
+        const html = readFileSync(resolve(__dirname, '..', file.replace(/\.js$/, '.html')), 'utf8');
+        for (const match of html.matchAll(/\$\.ajax\(\{\s*url:\s*'([^']+)'/g)) requested.push(match[1]);
+    }
+    assert.ok(requested.length > 0);
+    for (const url of requested) assert.ok(routes.has('/' + url), url + ' is not a registered admin route');
+});
+
 it('keeps editor templates within the Creating Nodes appearance and safety rules', () => {
     const { readFileSync } = require('node:fs');
     const basenames = new Set();
