@@ -218,7 +218,7 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
         assert.equal(second.statuses.at(-1).text, 'duplicate');
         assert.equal(runtimeNode.warnings.filter(message => message.includes('Duplicate MCP tool name')).length, 1);
 
-        await new Promise(resolve => first.emit('close', resolve));
+        await new Promise(resolve => first.emit('close', true, resolve));
         assert.deepStrictEqual(server.registeredTools().map(tool => tool.registeredBy), ['duplicate-b']);
         assert.equal(second.statuses.at(-1).text, 'registered');
     });
@@ -597,6 +597,50 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
         assert.match((await respond(RED, { payload: 'x', mcp: { executionId: 'unknown-id' } })).message, /Unknown MCP executionId/);
         assert.match((await respond(RED, { payload: 'x' })).message, /executionId is required/);
         assert.equal(server.warnings.length, 0, 'the late response must not raise an Orphan warning');
+    });
+
+    it('does not start the flow when the connection closed during token validation', async () => {
+        const { RED, server } = buildServer();
+        registerTool(RED, { name: 'sample_ping', description: 'Sample', inputSchema: { type: 'object', properties: {} } });
+        const response = Object.assign(new EventEmitter(), mockRes(), { closed: true });
+        await server.handleToolCall({ id: 43, params: { name: 'sample_ping', arguments: {} } }, response);
+        assert.deepStrictEqual(RED.delivered, []);
+        assert.deepStrictEqual(RED.cancelled, []);
+        assert.equal(response.body, undefined);
+        assert.equal(server.activeToolCalls, 0);
+    });
+
+    it('ignores a second response to a completed call', async () => {
+        const { RED, server } = buildServer();
+        registerTool(RED, { name: 'sample_ping', description: 'Sample', inputSchema: { type: 'object', properties: {} } });
+        const pending = server.handleToolCall({ id: 44, params: { name: 'sample_ping', arguments: {} } }, mockRes());
+        const { executionId } = RED.delivered[0].mcp;
+        assert.equal(await respond(RED, { payload: 'first', mcp: { executionId } }), undefined);
+        await pending;
+        assert.equal(await respond(RED, { payload: 'second', mcp: { executionId } }), undefined);
+    });
+
+    it('fails the calls of a removed tool and keeps them when the tool only restarts', async () => {
+        const { RED, types, server } = buildServer();
+        const tool = new types['nr-mcp-tool']({ id: 'tool-removed', toolName: 'removed_tool', scope: 'endpoint',
+            endpoint: server.id, toolSchema: '{"type":"object","properties":{}}' });
+        const restarted = mockRes();
+        const restartedCall = server.handleToolCall({ id: 45, params: { name: 'removed_tool', arguments: {} } }, restarted);
+        await new Promise(resolve => tool.emit('close', false, resolve));
+        const replacement = new types['nr-mcp-tool']({ id: 'tool-removed', toolName: 'removed_tool', scope: 'endpoint',
+            endpoint: server.id, toolSchema: '{"type":"object","properties":{}}' });
+        assert.equal(restarted.body, undefined, 'a call of a restarted tool stays pending');
+        await respond(RED, { payload: 'late', mcp: { executionId: tool.sent[0].mcp.executionId } });
+        await restartedCall;
+        assert.equal(restarted.body.result.content[0].text, 'late');
+
+        const removed = mockRes();
+        const removedCall = server.handleToolCall({ id: 46, params: { name: 'removed_tool', arguments: {} } }, removed);
+        await new Promise(resolve => replacement.emit('close', true, resolve));
+        await removedCall;
+        assert.equal(removed.body.result.isError, true);
+        assert.equal(removed.body.result.content[0].text, 'MCP tool was removed before execution completed');
+        assert.equal(await respond(RED, { payload: 'too late', mcp: { executionId: replacement.sent[0].mcp.executionId } }), undefined);
     });
 
     // MCP-PROTO-6

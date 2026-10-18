@@ -882,6 +882,8 @@ module.exports = function (RED)
                 // The request stream closes once its body is read; only the response closes with the connection.
                 const onClose = () => { if (!res.writableEnded) cancel.abort(); };
                 if (typeof res.on === 'function') res.on('close', onClose);
+                // The connection may have closed while the token was being validated.
+                if (res.closed || res.destroyed) cancel.abort();
                 let result;
                 try
                 {
@@ -935,6 +937,7 @@ module.exports = function (RED)
         {
             return new Promise((resolve, reject) =>
             {
+                if (signal && signal.aborted) return reject(new Error('Tool execution cancelled'));
                 const executionId = uuidv4();
                 const mcp = { executionId, toolName: tool.name, subject: claims.subject || '', email: claims.email || '',
                     groups: claims.groups || [], client: claims.client || '' };
@@ -948,7 +951,14 @@ module.exports = function (RED)
                 };
                 const timeout = setTimeout(() => end('timeout', new Error('Tool execution timeout')),
                     Math.min(tool.timeoutMs || node.toolTimeoutMs, node.toolTimeoutMs));
-                executions.add(executionId, { resolve, reject, timeout, endpointId: node.endpointId });
+                executions.add(executionId, { resolve, reject, timeout, endpointId: node.endpointId,
+                    registeredBy: tool.registeredBy, stop: error =>
+                    {
+                        if (!executions.take(executionId)) return;
+                        clearTimeout(timeout);
+                        executions.retire(executionId);
+                        reject(error);
+                    } });
                 if (signal) signal.addEventListener('abort', () => end('cancelled', new Error('Tool execution cancelled')), { once: true });
                 try
                 {

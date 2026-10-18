@@ -117,8 +117,14 @@ module.exports = function (RED)
 
         if (!node.validationError) node.registerTool();
 
-        node.on('close', function (done)
+        node.on('close', function (removed, done)
         {
+            // A restarted tool keeps its calls: the rest of the flow may still answer them.
+            if (removed)
+            {
+                for (const [, pending] of executions.entries())
+                    if (pending.registeredBy === node.id) pending.stop(new Error('MCP tool was removed before execution completed'));
+            }
             if (node.isRegistered) runtime.unregisterTool(node.id);
             node.isRegistered = false;
             done();
@@ -145,6 +151,7 @@ module.exports = function (RED)
                 return done(new Error('Unknown MCP executionId: ' + executionId));
             }
             clearTimeout(pending.timeout);
+            executions.retire(executionId);
             if (msg.mcp.error) pending.reject(new Error(executions.errorText(msg.mcp.error)));
             else pending.resolve(msg.payload);
             done();

@@ -152,7 +152,7 @@ msg.payload = arguments;
 msg.mcp = { executionId, toolName, subject, email, groups, client };
 ```
 
-The flow puts the result in `msg.payload` and ends with an `nr-mcp-tool-response` (MCP Tool Response) node, keeping `msg.mcp`. Set `msg.mcp.error` (string or Error) to return an error result. `msg.payload` can be a standard MCP result object; strings and other values are normalized into text responses. A message without `msg.mcp.executionId` or with an unknown one fails the response node for a Catch node; a response after cancellation or timeout is ignored.
+The flow puts the result in `msg.payload` and ends with an `nr-mcp-tool-response` (MCP Tool Response) node, keeping `msg.mcp`. Set `msg.mcp.error` (string or Error) to return an error result. `msg.payload` can be a standard MCP result object; strings and other values are normalized into text responses. A message without `msg.mcp.executionId` or with an unknown one fails the response node for a Catch node; a response after cancellation or timeout, or a second response to the same call, is ignored. Removing or disabling a tool node fails its running calls; a tool node that only restarts keeps them.
 
 With **Cancel Output** enabled, the MCP Tool node gets a second output that receives `msg.mcp = { executionId, toolName, reason }` when the client closes the request (`cancelled`) or the tool timeout expires (`timeout`).
 

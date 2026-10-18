@@ -215,7 +215,7 @@ describe('registry lifecycle', () => {
             toolSchema: '{"type":"object","properties":{}}' });
         assert.strictEqual(registry.isRegistered, true);
         assert.deepStrictEqual(emitted.map(entry => entry.event), ['register']);
-        await new Promise(resolve => registry.emit('close', resolve));
+        await new Promise(resolve => registry.emit('close', false, resolve));
         assert.deepStrictEqual(emitted.map(entry => entry.event), ['register', 'unregister']);
         assert.strictEqual(registry.isRegistered, false);
     });
