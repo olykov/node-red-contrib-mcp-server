@@ -4,6 +4,14 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
+## 4.1.0 - Unreleased
+
+- Protocol: MCP 2025-06-18 and 2025-11-25 clients are served next to 2026-07-28. They start with
+  `initialize` (answered with the requested revision or `2025-11-25`), send `MCP-Protocol-Version`
+  on every request, may use `ping` and cancel calls with `notifications/cancelled`. Results for
+  them carry no 2026 fields. `server/discover` and `-32022` list all three revisions. The handshake
+  needs a token like every other request.
+
 ## 4.0.0 - Unreleased
 
 Breaking release; convert 3.x flows with `nr-mcp-migrate` (README "Upgrading to 4.0").

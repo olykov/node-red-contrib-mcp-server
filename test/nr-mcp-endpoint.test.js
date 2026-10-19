@@ -93,6 +93,7 @@ function mockRes() {
         statusCode: 200,
         body: undefined,
         headers: {},
+        locals: {},
         set(name, value) { this.headers[name.toLowerCase()] = value; return this; },
         getHeader(name) { return this.headers[name.toLowerCase()]; },
         status(code) { this.statusCode = code; return this; },
@@ -1296,7 +1297,7 @@ describe('tool-level OAuth discovery', () => {
     });
 
     // MCP-KEEP-1
-    it('challenges every MCP request without a token over HTTP and rejects the legacy handshake', async () => {
+    it('challenges every MCP request without a token over HTTP, the 2025 handshake included', async () => {
         const context = setup({ serverPort: 18114 });
         const server = context.server;
         await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
@@ -1311,10 +1312,7 @@ describe('tool-level OAuth discovery', () => {
             return { status: res.status, body: await res.json() };
         };
         try {
-            const legacy = await post('initialize');
-            assert.equal(legacy.status, 400);
-            assert.equal(legacy.body.error.code, -32022);
-            assert.deepStrictEqual(legacy.body.error.data.supported, ['2026-07-28']);
+            assert.equal((await post('initialize')).status, 401);
             assert.equal((await post('server/discover')).status, 401);
             const notification = await mcpFetch('http://127.0.0.1:18114/mcp/test', {
                 method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' },
@@ -1693,7 +1691,12 @@ describe('protocol version header and JSON-RPC batch handling', () => {
             const unsupported = await call({ ...modern, 'mcp-protocol-version': '2025-11-25' }, { method: 'tools/list',
                 params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2025-11-25' } } });
             assert.equal(unsupported.status, 400);
-            assert.deepStrictEqual(unsupported.body.error.data, { supported: ['2026-07-28'], requested: '2025-11-25' });
+            assert.deepStrictEqual(unsupported.body.error.data,
+                { supported: ['2025-06-18', '2025-11-25', '2026-07-28'], requested: '2025-11-25' });
+            const unknownRevision = await call({ 'mcp-protocol-version': '2024-11-05' }, { method: 'tools/list' });
+            assert.equal(unknownRevision.status, 400);
+            assert.equal(unknownRevision.body.error.code, -32022);
+            assert.equal((await call({}, { method: 'tools/list' })).body.error.code, -32022);
             assert.equal((await call({ 'mcp-method': 'tools/list' }, list)).body.error.code, -32020);
             assert.equal((await call({ ...modern, 'mcp-method': 'tools/call' }, list)).body.error.code, -32020);
             const toolCall = { method: 'tools/call', params: { name: 'ping', arguments: {}, _meta: meta } };
@@ -1798,7 +1801,7 @@ describe('audit log and OAuth hardening', () => {
         const { server } = createRuntime();
         const res = mockRes();
         server.handleDiscover({ id: 1 }, res);
-        assert.deepStrictEqual(res.body.result.supportedVersions, ['2026-07-28']);
+        assert.deepStrictEqual(res.body.result.supportedVersions, ['2025-06-18', '2025-11-25', '2026-07-28']);
         assert.equal(res.body.result.resultType, 'complete');
         assert.equal(res.body.result._meta['io.modelcontextprotocol/serverInfo'].version, require('../package.json').version);
         assert.equal(res.body.result.cacheScope, 'private');
@@ -1933,6 +1936,83 @@ describe('telemetry identity', () => {
     });
 });
 
+
+describe('MCP 2025-06-18 and 2025-11-25 clients', () => {
+    const legacyPost = async (port, body, headers = {}) => {
+        const res = await mcpFetch('http://127.0.0.1:' + port + '/mcp/test', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: 'Bearer test-token', 'x-test-raw': '1', ...headers },
+            body: JSON.stringify({ jsonrpc: '2.0', ...body })
+        });
+        return { status: res.status, body: res.status === 202 ? await res.text() : await res.json() };
+    };
+
+    // MCP-PROTO-1, MCP-PROTO-3
+    it('answers initialize with the requested 2025 revision or the newest 2025 one', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18170 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            for (const [requested, negotiated] of [['2025-06-18', '2025-06-18'], ['2025-11-25', '2025-11-25'],
+                ['2024-11-05', '2025-11-25'], ['2026-07-28', '2025-11-25']]) {
+                const res = await legacyPost(18170, { id: 1, method: 'initialize', params: { protocolVersion: requested,
+                    capabilities: {}, clientInfo: { name: 'client', version: '1' } } });
+                assert.equal(res.status, 200);
+                assert.equal(res.body.result.protocolVersion, negotiated);
+                assert.deepStrictEqual(res.body.result.capabilities, { tools: { listChanged: false } });
+                assert.deepStrictEqual(res.body.result.serverInfo, { name: 'test', version: require('../package.json').version });
+                assert.equal(res.body.result.resultType, undefined);
+            }
+            const anonymous = await mcpFetch('http://127.0.0.1:18170/mcp/test', {
+                method: 'POST', headers: { 'content-type': 'application/json', 'x-test-raw': '1' },
+                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } })
+            });
+            assert.equal(anonymous.status, 401);
+            assert.match(anonymous.headers.get('www-authenticate'), /resource_metadata=/);
+        } finally { await new Promise(resolve => server.emit('close', resolve)); }
+    });
+
+    // MCP-PROTO-2, MCP-PROTO-4
+    it('serves 2025 requests by MCP-Protocol-Version without 2026 fields', async () => {
+        const { server } = createRuntime({ __runtime: { serverPort: 18171 } });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        try {
+            for (const version of ['2025-06-18', '2025-11-25']) {
+                const headers = { 'mcp-protocol-version': version };
+                const initialized = await legacyPost(18171, { method: 'notifications/initialized' }, headers);
+                assert.equal(initialized.status, 202);
+                assert.equal(initialized.body, '');
+                const ping = await legacyPost(18171, { id: 2, method: 'ping' }, headers);
+                assert.deepStrictEqual(ping.body.result, {});
+                const list = await legacyPost(18171, { id: 3, method: 'tools/list' }, headers);
+                assert.equal(list.status, 200);
+                assert.ok(Array.isArray(list.body.result.tools));
+                for (const key of ['resultType', 'ttlMs', 'cacheScope']) assert.equal(list.body.result[key], undefined);
+                assert.equal(list.body.result._meta, undefined);
+                const discover = await legacyPost(18171, { id: 4, method: 'server/discover' }, headers);
+                assert.equal(discover.status, 404);
+                assert.equal(discover.body.error.code, -32601);
+            }
+        } finally { await new Promise(resolve => server.emit('close', resolve)); }
+    });
+
+    // MCP-PROTO-7
+    it('cancels a 2025 tool call on notifications/cancelled from the same caller only', async () => {
+        const { RED, server } = buildServer();
+        registerTool(RED, { name: 'sample_ping', description: 'Sample', inputSchema: { type: 'object', properties: {} } });
+        const response = mockRes();
+        response.locals.mcpLegacy = true;
+        const pending = server.handleToolCall({ id: 7, params: { name: 'sample_ping', arguments: {} } }, response, { subject: 'user-1' });
+        await new Promise(resolve => setImmediate(resolve));
+        server.cancelLegacyCall(7, { subject: 'user-2' });
+        assert.equal(server.activeToolCalls, 1, 'another caller cannot cancel the call');
+        server.cancelLegacyCall(7, { subject: 'user-1' });
+        await pending;
+        assert.equal(response.body, undefined);
+        assert.equal(server.activeToolCalls, 0);
+        assert.equal(server.legacyCalls.size, 0);
+        assert.equal(RED.cancelled.length, 1);
+    });
+});
 
 describe('notifications and endpoint limits', () => {
     // MCP-PROTO-4

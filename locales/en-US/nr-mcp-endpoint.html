@@ -51,8 +51,9 @@
     <p>The endpoint starts when flows start and has no wires or commands; deploy or disable its
     tools to change what it serves. A configuration error or an unavailable port is logged and shown
     as <code>endpoint error</code> on its tools. Tool telemetry comes from the MCP metrics node. The
-    endpoint speaks MCP 2026-07-28 only, without an <code>initialize</code> handshake; every request,
-    <code>server/discover</code> included, requires OAuth. Notifications return HTTP 202 without a
+    endpoint speaks MCP 2025-06-18 and 2025-11-25 (after <code>initialize</code>) and 2026-07-28
+    (without a handshake); every request, <code>initialize</code> and <code>server/discover</code>
+    included, requires OAuth. Notifications return HTTP 202 without a
     body, and closing the connection cancels a running tool call.</p>
     <dl>
         <dt>Runtime</dt>

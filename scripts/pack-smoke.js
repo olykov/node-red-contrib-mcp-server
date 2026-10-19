@@ -108,8 +108,8 @@ async function main() {
             body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } })
         });
         const legacyBody = await legacy.json();
-        if (legacy.status !== 400 || legacyBody.error.code !== -32022 || legacyBody.error.data.supported[0] !== '2026-07-28')
-            throw new Error('Expected the legacy initialize handshake to be rejected with the supported versions.');
+        if (legacy.status !== 401 || legacyBody.error !== 'invalid_token')
+            throw new Error('Expected the 2025 initialize handshake to require authentication.');
 
         const malformed = await fetch('http://127.0.0.1:' + port + '/mcp/example', {
             method: 'POST', headers: { 'content-type': 'application/json' }, body: '{invalid-json'

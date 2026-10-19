@@ -95,7 +95,6 @@ report `{ input, output, converted, unchanged, manualReview }`; exit code 1 mean
 | Groups and Code Groups separated by spaces | Separated by commas: a group name may contain spaces, so `Sales Ops` is one group; the CLI rewrites 3.x lists with commas |
 | `NODE_RED_ADMIN_API_TOKEN` | Admin Token credential or Admin Token Env |
 | Admin API CA field | `NODE_EXTRA_CA_CERTS` (see Environment Variables) |
-| MCP 2025-06-18 and 2025-11-25 clients | MCP 2026-07-28 only: Claude Code negotiates it for HTTP servers; Codex needs its `mcp_2026_07_28` feature flag |
 
 ## Flow Server Extensions
 
@@ -244,15 +243,22 @@ Config-node details retain ordinary property types and values. Node-RED's flow A
 
 `get_flow` never requests the full `/flows` export. The tab index walks Node-RED's in-memory configuration once and caches only compact tab metadata until the next runtime deploy; it does not serialize or transfer full flows. `meta.cached` indicates whether the index was reused. The index excludes undeployed editor changes. Tab detail modes read `/flow/:id`; subflow modes read `/flow/global` and optionally the specified tab. These endpoints still make Node-RED prepare the selected flow before the palette applies its response limits. Responses cap lists at 40 items and edges at 80; Admin API reads have a 15-second timeout and a 32 MiB response limit. Tab indexing stops above 100,000 configuration nodes; graph inspection stops above 20,000 nodes or 100,000 wire visits. `meta` reports the source, scan count, returned node count and truncation.
 
-The endpoint speaks MCP 2026-07-28 only: there is no `initialize` handshake and no session. Every
-request carries `MCP-Protocol-Version`, `Mcp-Method` (and `Mcp-Name` for `tools/call`) matching its
-body and `_meta`; a mismatch is `400` with `-32020`, any other revision is `400` with `-32022` and
-the supported versions. Every request, `server/discover` included, needs a valid token; without
-one the endpoint answers HTTP 401 with `WWW-Authenticate` pointing to the protected resource
-metadata, which starts sign-in in MCP clients (MCP authorization spec). Claude Code negotiates
-2026-07-28 for HTTP servers; Codex needs its `mcp_2026_07_28` feature flag. Closing the connection
-cancels a running tool call. GET and DELETE answer 405. Tools advertise `securitySchemes` and the
-matching `_meta.securitySchemes`.
+The endpoint speaks MCP 2025-06-18, 2025-11-25 and 2026-07-28, without sessions.
+
+- **2026-07-28:** no `initialize` handshake. Every request carries `MCP-Protocol-Version`,
+  `Mcp-Method` (and `Mcp-Name` for `tools/call`) matching its body and `_meta`; a mismatch is `400`
+  with `-32020`. `server/discover` reports the supported revisions.
+- **2025-06-18 and 2025-11-25:** the client starts with `initialize`, which answers with the
+  requested revision or `2025-11-25`, then sends `MCP-Protocol-Version` on every request.
+  `ping` and `notifications/cancelled` are supported; results carry no 2026 fields.
+- A request without a known revision is `400` with `-32022` and the supported revisions.
+
+Claude Code and Codex use a 2025 revision unless 2026-07-28 negotiation is enabled in the client.
+Every request, `initialize` and `server/discover` included, needs a valid token; without one the
+endpoint answers HTTP 401 with `WWW-Authenticate` pointing to the protected resource metadata,
+which starts sign-in in MCP clients (MCP authorization spec). Closing the connection cancels a
+running tool call. GET and DELETE answer 405. Tools advertise `securitySchemes` and the matching
+`_meta.securitySchemes`.
 
 All tool calls validate credentials before flow or admin execution. Missing, invalid or
 expired tokens return HTTP 401 with `WWW-Authenticate`. Endpoint role and resource failures

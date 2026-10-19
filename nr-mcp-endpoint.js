@@ -11,7 +11,8 @@ module.exports = function (RED)
     const executions = require('./lib/executions');
     const PACKAGE_VERSION = require('./package.json').version;
     const PROTOCOL_VERSION = '2026-07-28';
-    const SUPPORTED_PROTOCOL_VERSIONS = [PROTOCOL_VERSION];
+    const LEGACY_PROTOCOL_VERSIONS = ['2025-06-18', '2025-11-25'];
+    const SUPPORTED_PROTOCOL_VERSIONS = [...LEGACY_PROTOCOL_VERSIONS, PROTOCOL_VERSION];
     const HEADER_MISMATCH = -32020;
     const UNSUPPORTED_PROTOCOL_VERSION = -32022;
     const LIST_TTL_MS = 60000;
@@ -365,6 +366,12 @@ module.exports = function (RED)
         server.once('error', onError);
     }
 
+    // A 2025 client cancels by request id; the subject keeps one user from cancelling another's call.
+    function legacyCallKey(id, claims = {})
+    {
+        return JSON.stringify([claims.subject || '', id]);
+    }
+
     function textResult(text, isError = false)
     {
         return { content: [{ type: 'text', text: String(text) }], ...(isError ? { isError: true } : {}) };
@@ -605,6 +612,7 @@ module.exports = function (RED)
         node.authConfig = configNode(RED, config.auth);
         node.endpointId = node.id;
         node.activeToolCalls = 0;
+        node.legacyCalls = new Map();
         node.toolTimeoutMs = config.toolTimeoutMs === undefined || config.toolTimeoutMs === '' ?
             30000 : Number(config.toolTimeoutMs);
         node.maxConcurrentCalls = config.maxConcurrentCalls === undefined || config.maxConcurrentCalls === '' ?
@@ -705,14 +713,23 @@ module.exports = function (RED)
             node.httpServer = portState.httpServer;
         };
 
+        // 2025 revisions start with initialize and then send only MCP-Protocol-Version; 2026-07-28 has no handshake.
+        node.isLegacyRequest = function (req, request)
+        {
+            const meta = request.params && request.params._meta;
+            const bodyVersion = meta && meta['io.modelcontextprotocol/protocolVersion'];
+            const headerVersion = (req.headers || {})['mcp-protocol-version'];
+            return request.method === 'initialize' || (!bodyVersion && LEGACY_PROTOCOL_VERSIONS.includes(headerVersion));
+        };
+
         node.protocolError = function (req, request)
         {
             const headers = req.headers || {};
             const meta = request.params && request.params._meta;
             const bodyVersion = meta && meta['io.modelcontextprotocol/protocolVersion'];
             const headerVersion = headers['mcp-protocol-version'];
-            const requested = headerVersion || bodyVersion || (request.params && request.params.protocolVersion) || null;
-            if (request.method === 'initialize' || !SUPPORTED_PROTOCOL_VERSIONS.includes(requested))
+            const requested = headerVersion || bodyVersion || null;
+            if (requested !== PROTOCOL_VERSION)
                 return { code: UNSUPPORTED_PROTOCOL_VERSION, message: 'Unsupported protocol version',
                     data: { supported: SUPPORTED_PROTOCOL_VERSIONS, requested } };
             if (!headerVersion || headerVersion !== bodyVersion)
@@ -727,6 +744,12 @@ module.exports = function (RED)
 
         node.result = function (res, id, result)
         {
+            if (res.locals && res.locals.mcpLegacy)
+            {
+                const legacyResult = Object.fromEntries(Object.entries(result || {})
+                    .filter(([key]) => !['resultType', 'ttlMs', 'cacheScope'].includes(key)));
+                return res.json({ jsonrpc: '2.0', id, result: legacyResult });
+            }
             res.json({ jsonrpc: '2.0', id, result: { resultType: 'complete', ...result,
                 _meta: { ...(result && result._meta), 'io.modelcontextprotocol/serverInfo': { name: node.serverName, version: PACKAGE_VERSION } } } });
         };
@@ -741,7 +764,9 @@ module.exports = function (RED)
             let handledToolCall = false;
             try
             {
-                const protocolError = node.protocolError(req, request);
+                const legacy = node.isLegacyRequest(req, request);
+                if (legacy && res.locals) res.locals.mcpLegacy = true;
+                const protocolError = legacy ? null : node.protocolError(req, request);
                 if (protocolError)
                     return node.rpcError(res, request.id, protocolError.code, protocolError.message, protocolError.data, 400);
                 let authResult;
@@ -762,7 +787,23 @@ module.exports = function (RED)
                     node.auditDenied(req, authResult);
                     return writeAuthFailure(req, res, node, authResult);
                 }
-                if (request.id === undefined) return res.status(202).end();
+                if (request.id === undefined)
+                {
+                    if (legacy && request.method === 'notifications/cancelled')
+                        node.cancelLegacyCall(request.params && request.params.requestId, authResult.claims);
+                    return res.status(202).end();
+                }
+                if (legacy)
+                {
+                    switch (request.method)
+                    {
+                        case 'initialize': return node.handleInitialize(request, res);
+                        case 'ping': return node.result(res, request.id, {});
+                        case 'tools/list': return node.handleToolsList(request, res, authResult.claims);
+                        case 'tools/call': handledToolCall = true; await node.handleToolCall(request, res, authResult.claims); return;
+                        default: return node.rpcError(res, request.id, -32601, 'Method not found: ' + request.method, undefined, 404);
+                    }
+                }
                 switch (request.method)
                 {
                     case 'server/discover': return node.handleDiscover(request, res);
@@ -865,6 +906,8 @@ module.exports = function (RED)
             }
             node.activeToolCalls++;
             const cancel = new AbortController();
+            const legacyKey = res.locals && res.locals.mcpLegacy ? legacyCallKey(request.id, claims) : null;
+            if (legacyKey) node.legacyCalls.set(legacyKey, cancel);
             try
             {
                 if (adminTool)
@@ -908,6 +951,7 @@ module.exports = function (RED)
             }
             finally
             {
+                if (legacyKey && node.legacyCalls.get(legacyKey) === cancel) node.legacyCalls.delete(legacyKey);
                 node.activeToolCalls--;
                 const meta = adminResult && adminResult.structuredContent && adminResult.structuredContent.meta;
                 auditLog(node, 'mcp.tool_call', { outcome: status, tool: toolName, endpoint: node.serverName,
@@ -925,6 +969,23 @@ module.exports = function (RED)
                     cached: meta && typeof meta.cached === 'boolean' ? meta.cached : null
                 });
             }
+        };
+
+        node.handleInitialize = function (request, res)
+        {
+            const requested = request.params && request.params.protocolVersion;
+            node.result(res, request.id, {
+                protocolVersion: LEGACY_PROTOCOL_VERSIONS.includes(requested) ? requested : LEGACY_PROTOCOL_VERSIONS.at(-1),
+                capabilities: { tools: { listChanged: false } },
+                serverInfo: { name: node.serverName, version: PACKAGE_VERSION }
+            });
+        };
+
+        node.cancelLegacyCall = function (requestId, claims = {})
+        {
+            if (requestId === undefined || requestId === null) return;
+            const cancel = node.legacyCalls.get(legacyCallKey(requestId, claims));
+            if (cancel) cancel.abort();
         };
 
         node.handleDiscover = function (request, res)
