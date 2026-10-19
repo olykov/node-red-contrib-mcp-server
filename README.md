@@ -386,7 +386,7 @@ deployment.
 The MCP listener runs inside the Node-RED pod on the `nr-mcp-runtime` port, separate from the
 editor port. Expose it through a Service port and route only the MCP and OAuth paths to it:
 
-- each MCP endpoint path (POST);
+- each MCP endpoint path and the runtime Admin Path (POST);
 - `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/*`;
 - `/.well-known/oauth-authorization-server` and `/.well-known/oauth-authorization-server/*`;
 - `/oauth/*/authorize`, `/oauth/*/callback` (GET) and `/oauth/*/token` (POST).
