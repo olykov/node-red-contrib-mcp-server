@@ -6,26 +6,15 @@ the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1
 
 ## 4.2.0 - Unreleased
 
-- Admin Tools: the runtime serves `get_flow` itself when **Admin Tools** is enabled, on its Admin
-  Path with its own Auth and Groups. The MCP Endpoint that used to serve the Admin Endpoint Path is
-  no longer needed, so the editor no longer lists it as unused. Admin fields appear only when Admin
-  Tools is enabled. `nr-mcp-migrate` moves the old admin endpoint into the runtime and removes it.
-
-## 4.1.0 - Unreleased
-
-- Protocol: MCP 2025-06-18 and 2025-11-25 clients are served next to 2026-07-28. They start with
-  `initialize` (answered with the requested revision or `2025-11-25`), send `MCP-Protocol-Version`
-  on every request, may use `ping` and cancel calls with `notifications/cancelled`. Results for
-  them carry no 2026 fields. `server/discover` and `-32022` list all three revisions. The handshake
-  needs a token like every other request.
-
-## 4.0.0 - Unreleased
-
 Breaking release; convert 3.x flows with `nr-mcp-migrate` (README "Upgrading to 4.0").
 
-- Protocol: MCP 2026-07-28 only. No `initialize`; `server/discover`, `resultType`, cache hints,
-  `MCP-Protocol-Version`/`Mcp-Method`/`Mcp-Name` checks (`-32020`), unsupported revisions `-32022`.
-  Every request needs a token. Closing the connection cancels a running tool call.
+- Protocol: MCP 2025-06-18, 2025-11-25 and 2026-07-28. 2025 clients start with `initialize`
+  (answered with the requested revision or `2025-11-25`), send `MCP-Protocol-Version` on every
+  request, may use `ping` and cancel calls with `notifications/cancelled`; their results carry no
+  2026 fields. 2026-07-28 clients use `server/discover`, `resultType`, cache hints and
+  `MCP-Protocol-Version`/`Mcp-Method`/`Mcp-Name` checks (`-32020`). Unknown revisions get `-32022`
+  with the supported list. Every request, `initialize` included, needs a token. Closing the
+  connection cancels a running tool call.
 - Nodes: types use the `nr-mcp-` prefix (`nr-mcp-runtime`, `nr-mcp-endpoint`, `nr-mcp-tool`,
   `nr-mcp-tool-response`, `nr-mcp-metrics`, `nr-mcp-auth`, `nr-mcp-auth-storage`) and install next
   to the upstream package. A call leaves `nr-mcp-tool` with the arguments in `msg.payload` and the
@@ -36,8 +25,12 @@ Breaking release; convert 3.x flows with `nr-mcp-migrate` (README "Upgrading to 
 - Runtime: owns the listener and the tool registry; tools register synchronously, a runtime
   redeploy closes and opens its port once. `runtimeName`, the Admin API CA field and the
   `NODE_RED_ADMIN_API_TOKEN` fallback are removed.
+- Admin Tools: the runtime serves `get_flow` itself when **Admin Tools** is enabled, on its Admin
+  Path with its own Auth and Groups; no endpoint configuration node is needed, so none shows as
+  unused. Admin fields appear only when Admin Tools is enabled.
 - Migration: `nr-mcp-migrate --input --output` converts a 3.x flow, keeps node ids and credential
-  field names and lists the routing nodes that need manual changes.
+  field names, moves the admin endpoint into the runtime Admin Tools and lists the routing nodes
+  that need manual changes.
 - Fixes: group names split only on commas and new lines; tool schemas valid under JSON Schema
   2020-12 are no longer rejected by Ajv lint rules; the annotation label is Open World.
 
