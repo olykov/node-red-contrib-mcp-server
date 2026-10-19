@@ -4,7 +4,7 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
-## 4.2.0 - Unreleased
+## 4.2.0 - 2026-10-19
 
 Breaking release; convert 3.x flows with `nr-mcp-migrate` (README "Upgrading to 4.0").
 
