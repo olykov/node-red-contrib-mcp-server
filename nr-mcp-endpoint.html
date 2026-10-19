@@ -22,17 +22,29 @@
                     return /^[0-9a-fA-F:.]+\/\d{1,3}$/.test(value);
                 });
             } },
-            allowFunctionCode: { value: false },
-            codeGroups: { value: '', validate: function(v) {
-                return !$('#node-config-input-allowFunctionCode').prop('checked') || !!String(v || '').trim();
+            adminTools: { value: false },
+            adminPath: { value: '', validate: function(v) {
+                return !mcpAdminTools(this) || /^\/\S*$/.test(String(v || '').trim());
+            } },
+            adminAuth: { value: '', type: 'nr-mcp-auth', required: false, validate: function(v) {
+                return !mcpAdminTools(this) || (!!v && v !== '_ADD_');
+            } },
+            adminGroups: { value: '', validate: function(v) {
+                return !mcpAdminTools(this) || !!String(v || '').trim();
             } },
             adminPort: { value: 1880, required: false, validate: function(v) {
-                return v === '' || (RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536);
+                return !mcpAdminTools(this) || v === '' ||
+                    (RED.validators.number()(v) && Number.isInteger(Number(v)) && v > 0 && v < 65536);
             } },
             adminTokenEnv: { value: '', validate: function(v) {
-                return !v || /^MCP_[A-Z0-9_]+$/.test(String(v).trim());
+                return !mcpAdminTools(this) || !v || /^MCP_[A-Z0-9_]+$/.test(String(v).trim());
             } },
-            adminEndpointPath: { value: '' }
+            allowFunctionCode: { value: false },
+            codeGroups: { value: '', validate: function(v) {
+                var allow = $('#node-config-input-allowFunctionCode');
+                var enabled = allow.length ? allow.prop('checked') : this.allowFunctionCode === true;
+                return !mcpAdminTools(this) || !enabled || !!String(v || '').trim();
+            } }
         },
         credentials: {
             adminToken: { type: 'password' }
@@ -40,8 +52,20 @@
         paletteLabel: 'MCP Runtime',
         label: function() {
             return this.name || this._('nr-mcp-runtime.label.paletteLabel');
+        },
+        oneditprepare: function() {
+            var toggle = function() {
+                $('.mcp-admin-row').toggle($('#node-config-input-adminTools').prop('checked'));
+            };
+            $('#node-config-input-adminTools').on('change', toggle);
+            toggle();
         }
     });
+
+    function mcpAdminTools(node) {
+        var box = $('#node-config-input-adminTools');
+        return box.length ? box.prop('checked') : node.adminTools === true;
+    }
 
     RED.nodes.registerType('nr-mcp-endpoint', {
         category: 'config',
@@ -122,34 +146,42 @@
     <div class="form-tips" data-i18n="nr-mcp-runtime.label.trustedProxiesTip"></div>
 
     <hr>
-    <h4 data-i18n="nr-mcp-runtime.label.adminToolsHeading"></h4>
     <div class="form-row">
-        <label for="node-config-input-allowFunctionCode" data-i18n="nr-mcp-runtime.label.allowFunctionCode"></label>
-        <input type="checkbox" id="node-config-input-allowFunctionCode" style="width: auto;">
+        <label for="node-config-input-adminTools" data-i18n="nr-mcp-runtime.label.adminTools"></label>
+        <input type="checkbox" id="node-config-input-adminTools" style="width: auto;">
     </div>
-    <div class="form-row">
-        <label for="node-config-input-codeGroups"><i class="fa fa-users"></i> <span data-i18n="nr-mcp-runtime.label.codeGroups"></span></label>
-        <input type="text" id="node-config-input-codeGroups" data-i18n="[placeholder]nr-mcp-runtime.label.codeGroupsPlaceholder">
+    <div class="form-row mcp-admin-row">
+        <label for="node-config-input-adminPath"><i class="fa fa-link"></i> <span data-i18n="nr-mcp-runtime.label.adminPath"></span></label>
+        <input type="text" id="node-config-input-adminPath" data-i18n="[placeholder]nr-mcp-runtime.label.adminPathPlaceholder">
     </div>
-    <div class="form-tips" data-i18n="nr-mcp-runtime.label.codeGroupsTip"></div>
-
-    <div class="form-row">
+    <div class="form-row mcp-admin-row">
+        <label for="node-config-input-adminAuth"><i class="fa fa-lock"></i> <span data-i18n="nr-mcp-runtime.label.adminAuth"></span></label>
+        <input type="text" id="node-config-input-adminAuth">
+    </div>
+    <div class="form-row mcp-admin-row">
+        <label for="node-config-input-adminGroups"><i class="fa fa-users"></i> <span data-i18n="nr-mcp-runtime.label.adminGroups"></span></label>
+        <input type="text" id="node-config-input-adminGroups">
+    </div>
+    <div class="form-row mcp-admin-row">
         <label for="node-config-input-adminPort"><i class="fa fa-plug"></i> <span data-i18n="nr-mcp-runtime.label.adminPort"></span></label>
         <input type="text" id="node-config-input-adminPort" data-i18n="[placeholder]nr-mcp-runtime.label.adminPortPlaceholder">
     </div>
-    <div class="form-row">
+    <div class="form-row mcp-admin-row">
         <label for="node-config-input-adminToken"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-runtime.label.adminToken"></span></label>
         <input type="password" id="node-config-input-adminToken" autocomplete="off">
     </div>
-    <div class="form-row">
+    <div class="form-row mcp-admin-row">
         <label for="node-config-input-adminTokenEnv"><i class="fa fa-key"></i> <span data-i18n="nr-mcp-runtime.label.adminTokenEnv"></span></label>
         <input type="text" id="node-config-input-adminTokenEnv" data-i18n="[placeholder]nr-mcp-runtime.label.adminTokenEnvPlaceholder">
     </div>
-    <div class="form-row">
-        <label for="node-config-input-adminEndpointPath"><i class="fa fa-link"></i> <span data-i18n="nr-mcp-runtime.label.adminEndpointPath"></span></label>
-        <input type="text" id="node-config-input-adminEndpointPath" data-i18n="[placeholder]nr-mcp-runtime.label.adminEndpointPathPlaceholder">
+    <div class="form-row mcp-admin-row">
+        <label for="node-config-input-allowFunctionCode" data-i18n="nr-mcp-runtime.label.allowFunctionCode"></label>
+        <input type="checkbox" id="node-config-input-allowFunctionCode" style="width: auto;">
     </div>
-    <div class="form-tips mcp-admin-tools-note" data-i18n="nr-mcp-runtime.label.adminToolsNote"></div>
+    <div class="form-row mcp-admin-row">
+        <label for="node-config-input-codeGroups"><i class="fa fa-users"></i> <span data-i18n="nr-mcp-runtime.label.codeGroups"></span></label>
+        <input type="text" id="node-config-input-codeGroups">
+    </div>
 </script>
 
 

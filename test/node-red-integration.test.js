@@ -148,7 +148,7 @@ describe('Node-RED runtime integration', () => {
             { id: 'it-runtime', type: 'nr-mcp-runtime', name: 'Integration runtime',
                 serverPort: port, bindHost: '127.0.0.1', publicBaseUrl: 'http://127.0.0.1:' + port,
                 allowedOrigins: 'https://trusted.example.test',
-                adminPort: '', adminEndpointPath: '' },
+                adminTools: false },
             { id: 'it-storage', type: 'nr-mcp-auth-storage', name: 'Integration storage', mode: 'memory',
                 redisUrlEnv: 'MCP_REDIS_URL', host: '127.0.0.1', port: 6379, db: 0, tls: false,
                 username: '', passwordEnv: '', keyPrefix: 'mcp_auth:' },

@@ -19,9 +19,15 @@
         <dt>Trusted Proxies</dt>
         <dd>CIDR ranges of trusted reverse proxies. Forwarded client addresses are used in audit
         logs only when the TCP peer is in this list.</dd>
-        <dt>Allow Function Code</dt>
-        <dd>When enabled, Function code may be returned by <code>get_flow</code> only to users
-        in Code Groups. Code is sent to the MCP client and secrets in code are not redacted.</dd>
+        <dt>Admin Tools</dt>
+        <dd>Serves the read-only <code>get_flow</code> tool from this runtime. The fields below
+        appear only when it is enabled.</dd>
+        <dt>Admin Path</dt>
+        <dd>MCP path of the admin tools on the runtime port. No MCP Endpoint may use it.</dd>
+        <dt>Auth</dt>
+        <dd>OAuth configuration that signs callers in.</dd>
+        <dt>Groups</dt>
+        <dd>Groups allowed to call the admin tools, separated by commas.</dd>
         <dt>Admin Port</dt>
         <dd>Fallback port for the local Node-RED Admin API; the runtime uses Node-RED's configured
         UI port, host, HTTP admin root and HTTPS setting when available. When Node-RED itself serves
@@ -32,11 +38,10 @@
         <dt>Admin Token Env</dt>
         <dd>Optional <code>MCP_*</code> environment variable for the API token. The Admin Token
         credential takes precedence.</dd>
-        <dt>Admin Path</dt>
-        <dd>Exact MCP path allowed to expose the read-only admin tools.</dd>
+        <dt>Allow Function Code</dt>
+        <dd>When enabled, Function code may be returned by <code>get_flow</code> only to users
+        in Code Groups. Code is sent to the MCP client and secrets in code are not redacted.</dd>
     </dl>
-    <p>Admin tools are exposed only when a token and Admin Path are set and an MCP Endpoint on this
-    runtime uses exactly that path.</p>
     <p>An empty Bind Host listens on all interfaces and logs a warning.</p>
     <h3>References</h3>
     <ul>

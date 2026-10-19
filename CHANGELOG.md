@@ -4,6 +4,13 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
+## 4.2.0 - Unreleased
+
+- Admin Tools: the runtime serves `get_flow` itself when **Admin Tools** is enabled, on its Admin
+  Path with its own Auth and Groups. The MCP Endpoint that used to serve the Admin Endpoint Path is
+  no longer needed, so the editor no longer lists it as unused. Admin fields appear only when Admin
+  Tools is enabled. `nr-mcp-migrate` moves the old admin endpoint into the runtime and removes it.
+
 ## 4.1.0 - Unreleased
 
 - Protocol: MCP 2025-06-18 and 2025-11-25 clients are served next to 2026-07-28. They start with

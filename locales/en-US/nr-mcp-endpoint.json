@@ -16,19 +16,18 @@
             "trustedProxies": "Trusted Proxies",
             "trustedProxiesPlaceholder": "10.0.0.0/8, 2001:db8::/32",
             "trustedProxiesTip": "Only configure proxy CIDRs that you control. Forwarded client addresses are ignored unless the TCP peer is trusted.",
-            "adminToolsHeading": "Admin Tools",
+            "adminTools": "Admin Tools",
+            "adminPath": "Admin Path",
+            "adminPathPlaceholder": "/mcp/admin",
+            "adminAuth": "Auth",
+            "adminGroups": "Groups",
             "allowFunctionCode": "Allow Function Code",
             "codeGroups": "Code Groups",
-            "codeGroupsPlaceholder": "Required when Function code is enabled",
-            "codeGroupsTip": "Function code is sent to the MCP client and is not redacted. Enable only for trusted groups.",
             "adminPort": "Admin Port",
             "adminPortPlaceholder": "1880",
             "adminToken": "Admin Token",
             "adminTokenEnv": "Admin Token Env",
-            "adminTokenEnvPlaceholder": "MCP_ADMIN_TOKEN",
-            "adminEndpointPath": "Admin Path",
-            "adminEndpointPathPlaceholder": "/mcp/admin",
-            "adminToolsNote": "Admin tools require an Admin Token or Admin Token Env and an Admin Endpoint Path matching an MCP Endpoint."
+            "adminTokenEnvPlaceholder": "MCP_ADMIN_TOKEN"
         }
     },
     "nr-mcp-endpoint": {

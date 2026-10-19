@@ -3,6 +3,7 @@ module.exports = function (RED)
     "use strict";
 
     const http = require('http');
+    const { EventEmitter } = require('events');
     const express = require('express');
     const { randomUUID: uuidv4 } = require('crypto');
     const { normalizeIp, parseCidr, ipInCidr } = require('./lib/cidr');
@@ -135,17 +136,6 @@ module.exports = function (RED)
             if (!isTrusted(candidate)) return candidate;
         }
         return address;
-    }
-
-    function hasAdminTools(runtime, serverPath)
-    {
-        return Boolean(
-            runtime &&
-            runtime.adminPort &&
-            runtimeAdminToken(runtime) &&
-            runtime.adminEndpointPath &&
-            normalizePath(runtime.adminEndpointPath) === serverPath
-        );
     }
 
     function toolKey(tool)
@@ -452,7 +442,8 @@ module.exports = function (RED)
             node.configError = 'Trusted Proxies must contain valid IP addresses or CIDR ranges';
             node.error('MCP runtime configuration is invalid: ' + node.configError);
         }
-        node.adminEndpointPath = config.adminEndpointPath ? normalizePath(config.adminEndpointPath) : '';
+        node.adminEnabled = config.adminTools === true || config.adminTools === 'true';
+        node.adminEndpoint = null;
         node.listener = null;
         node.tools = new Map();
         node.endpoints = new Set();
@@ -588,7 +579,15 @@ module.exports = function (RED)
             }
         };
 
+        if (node.adminEnabled) node.adminEndpoint = createAdminEndpoint(node, config);
+
         node.on('close', function (done)
+        {
+            if (node.adminEndpoint) node.adminEndpoint.emit('close', () => closeRuntime(done));
+            else closeRuntime(done);
+        });
+
+        function closeRuntime(done)
         {
             toolTelemetryListener = null;
             runtimes.delete(node);
@@ -598,15 +597,28 @@ module.exports = function (RED)
             node.listener = null;
             if (state) closeListener(state, () => done());
             else done();
-        });
+        }
+    }
+
+    // Admin Tools are served by the runtime itself, so no endpoint configuration node exists for them.
+    function createAdminEndpoint(runtime, config)
+    {
+        const endpoint = new EventEmitter();
+        endpoint.id = runtime.id + '-admin';
+        for (const level of ['log', 'warn', 'error', 'debug']) endpoint[level] = message => runtime[level](message);
+        setupEndpoint(endpoint, { runtime: runtime.id, auth: config.adminAuth, serverName: 'node-red-admin',
+            serverPath: config.adminPath, allowedGroups: config.adminGroups }, runtime, true);
+        return endpoint;
     }
 
     function MCPFlowServerNode(config)
     {
         RED.nodes.createNode(this, config);
-        const node = this;
-        const runtime = runtimeFromConfig(RED, config);
+        setupEndpoint(this, config, runtimeFromConfig(RED, config), false);
+    }
 
+    function setupEndpoint(node, config, runtime, admin)
+    {
         node.runtimeId = config.runtime || '';
         node.runtime = runtime;
         node.authConfig = configNode(RED, config.auth);
@@ -634,7 +646,7 @@ module.exports = function (RED)
         node.serverPort = runtime ? runtime.serverPort : 0;
         node.publicBaseUrl = runtime ? runtime.publicBaseUrl : '';
         node.allowedGroups = parseGroupNames(config.allowedGroups || '');
-        node.adminToolsEnabled = hasAdminTools(runtime, node.serverPath);
+        node.adminToolsEnabled = admin;
         node.adminPort = runtime ? runtime.adminPort : 0;
         node.adminToken = runtimeAdminToken(runtime);
         node.adminTools = createAdminTools({
@@ -682,6 +694,7 @@ module.exports = function (RED)
                 throw new Error('MCP endpoint configuration is invalid: ' + node.configError);
             if (node.runtime.configError)
                 throw new Error('MCP runtime configuration is invalid: ' + node.runtime.configError);
+            if (!node.authConfig) node.authConfig = configNode(RED, config.auth);
             if (!node.authConfig)
                 throw new Error('MCP auth configuration is required');
             if (node.authConfig.configError)
@@ -692,6 +705,8 @@ module.exports = function (RED)
             // Deny by default: an endpoint without groups would admit every user of the identity provider.
             if (!node.allowedGroups.length)
                 throw new Error('MCP endpoint Groups are required');
+            if (admin && !runtimeAdminToken(node.runtime))
+                throw new Error('MCP runtime Admin Token or Admin Token Env is required');
             const slug = authRouteSlug(node.authConfig);
             const base = String(node.publicBaseUrl || '').replace(/\/+$/, '');
             for (const runtime of runtimes)
@@ -1126,7 +1141,7 @@ module.exports = function (RED)
             else finish();
         };
 
-        if (node.runtime && typeof node.runtime.addEndpoint === 'function') node.runtime.addEndpoint(node);
+        if (!admin && node.runtime && typeof node.runtime.addEndpoint === 'function') node.runtime.addEndpoint(node);
 
         const startOnDeploy = () => node.startServer();
         RED.events.on('flows:started', startOnDeploy);

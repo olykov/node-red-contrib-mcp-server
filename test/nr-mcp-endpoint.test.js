@@ -88,6 +88,11 @@ function buildServer(config = {}) {
     return createRuntime(config);
 }
 
+function adminRuntime(runtime = {}) {
+    return { adminTools: true, adminPath: '/mcp/ops', adminAuth: 'default-auth', adminGroups: 'test-group',
+        adminPort: 1881, credentials: { adminToken: 'configured-value' }, ...runtime };
+}
+
 function mockRes() {
     return {
         statusCode: 200,
@@ -372,25 +377,16 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
         }
     });
 
-    it('exposes admin tools only on the runtime admin endpoint path', () => {
-        const adminRuntime = {
-            serverPort: 18003,
-            adminPort: 1881,
-            adminEndpointPath: '/mcp/ops',
-            credentials: { adminToken: 'configured-value' }
-        };
-        const adminServer = buildServer({
-            id: 'admin-endpoint',
-            serverName: 'ops',
-            serverPath: '/mcp/ops',
-            __runtime: adminRuntime
-        }).server;
-        const otherServer = buildServer({
+    it('serves admin tools only from the runtime Admin Tools path, not from its endpoints', () => {
+        const { server: otherServer, runtimeNode } = buildServer({
             id: 'other-endpoint',
             serverName: 'other',
             serverPath: '/mcp/other',
-            __runtime: Object.assign({ id: 'runtime-2' }, adminRuntime)
-        }).server;
+            __runtime: adminRuntime({ serverPort: 18003 })
+        });
+        const adminServer = runtimeNode.adminEndpoint;
+        assert.equal(adminServer.serverPath, '/mcp/ops');
+        assert.equal(createRuntime().runtimeNode.adminEndpoint, null);
 
         const adminRes = mockRes();
         adminServer.handleToolsList({ id: 1 }, adminRes);
@@ -420,16 +416,8 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
             { id: 'tab1', type: 'tab', label: 'Operations' },
             { id: 'n1', type: 'function', z: 'tab1', func: 'private code' }
         ];
-        const { RED, server } = buildServer({
-            id: 'admin-endpoint',
-            serverPath: '/mcp/ops',
-            __flowNodes: flowNodes,
-            __runtime: {
-                adminPort: 1881,
-                adminEndpointPath: '/mcp/ops',
-                credentials: { adminToken: 'configured-value' }
-            }
-        });
+        const { RED, runtimeNode } = buildServer({ __flowNodes: flowNodes, __runtime: adminRuntime() });
+        const server = runtimeNode.adminEndpoint;
         const tabs = (await server.adminTools.callTool('get_flow', {})).structuredContent;
         assert.deepStrictEqual(tabs.tabs, [
             { id: 'tab1', label: 'Operations', disabled: false, nodeCount: 1 }
@@ -451,11 +439,10 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
         await new Promise(resolve => admin.listen(0, '127.0.0.1', resolve));
         const adminPort = admin.address().port;
         try {
-            const { server } = buildServer({
-                id: 'admin-endpoint', serverPath: '/mcp/ops',
+            const server = buildServer({
                 __settings: { httpAdminRoot: '/admin', uiHost: '127.0.0.1', uiPort: adminPort },
-                __runtime: { adminEndpointPath: '/mcp/ops', credentials: { adminToken: 'configured-value' } }
-            });
+                __runtime: adminRuntime()
+            }).runtimeNode.adminEndpoint;
             const flow = (await server.adminTools.callTool('get_flow', { id: 'tab1' })).structuredContent;
             assert.equal(flow.tab.id, 'tab1');
             assert.deepStrictEqual(received, ['/admin/flow/tab1']);
@@ -466,16 +453,11 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
     });
 
     it('publishes admin calls through the runtime metrics source without changing the MCP response', async () => {
-        const { server, runtimeNode, types } = buildServer({
-            serverName: 'ops',
-            serverPath: '/mcp/ops',
+        const { runtimeNode, types } = buildServer({
             __flowNodes: [{ id: 'tab1', type: 'tab', label: 'Operations' }],
-            __runtime: {
-                adminPort: 1881,
-                adminEndpointPath: '/mcp/ops',
-                credentials: { adminToken: 'configured-value' }
-            }
+            __runtime: adminRuntime()
         });
+        const server = runtimeNode.adminEndpoint;
         const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         const response = mockRes();
         await server.handleToolCall({ id: 1, params: { name: 'get_flow', arguments: {} } }, response);
@@ -486,22 +468,16 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
         assert.deepStrictEqual(Object.keys(metrics.sent[0].payload).sort(), [
             'cached', 'client', 'durationMs', 'endpoint', 'mode', 'responseBytes', 'scannedNodes', 'status', 'tool', 'user'
         ]);
-        assert.equal(metrics.sent[0].payload.endpoint, 'ops');
+        assert.equal(metrics.sent[0].payload.endpoint, 'node-red-admin');
         assert.equal(metrics.sent[0].payload.tool, 'get_flow');
         assert.equal(metrics.sent[0].payload.status, 'success');
-        assert.equal(server.sent.length, 0);
+        assert.equal(runtimeNode.sent.length, 0);
         assert.ok(!JSON.stringify(metrics.sent[0]).includes('configured-value'));
     });
 
     it('forwards failed admin telemetry without request arguments', async () => {
-        const { server, runtimeNode, types } = buildServer({
-            serverPath: '/mcp/ops',
-            __runtime: {
-                adminPort: 1881,
-                adminEndpointPath: '/mcp/ops',
-                credentials: { adminToken: 'configured-value' }
-            }
-        });
+        const { runtimeNode, types } = buildServer({ __runtime: adminRuntime() });
+        const server = runtimeNode.adminEndpoint;
         const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         const response = mockRes();
         await server.handleToolCall({
@@ -809,19 +785,14 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
 
     it('keeps MCP responses available if the metrics source fails', async () => {
         const { RED, server, runtimeNode, types } = buildServer({
-            serverPath: '/mcp/ops',
             __flowNodes: [{ id: 'tab1', type: 'tab', label: 'Operations' }],
-            __runtime: {
-                adminPort: 1881,
-                adminEndpointPath: '/mcp/ops',
-                credentials: { adminToken: 'configured-value' }
-            }
+            __runtime: adminRuntime()
         });
         const metrics = new types['nr-mcp-metrics']({ id: 'metrics-1', runtime: runtimeNode.id });
         metrics.send = () => { throw new Error('metrics unavailable'); };
         const response = mockRes();
-        await server.handleToolCall({ id: 1, params: { name: 'get_flow', arguments: {} } }, response);
-        await server.handleToolCall({ id: 2, params: { name: 'get_flow', arguments: {} } }, mockRes());
+        await runtimeNode.adminEndpoint.handleToolCall({ id: 1, params: { name: 'get_flow', arguments: {} } }, response);
+        await runtimeNode.adminEndpoint.handleToolCall({ id: 2, params: { name: 'get_flow', arguments: {} } }, mockRes());
         registerTool(RED, {
             name: 'sample_ping',
             description: 'Sample',
@@ -838,20 +809,45 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
         assert.deepStrictEqual(runtimeNode.warnings, ['MCP tool telemetry subscriber failed']);
     });
 
-    it('does not expose admin tools without complete runtime admin config', () => {
-        const { server } = buildServer({
-            serverName: 'ops',
-            serverPath: '/mcp/ops',
-            __runtime: {
-                serverPort: 18004,
-                adminPort: 1881,
-                adminEndpointPath: '/mcp/ops',
-                credentials: { adminToken: '' }
-            }
-        });
-        const res = mockRes();
-        server.handleToolsList({ id: 1 }, res);
-        assert.ok(!res.body.result.tools.some(tool => tool.name === 'get_flow'));
+    it('serves Admin Tools over HTTP from the runtime and closes them with it', async () => {
+        const { RED, server, runtimeNode } = buildServer({ __runtime: adminRuntime({ serverPort: 18180, adminPath: '/mcp/admin' }) });
+        RED.events.emit('flows:started');
+        await new Promise(resolve => setTimeout(resolve, 100));
+        try {
+            const list = async path => {
+                const res = await mcpFetch('http://127.0.0.1:18180' + path, { method: 'POST',
+                    headers: { 'content-type': 'application/json', authorization: 'Bearer test-token', connection: 'close' },
+                    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+                return (await res.json()).result.tools.map(tool => tool.name);
+            };
+            assert.deepStrictEqual(await list('/mcp/admin'), ['get_flow']);
+            assert.ok(!(await list('/mcp/test')).includes('get_flow'));
+            assert.equal(server.state, 'running');
+            assert.equal(runtimeNode.adminEndpoint.state, 'running');
+        } finally {
+            await new Promise(resolve => server.emit('close', resolve));
+            await new Promise(resolve => runtimeNode.emit('close', resolve));
+        }
+        assert.equal(runtimeNode.listener, null);
+    });
+
+    it('does not let an endpoint take the Admin Tools path', () => {
+        const { server, runtimeNode } = buildServer({ serverPath: '/mcp/ops', __runtime: adminRuntime({ serverPort: 18181 }) });
+        runtimeNode.adminEndpoint.initializeServer();
+        assert.throws(() => server.initializeServer(), /path already registered/);
+        runtimeNode.releaseListener(runtimeNode.adminEndpoint, () => {});
+    });
+
+    it('does not start Admin Tools without a token, Auth or Groups', () => {
+        const missing = [
+            [{ credentials: { adminToken: '' } }, /Admin Token or Admin Token Env is required/],
+            [{ adminAuth: '' }, /auth configuration is required/],
+            [{ adminGroups: '' }, /Groups are required/]
+        ];
+        for (const [runtime, error] of missing) {
+            const admin = buildServer({ __runtime: adminRuntime({ serverPort: 18004, ...runtime }) }).runtimeNode.adminEndpoint;
+            assert.throws(() => admin.initializeServer(), error);
+        }
     });
 
     // MCP-NAME-2
@@ -859,20 +855,11 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
         process.env.NODE_RED_ADMIN_API_TOKEN = 'configured-value';
         try
         {
-            const { server, runtimeNode } = buildServer({
-                serverName: 'ops',
-                serverPath: '/mcp/ops',
-                __runtime: {
-                    serverPort: 18007,
-                    adminPort: 1881,
-                    adminEndpointPath: '/mcp/ops',
-                    credentials: { adminToken: '' }
-                }
+            const { runtimeNode } = buildServer({
+                __runtime: adminRuntime({ serverPort: 18007, credentials: { adminToken: '' } })
             });
 
-            const res = mockRes();
-            server.handleToolsList({ id: 1 }, res);
-            assert.ok(!res.body.result.tools.some(tool => tool.name === 'get_flow'));
+            assert.throws(() => runtimeNode.adminEndpoint.initializeServer(), /Admin Token or Admin Token Env is required/);
             assert.ok(!runtimeNode.warnings.some(message => message.includes('NODE_RED_ADMIN_API_TOKEN')));
         } finally
         {
@@ -885,19 +872,19 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
         process.env.MCP_CUSTOM_ADMIN_TOKEN = 'env-value';
         try
         {
-            const { runtimeNode: withCredential, server: credentialServer } = createRuntime({ serverPath: '/mcp/ops', __runtime: {
-                id: 'runtime-credential', serverPort: 18008, adminPort: 1881, adminEndpointPath: '/mcp/ops',
+            const { runtimeNode: withCredential } = createRuntime({ __runtime: adminRuntime({
+                id: 'runtime-credential', serverPort: 18008,
                 credentials: { adminToken: 'credential-value' }, adminTokenEnv: 'MCP_CUSTOM_ADMIN_TOKEN'
-            } });
+            }) });
             assert.equal(withCredential.adminToken, 'credential-value');
-            assert.equal(credentialServer.adminToken, 'credential-value');
+            assert.equal(withCredential.adminEndpoint.adminToken, 'credential-value');
 
-            const { runtimeNode: withEnvName, server: envServer } = createRuntime({ serverPath: '/mcp/ops', __runtime: {
-                id: 'runtime-env-name', serverPort: 18009, adminPort: 1881, adminEndpointPath: '/mcp/ops',
+            const { runtimeNode: withEnvName } = createRuntime({ __runtime: adminRuntime({
+                id: 'runtime-env-name', serverPort: 18009,
                 credentials: { adminToken: '' }, adminTokenEnv: 'MCP_CUSTOM_ADMIN_TOKEN'
-            } });
+            }) });
             assert.equal(withEnvName.adminToken, '');
-            assert.equal(envServer.adminToken, 'env-value');
+            assert.equal(withEnvName.adminEndpoint.adminToken, 'env-value');
         } finally
         {
             delete process.env.MCP_CUSTOM_ADMIN_TOKEN;
@@ -906,12 +893,10 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
 
     // MCP-ADM-1
     it('advertises and returns Function code only for configured groups', async () => {
-        const { server, nodeMap } = buildServer({
-            serverPath: '/mcp/ops',
-            __runtime: { adminPort: 1881, adminEndpointPath: '/mcp/ops',
-                credentials: { adminToken: 'configured-value' }, allowFunctionCode: true,
-                codeGroups: 'MCP.CodeReaders' }
+        const { runtimeNode, nodeMap } = buildServer({
+            __runtime: adminRuntime({ allowFunctionCode: true, codeGroups: 'MCP.CodeReaders' })
         });
+        const server = runtimeNode.adminEndpoint;
         nodeMap['default-auth'].readAccessToken = async () => ({
             groups: ['MCP.CodeReaders'], scopes: ['openid'], subject: 'reader'
         });
@@ -1194,9 +1179,10 @@ describe('tool-level OAuth discovery', () => {
         const context = buildServer({
             auth: auth.id, allowedGroups: 'operators',
             __nodes: { [auth.id]: auth },
-            __runtime: { publicBaseUrl: 'https://mcp.example.test', adminPort: 1880,
-                credentials: { adminToken: 'test-admin-token' }, adminEndpointPath: '/mcp/test', ...runtime }
+            __runtime: adminRuntime({ publicBaseUrl: 'https://mcp.example.test', adminPort: 1880, adminPath: '/mcp/test',
+                adminAuth: auth.id, adminGroups: 'operators', credentials: { adminToken: 'test-admin-token' }, ...runtime })
         });
+        const admin = context.runtimeNode.adminEndpoint;
         registerTool(context.RED, {
             name: 'protected_tool', description: 'Protected test tool',
             inputSchema: { type: 'object', properties: {} },
@@ -1204,8 +1190,9 @@ describe('tool-level OAuth discovery', () => {
         });
         let executions = 0;
         context.server.executeToolFlow = async () => { executions++; return { content: [{ type: 'text', text: 'ok' }] }; };
-        context.server.adminTools.callTool = async () => { executions++; return { content: [{ type: 'text', text: 'ok' }] }; };
-        return { ...context, reads: () => reads, executions: () => executions };
+        admin.adminTools.callTool = async () => { executions++; return { content: [{ type: 'text', text: 'ok' }] }; };
+        const serverFor = name => name === 'get_flow' ? admin : context.server;
+        return { ...context, admin, serverFor, reads: () => reads, executions: () => executions };
     }
 
     it('requires a valid token for tools/list and answers 401 or 403 otherwise', async () => {
@@ -1219,20 +1206,20 @@ describe('tool-level OAuth discovery', () => {
             if (status === 401) assert.match(res.headers['www-authenticate'], /^Bearer resource_metadata=/);
         }
         let first;
-        for (const token of ['valid', 'valid']) {
+        for (const server of [context.server, context.server, context.admin]) {
             const res = mockRes();
-            await context.server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/list' },
-                { authorization: 'Bearer ' + token }), res);
+            await server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1, method: 'tools/list' },
+                { authorization: 'Bearer valid' }), res);
             assert.equal(res.statusCode, 200);
-            assert.equal(res.body.result.tools.length, 2);
+            assert.equal(res.body.result.tools.length, 1);
             for (const tool of res.body.result.tools) {
                 assert.deepStrictEqual(tool.securitySchemes, [{ type: 'oauth2', scopes: [] }]);
                 assert.deepStrictEqual(tool._meta.securitySchemes, tool.securitySchemes);
                 assert.equal(tool.credentials, undefined);
                 assert.equal(tool.node, undefined);
             }
-            if (first) assert.deepStrictEqual(res.body.result, first);
-            first = res.body.result;
+            if (first && server === context.server) assert.deepStrictEqual(res.body.result, first);
+            if (server === context.server) first = res.body.result;
         }
         assert.equal(context.executions(), 0);
     });
@@ -1243,7 +1230,7 @@ describe('tool-level OAuth discovery', () => {
             const request = { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: {} } };
             for (const token of [null, 'invalid', 'expired']) {
                 const res = mockRes();
-                await context.server.handleMcpHttpRequest(mockReq(request,
+                await context.serverFor(name).handleMcpHttpRequest(mockReq(request,
                     token ? { authorization: 'Bearer ' + token } : {}), res);
                 assert.equal(res.statusCode, 401);
                 assert.equal(res.body.error, 'invalid_token');
@@ -1251,7 +1238,7 @@ describe('tool-level OAuth discovery', () => {
                 assert.equal(context.executions(), name === 'protected_tool' ? 0 : 1);
             }
             const valid = mockRes();
-            await context.server.handleMcpHttpRequest(mockReq(request, { authorization: 'Bearer valid' }), valid);
+            await context.serverFor(name).handleMcpHttpRequest(mockReq(request, { authorization: 'Bearer valid' }), valid);
             assert.equal(valid.body.result.content[0].text, 'ok');
             assert.equal(valid.body.result._meta['mcp/www_authenticate'], undefined);
         }
@@ -1263,7 +1250,7 @@ describe('tool-level OAuth discovery', () => {
         for (const token of ['wrong-role', 'wrong-resource']) {
             for (const name of ['protected_tool', 'get_flow']) {
                 const res = mockRes();
-                await context.server.handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1,
+                await context.serverFor(name).handleMcpHttpRequest(mockReq({ jsonrpc: '2.0', id: 1,
                     method: 'tools/call', params: { name } }, { authorization: 'Bearer ' + token }), res);
                 assert.equal(res.statusCode, 403);
                 assert.equal(res.body.result, undefined);
@@ -1323,7 +1310,7 @@ describe('tool-level OAuth discovery', () => {
             assert.equal((await post('tools/list', 'expired')).status, 401);
             const list = await post('tools/list', 'valid');
             assert.equal(list.status, 200);
-            assert.equal(list.body.result.tools.length, 2);
+            assert.equal(list.body.result.tools.length, 1);
             const challenge = await post('tools/call');
             assert.equal(challenge.status, 401);
             assert.equal(challenge.body.error, 'invalid_token');

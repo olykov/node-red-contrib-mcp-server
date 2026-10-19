@@ -23,7 +23,7 @@
         "serverPort": 8001,
         "publicBaseUrl": "https://nodered.example.com",
         "adminPort": "",
-        "adminEndpointPath": ""
+        "adminTools": false
     },
     {
         "id": "mcp-example-storage",

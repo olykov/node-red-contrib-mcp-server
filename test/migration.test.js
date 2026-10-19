@@ -22,15 +22,18 @@ describe('migrateFlow', () => {
         const input = fixture();
         const report = migrateFlow(input);
         const byId = new Map(report.flow.map(node => [node.id, node]));
-        assert.deepEqual(report.flow.map(node => node.id), input.map(node => node.id));
-        assert.equal(report.converted, 10);
-        assert.equal(report.unchanged, input.length - 10);
+        assert.deepEqual(report.flow.map(node => node.id), input.map(node => node.id).filter(id => id !== 'endpoint-ops'));
+        assert.equal(report.converted, 9);
+        assert.equal(report.unchanged, input.length - 1 - 9);
         assert.ok(report.flow.every(node => !String(node.type).startsWith('mcp-')));
 
         const runtime = byId.get('runtime');
         assert.equal(runtime.type, 'nr-mcp-runtime');
         assert.equal(runtime.runtimeName, undefined);
         assert.equal(runtime.adminCa, undefined);
+        assert.ok(!('adminEndpointPath' in runtime));
+        assert.deepEqual(pick(runtime, ['adminTools', 'adminPath', 'adminAuth', 'adminGroups']),
+            { adminTools: true, adminPath: '/mcp/ops', adminAuth: 'auth', adminGroups: 'Ops, Admins, Auditors' });
         assert.equal(byId.get('storage').type, 'nr-mcp-auth-storage');
         assert.equal(byId.get('auth').type, 'nr-mcp-auth');
         assert.equal(byId.get('auth').redis, 'storage');
@@ -41,9 +44,7 @@ describe('migrateFlow', () => {
         assert.equal(endpoint.type, 'nr-mcp-endpoint');
         for (const field of ['z', 'g', 'x', 'y', 'wires']) assert.equal(endpoint[field], undefined, field);
         assert.equal(endpoint.toolTimeoutMs, 60000);
-        assert.equal(byId.get('endpoint-ops').toolTimeoutMs, 30000);
-        assert.equal(byId.get('endpoint-ops').maxConcurrentCalls, 32);
-        assert.equal(byId.get('endpoint-ops').allowedGroups, 'Ops, Admins, Auditors');
+        assert.equal(byId.get('endpoint-ops'), undefined);
         assert.equal(endpoint.allowedGroups, 'Sales');
         assert.equal(runtime.codeGroups, 'Code, Readers');
         assert.deepEqual(byId.get('group-sales').nodes, ['tool-list']);
@@ -57,6 +58,26 @@ describe('migrateFlow', () => {
         assert.deepEqual(byId.get('restart').wires, [[]]);
         assert.deepEqual(byId.get('answers-in').wires, [[]]);
         assert.deepEqual(byId.get('unrelated'), input.find(node => node.id === 'unrelated'));
+    });
+
+    it('moves a 4.x admin endpoint into the runtime Admin Tools unless tools still use it', () => {
+        const flow = [
+            { id: 'rt', type: 'nr-mcp-runtime', adminEndpointPath: '/internal/ops' },
+            { id: 'ops', type: 'nr-mcp-endpoint', runtime: 'rt', auth: 'auth', serverPath: '/internal/ops', allowedGroups: 'Operators' },
+            { id: 'other', type: 'nr-mcp-endpoint', runtime: 'rt', auth: 'auth', serverPath: '/mcp/other', allowedGroups: 'Users' }
+        ];
+        const moved = migrateFlow(flow);
+        assert.deepEqual(moved.flow.map(node => node.id), ['rt', 'other']);
+        assert.deepEqual(pick(moved.flow[0], ['adminTools', 'adminPath', 'adminAuth', 'adminGroups']),
+            { adminTools: true, adminPath: '/internal/ops', adminAuth: 'auth', adminGroups: 'Operators' });
+
+        const used = migrateFlow([...flow, { id: 'tool', type: 'nr-mcp-tool', scope: 'endpoint', endpoint: 'ops' }]);
+        assert.ok(used.flow.some(node => node.id === 'ops'));
+        assert.match(actions(used, 'ops')[0], /Move its tools to another endpoint/);
+
+        const missing = migrateFlow([{ id: 'rt', type: 'nr-mcp-runtime', adminEndpointPath: '/internal/none' }]);
+        assert.match(actions(missing, 'rt')[0], /Select Auth and Groups of Admin Tools/);
+        assert.equal(migrateFlow([{ id: 'rt', type: 'nr-mcp-runtime' }]).flow[0].adminTools, false);
     });
 
     // MCP-MIG-1

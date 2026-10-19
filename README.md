@@ -27,7 +27,7 @@ Local extensions:
 - Endpoint nodes for logical MCP names and paths.
 - Endpoint-scoped and shared tool registration.
 - Automatic provider scopes in `_meta.securitySchemes`.
-- Optional read-only `get_flow` tool gated by runtime admin settings and an exact endpoint path.
+- Optional read-only `get_flow` tool served by the runtime when **Admin Tools** is enabled.
 - OIDC-backed MCP authorization configuration.
 - Memory or Redis-backed storage for short-lived auth state and opaque access tokens.
 - Bearer token enforcement for protected MCP endpoints.
@@ -84,6 +84,7 @@ and credential field name, so `flows_cred.json` stays valid without decryption. 
 report `{ input, output, converted, unchanged, manualReview }`; exit code 1 means
 `manualReview` lists nodes that need a manual step, and 2 is a usage or file error. Replace
 `flows.json` with `flows-4.json`, start Node-RED, make the listed changes in the editor and deploy.
+A 4.0 or 4.1 flow with an Admin Endpoint Path is converted the same way.
 
 | 3.x | 4.0 |
 | --- | --- |
@@ -94,6 +95,7 @@ report `{ input, output, converted, unchanged, manualReview }`; exit code 1 mean
 | Tool endpoint chosen by MCP path, or `Shared (All MCPs)` | Scope **Endpoint** with the endpoint node, or **Shared** with the runtime; set by the CLI, chosen manually when the flow is ambiguous |
 | Groups and Code Groups separated by spaces | Separated by commas: a group name may contain spaces, so `Sales Ops` is one group; the CLI rewrites 3.x lists with commas |
 | `NODE_RED_ADMIN_API_TOKEN` | Admin Token credential or Admin Token Env |
+| Admin Endpoint Path with an endpoint at that path | **Admin Tools** on the runtime with Admin Path, Auth and Groups; the CLI moves them from the endpoint and removes it |
 | Admin API CA field | `NODE_EXTRA_CA_CERTS` (see Environment Variables) |
 
 ## Flow Server Extensions
@@ -187,7 +189,10 @@ until one finishes. Tool arguments are validated against the compiled Input Sche
 flow runs; a tool whose Input or Output Schema fails to compile, or whose Tool Timeout exceeds
 its endpoint's Tool Timeout, does not register.
 
-Admin tools expose read-only `get_flow` only when the selected runtime has Admin Port, Admin Token, and Admin Endpoint Path configured, and the endpoint path exactly matches that Admin Endpoint Path.
+**Admin Tools** on the runtime serves the read-only `get_flow` tool on **Admin Path** of the runtime
+port, signed in with its **Auth** and limited to its **Groups**. No MCP Endpoint node is involved, so
+nothing shows as unused in the editor. It starts only with an Admin Token or Admin Token Env; an
+MCP Endpoint on the same path fails to start.
 
 Function code is not returned by default. **Allow Function Code** on the runtime together with
 **Code Groups** lets callers in those groups request it with `includeCode`. The code goes to the
