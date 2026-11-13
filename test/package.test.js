@@ -89,6 +89,17 @@ it('ships an example flow whose nodes satisfy the current editor contracts', () 
     assert.ok(flow.some(node => node.type === 'comment'));
 });
 
+it('uses every node type of the package in the example flow', () => {
+    const flow = require('../examples/flow-based-mcp-server-example.json');
+    const types = [];
+    const RED = { events: new EventEmitter(), nodes: { registerType(type) { types.push(type); } },
+        httpAdmin: { get() {}, post() {} } };
+    for (const file of Object.values(manifest['node-red'].nodes)) require('../' + file)(RED);
+    for (const type of types) assert.ok(flow.some(node => node.type === type), type + ' is missing from the example');
+    const metrics = flow.find(node => node.type === 'nr-mcp-metrics');
+    assert.strictEqual(metrics.runtime, flow.find(node => node.type === 'nr-mcp-endpoint').runtime);
+});
+
 it('points every editor request at an admin route the package registers', () => {
     const { readFileSync } = require('node:fs');
     const routes = new Set();

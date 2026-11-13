@@ -124,5 +124,36 @@
         "x": 600,
         "y": 200,
         "wires": []
+    },
+    {
+        "id": "mcp-example-metrics",
+        "type": "nr-mcp-metrics",
+        "z": "mcp-example-tab",
+        "name": "",
+        "runtime": "mcp-example-runtime",
+        "x": 150,
+        "y": 280,
+        "wires": [
+            [
+                "mcp-example-telemetry"
+            ]
+        ]
+    },
+    {
+        "id": "mcp-example-telemetry",
+        "type": "debug",
+        "z": "mcp-example-tab",
+        "name": "Tool telemetry",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 390,
+        "y": 280,
+        "wires": []
     }
 ]

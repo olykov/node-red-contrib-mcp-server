@@ -34,9 +34,7 @@ Local extensions:
 - Authorization-code flow bridge with PKCE S256, OIDC ID token validation, and userinfo claim extraction.
 - Tests for the read-only admin boundary and flow-server execution path.
 
-Not included yet:
-
-- Verified interoperability with hosted MCP clients.
+Sign-in, refresh and tool calls are verified with Claude Code, Codex, GitHub Copilot, Cursor, Grok and Hermes.
 
 ## Architecture
 
@@ -49,6 +47,13 @@ MCP client -> Node-RED MCP package auth layer -> Node-RED MCP flow server -> Nod
 ```
 
 ## Installation
+
+From npm, in the Node-RED user directory or through **Manage palette**:
+
+```bash
+cd ~/.node-red
+npm install @olykov/node-red-mcp-server
+```
 
 From a Git reference:
 
