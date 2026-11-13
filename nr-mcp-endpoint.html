@@ -54,17 +54,33 @@
             return this.name || this._('nr-mcp-runtime.label.paletteLabel');
         },
         oneditprepare: function() {
+            var node = this;
             var toggle = function() {
                 $('.mcp-admin-row').toggle($('#node-config-input-adminTools').prop('checked'));
             };
             $('#node-config-input-adminTools').on('change', toggle);
             toggle();
+            mcpAccessLabels(node, '#node-config-input-adminAuth', {
+                '#mcp-label-adminGroups': 'nr-mcp-runtime.label.admin', '#mcp-label-codeGroups': 'nr-mcp-runtime.label.code' });
         }
     });
 
     function mcpAdminTools(node) {
         var box = $('#node-config-input-adminTools');
         return box.length ? box.prop('checked') : node.adminTools === true;
+    }
+
+    // Microsoft auth checking app roles labels the access lists Roles; every other auth checks groups.
+    function mcpAccessLabels(node, authInput, labels) {
+        var update = function() {
+            var auth = RED.nodes.node($(authInput).val());
+            var roles = !!auth && auth.provider === 'microsoft' && (auth.microsoftGroupClaim || 'roles') === 'roles';
+            Object.keys(labels).forEach(function(selector) {
+                $(selector).text(node._(labels[selector] + (roles ? 'Roles' : 'Groups')));
+            });
+        };
+        $(authInput).on('change', update);
+        update();
     }
 
     RED.nodes.registerType('nr-mcp-endpoint', {
@@ -113,6 +129,7 @@
 
             $('#refresh-status-btn').on('click', loadFlowServers);
             setTimeout(loadFlowServers, 500);
+            mcpAccessLabels(node, '#node-config-input-auth', { '#mcp-label-allowedGroups': 'nr-mcp-endpoint.label.allowed' });
         }
     });
 </script>
@@ -159,7 +176,7 @@
         <input type="text" id="node-config-input-adminAuth">
     </div>
     <div class="form-row mcp-admin-row">
-        <label for="node-config-input-adminGroups"><i class="fa fa-users"></i> <span data-i18n="nr-mcp-runtime.label.adminGroups"></span></label>
+        <label for="node-config-input-adminGroups"><i class="fa fa-users"></i> <span id="mcp-label-adminGroups" data-i18n="nr-mcp-runtime.label.adminGroups"></span></label>
         <input type="text" id="node-config-input-adminGroups">
     </div>
     <div class="form-row mcp-admin-row">
@@ -179,7 +196,7 @@
         <input type="checkbox" id="node-config-input-allowFunctionCode" style="width: auto;">
     </div>
     <div class="form-row mcp-admin-row">
-        <label for="node-config-input-codeGroups"><i class="fa fa-users"></i> <span data-i18n="nr-mcp-runtime.label.codeGroups"></span></label>
+        <label for="node-config-input-codeGroups"><i class="fa fa-users"></i> <span id="mcp-label-codeGroups" data-i18n="nr-mcp-runtime.label.codeGroups"></span></label>
         <input type="text" id="node-config-input-codeGroups">
     </div>
 </script>
@@ -212,7 +229,7 @@
         <input type="text" id="node-config-input-serverPath" data-i18n="[placeholder]nr-mcp-endpoint.label.serverPathPlaceholder">
     </div>
     <div class="form-row">
-        <label for="node-config-input-allowedGroups"><i class="fa fa-users"></i> <span data-i18n="nr-mcp-endpoint.label.allowedGroups"></span></label>
+        <label for="node-config-input-allowedGroups"><i class="fa fa-users"></i> <span id="mcp-label-allowedGroups" data-i18n="nr-mcp-endpoint.label.allowedGroups"></span></label>
         <input type="text" id="node-config-input-allowedGroups" data-i18n="[placeholder]nr-mcp-endpoint.label.allowedGroupsPlaceholder">
     </div>
     <div class="form-row">

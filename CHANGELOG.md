@@ -9,6 +9,8 @@ the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1
 - Microsoft Entra ID: Access Claim selects `roles` (default, unchanged behaviour) or `groups`.
   Sign-in and refresh check the same claim; a groups overage (`hasgroups`, `_claim_names`) is
   refused and logged as `groups_overage`, without Graph lookups.
+- Editor: the endpoint Groups field and the runtime Groups and Code Groups fields read Roles and
+  Code Roles while the selected Microsoft auth checks app roles. Stored properties are unchanged.
 
 ## 4.2.0 - 2026-10-19
 

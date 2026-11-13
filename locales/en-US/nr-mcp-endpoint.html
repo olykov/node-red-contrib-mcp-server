@@ -26,8 +26,9 @@
         <dd>MCP path of the admin tools on the runtime port. No MCP Endpoint may use it.</dd>
         <dt>Auth</dt>
         <dd>OAuth configuration that signs callers in.</dd>
-        <dt>Groups</dt>
-        <dd>Groups allowed to call the admin tools, separated by commas.</dd>
+        <dt>Groups / Roles</dt>
+        <dd>Groups allowed to call the admin tools, separated by commas. Labelled Roles when the selected
+        Microsoft auth checks app roles.</dd>
         <dt>Admin Port</dt>
         <dd>Fallback port for the local Node-RED Admin API; the runtime uses Node-RED's configured
         UI port, host, HTTP admin root and HTTPS setting when available. When Node-RED itself serves
@@ -69,9 +70,10 @@
         <dd>Server name reported in <code>serverInfo</code> of every result.</dd>
         <dt>MCP Path</dt>
         <dd>HTTP JSON-RPC path, for example <code>/mcp/ops</code>. Only POST is served.</dd>
-        <dt>Groups</dt>
+        <dt>Groups / Roles</dt>
         <dd>Required groups separated by commas; a group name may contain spaces. A user needs at least one of them; an
-        endpoint without groups does not start.</dd>
+        endpoint without groups does not start. Labelled Roles when the selected Microsoft auth checks app roles
+        (Access Claim <code>roles</code>); the values are then app role values.</dd>
         <dt>Tool Timeout</dt>
         <dd>Execution deadline in milliseconds (1000-600000). Timed out flow calls return an MCP
         result with <code>isError: true</code>.</dd>
