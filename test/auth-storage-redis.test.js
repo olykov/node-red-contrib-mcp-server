@@ -6,7 +6,7 @@ const { EventEmitter } = require('node:events');
 
 // MCP-STO-1
 describe('redis auth storage connection options', () => {
-    it('configures ioredis with bounded timeouts, a single retry, and no offline queue', () => {
+    it('configures ioredis with RESP2, bounded timeouts, a single retry, and no offline queue', () => {
         const ioredisPath = require.resolve('ioredis');
         const original = require.cache[ioredisPath];
         const calls = [];
@@ -32,7 +32,8 @@ describe('redis auth storage connection options', () => {
                 commandTimeout: 2000,
                 maxRetriesPerRequest: 1,
                 enableOfflineQueue: false,
-                lazyConnect: true
+                lazyConnect: true,
+                protocol: 2
             };
             for (const key of Object.keys(expectedOptions)) {
                 assert.strictEqual(calls[0][1][key], expectedOptions[key], 'url form option ' + key);

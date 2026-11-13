@@ -48,7 +48,7 @@ it('declares accurate package metadata and ships the example instead of tests', 
     assert.match(manifest.devDependencies['node-red'], /^\^5\./);
     assert.match(manifest.devDependencies['node-red-node-test-helper'], /^\^0\./);
     assert.strictEqual(manifest.peerDependencies, undefined);
-    assert.strictEqual(manifest.engines.node, '>=22.9');
+    assert.strictEqual(manifest.engines.node, '>=22.12');
     assert.strictEqual(manifest.dependencies.qs, undefined);
     assert.ok(manifest.repository && /github\.com\/olykov\/node-red-contrib-mcp-server/.test(manifest.repository.url));
     assert.ok(manifest.files.includes('examples/'));

@@ -5,7 +5,7 @@ for MCP tool runtimes. The scoped name keeps an accidental install of the upstre
 replacing it. The source repository keeps the upstream name `node-red-contrib-mcp-server`; the
 npm package is `@olykov/node-red-mcp-server`. All node types use the `nr-mcp-` prefix, so the
 package installs next to the upstream package without type conflicts. Requires Node-RED 5.0 or
-later and Node.js 22.9 or later.
+later and Node.js 22.12 or later.
 
 The package exposes Node-RED flows as endpoint-scoped MCP servers with read-only admin helpers and package-level OAuth support.
 

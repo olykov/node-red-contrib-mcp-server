@@ -4,6 +4,13 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
+## Unreleased (4.4.0)
+
+- Dependencies: `jose` 6 and `ioredis` 6. `jose` 6 ships only ES modules, so the package now needs
+  Node.js 22.12 or later (Node-RED 5 images ship Node.js 24). Redis connections keep RESP2
+  (`protocol: 2`), so replies and supported Redis servers are unchanged.
+- Example: MCP Metrics feeds a Debug node. README: install from npm; verified clients.
+
 ## 4.3.0 - 2026-11-13
 
 - Microsoft Entra ID: Access Claim selects `roles` (default, unchanged behaviour) or `groups`.
