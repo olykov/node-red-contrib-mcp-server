@@ -4,7 +4,7 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
-## Unreleased (4.3.0)
+## 4.3.0 - 2026-11-13
 
 - Microsoft Entra ID: Access Claim selects `roles` (default, unchanged behaviour) or `groups`.
   Sign-in and refresh check the same claim; a groups overage (`hasgroups`, `_claim_names`) is
