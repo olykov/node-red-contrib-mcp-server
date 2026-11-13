@@ -32,8 +32,9 @@
         <code>https://your-nodered-host/oauth/your-slug/callback</code> with the provider. Slugs
         must be unique across separate auth configurations on the same listener or base URL.</dd>
         <dt>Microsoft Entra ID</dt>
-        <dd>Single-tenant v2 issuer from Tenant ID; roles from the verified ID token; scopes
-        <code>openid profile email</code>. At least one app role is required.</dd>
+        <dd>Single-tenant v2 issuer from Tenant ID; scopes <code>openid profile email</code>.
+        <b>Access Claim</b> selects app roles (<code>roles</code>) or groups (<code>groups</code>) from the
+        verified ID token; at least one value is required. An oversized groups claim is refused.</dd>
         <dt>OIDC</dt>
         <dd>Configured issuer, UserInfo groups and scopes <code>openid profile email groups</code>.</dd>
         <dt>Refresh Key</dt>

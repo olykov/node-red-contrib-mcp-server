@@ -69,6 +69,9 @@
             microsoftClientSecretEnv: { value: '', validate: function(v) {
                 return mcpAuthProvider(this) !== 'microsoft' || !v || /^MCP_[A-Z0-9_]+$/.test(v);
             } },
+            microsoftGroupClaim: { value: 'roles', validate: function(v) {
+                return mcpAuthProvider(this) !== 'microsoft' || v === 'roles' || v === 'groups';
+            } },
             allowedClientHosts: { value: '', required: true },
             groupClaim: { value: 'groups' },
             userClaim: { value: 'email' },
@@ -232,6 +235,13 @@
         <div class="form-row">
             <label for="node-config-input-microsoftClientSecretEnv"><i class="fa fa-terminal"></i> <span data-i18n="nr-mcp-auth.label.secretEnv"></span></label>
             <input type="text" id="node-config-input-microsoftClientSecretEnv" data-i18n="[placeholder]nr-mcp-auth.label.secretEnvPlaceholder">
+        </div>
+        <div class="form-row">
+            <label for="node-config-input-microsoftGroupClaim"><i class="fa fa-users"></i> <span data-i18n="nr-mcp-auth.label.accessClaim"></span></label>
+            <select id="node-config-input-microsoftGroupClaim">
+                <option value="roles" data-i18n="nr-mcp-auth.label.accessClaimRoles"></option>
+                <option value="groups" data-i18n="nr-mcp-auth.label.accessClaimGroups"></option>
+            </select>
         </div>
     </div>
     <div class="form-row">

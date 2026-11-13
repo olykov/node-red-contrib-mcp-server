@@ -62,6 +62,8 @@ describe('provider configuration', () => {
         assert.equal(node.baseScopes, 'openid profile email');
         assert.equal(node.groupClaim, 'roles');
         assert.equal(node.clientSecret(), 'active-test-value');
+        assert.equal(runtime()({ ...microsoft, microsoftGroupClaim: 'groups' }).groupClaim, 'groups');
+        assert.match(runtime()({ ...microsoft, microsoftGroupClaim: 'wids' }).configError, /access claim/);
     });
 
     it('selects only OIDC settings and secret', () => {
@@ -148,11 +150,12 @@ describe('Microsoft signed-token authorization', () => {
         const jwk = await exportJWK(publicKey);
         jwk.kid = 'test-key';
         jwk.alg = 'RS256';
-        const auth = runtime()({ ...microsoft, credentials: { microsoftClientSecret: 'test-secret' },
+        const auth = runtime()({ ...microsoft, microsoftGroupClaim: options.claim, credentials: { microsoftClientSecret: 'test-secret' },
             allowedClientHosts: 'client.example.test' });
         auth.jwks = createLocalJWKSet({ keys: [jwk] });
         const node = { endpointId: 'endpoint-test', authConfig: auth,
-            publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test', allowedGroups: options.allowedGroups || 'MCP.Reader' };
+            publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test', allowedGroups: options.allowedGroups || 'MCP.Reader',
+            log: options.log };
         const state = { client_id: 'https://client.example.test/metadata.json', redirect_uri: 'https://client.example.test/callback',
             client_state: 'client-state', code_challenge: sha256Base64Url(VERIFIER),
             resource: 'https://mcp.example.test/mcp/test', nonce: 'test-nonce', browserBinding: hashToken('test-binding') };
@@ -216,6 +219,25 @@ describe('Microsoft signed-token authorization', () => {
             assert.equal(res.body.error, 'insufficient_access');
             assert.equal(res.location, undefined);
             assert.equal(await auth.readCode('code'), null);
+        }
+    });
+
+    it('uses the selected groups claim and ignores roles', async () => {
+        const { res, auth } = await callback({ groups: ['MCP.Admin', 'MCP.Reader'] }, { claim: 'groups' });
+        assert.deepEqual((await auth.readCode(new URL(res.location).searchParams.get('code'))).groups, ['MCP.Admin', 'MCP.Reader']);
+        const denied = await callback({ roles: ['MCP.Reader'] }, { claim: 'groups' });
+        assert.equal(denied.res.statusCode, 403);
+        await assert.rejects(() => callback({ groups: 'MCP.Reader' }, { claim: 'groups' }), /groups claim/);
+    });
+
+    it('refuses a groups overage without a Graph lookup', async () => {
+        for (const claims of [{ hasgroups: true }, { _claim_names: { groups: 'src1' }, roles: ['MCP.Reader'] }]) {
+            const logs = [];
+            const { res, calls } = await callback(claims, { claim: 'groups', log: entry => logs.push(JSON.stringify(entry)) });
+            assert.equal(res.statusCode, 403);
+            assert.equal(res.body.error, 'insufficient_access');
+            assert.equal(calls.length, 1);
+            assert.ok(logs.some(line => line.includes('groups_overage')), logs.join('\n'));
         }
     });
 

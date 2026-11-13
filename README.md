@@ -130,9 +130,12 @@ one auth configuration. There is no fallback or alias for node-ID routes.
 OIDC uses an HTTPS issuer URL, client ID and UserInfo claim names;
 its base scopes are fixed to `openid profile email groups`.
 Microsoft uses a tenant GUID and application client GUID; its tenant-specific v2 issuer,
-`openid profile email` scopes and `roles` claim are fixed. Microsoft permissions come only
-from the verified ID token; at least one assigned app role is required. Endpoint Groups
-(separated by commas; names may contain spaces) must match the role values used for that endpoint. No Graph directory permissions are needed.
+`openid profile email` scopes are fixed. Access Claim selects `roles` (app roles, the default) or
+`groups`. Microsoft permissions come only from the verified ID token; at least one value is required.
+Endpoint Groups (separated by commas; names may contain spaces) must match those values. For
+`groups`, configure the app's groups claim to emit group names (groups assigned to the application,
+cloud-only display names); an overage claim (`hasgroups` or `_claim_names`) is refused as
+`groups_overage`. No Graph directory permissions are needed.
 
 Authorization state, codes and access tokens are isolated by auth node, provider, issuer,
 client ID, claim settings and OAuth slug, even when storage is shared. Switching provider/configuration
