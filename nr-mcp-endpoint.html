@@ -62,6 +62,10 @@
             toggle();
             mcpAccessLabels(node, '#node-config-input-adminAuth', {
                 '#mcp-label-adminGroups': 'nr-mcp-runtime.label.admin', '#mcp-label-codeGroups': 'nr-mcp-runtime.label.code' });
+        },
+        oneditsave: function() {
+            // A hidden auth reference would keep an otherwise unused auth node out of Unused config nodes.
+            if (!$('#node-config-input-adminTools').prop('checked')) $('#node-config-input-adminAuth').val('');
         }
     });
 

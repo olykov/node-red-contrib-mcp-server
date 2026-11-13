@@ -11,6 +11,8 @@ the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1
   refused and logged as `groups_overage`, without Graph lookups.
 - Editor: the endpoint Groups field and the runtime Groups and Code Groups fields read Roles and
   Code Roles while the selected Microsoft auth checks app roles. Stored properties are unchanged.
+- Editor: saving a runtime with Admin Tools disabled clears its Auth, so an auth node no endpoint uses
+  appears in Unused config nodes.
 
 ## 4.2.0 - 2026-10-19
 
