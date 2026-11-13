@@ -486,6 +486,9 @@ describe('rotating refresh tokens', () => {
             if (failure === 'subject') context.state.subject = 'other-user';
             const res = await context.refresh(initial.body.refresh_token);
             assert.equal(res.body.error, 'invalid_grant');
+            const revoked = context.state.logs.map(line => JSON.parse(line)).filter(entry => entry.outcome === 'revoked').pop();
+            assert.equal(revoked.reason, failure === 'denied' ? 'provider_denied' : 'access_changed');
+            assert.equal(revoked.user, 'user-1');
             assert.equal(JSON.stringify(res.body).includes('provider-test-secret'), false);
             assert.equal(await context.auth.refreshStore.read(initial.body.refresh_token), null);
         }

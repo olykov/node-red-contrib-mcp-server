@@ -230,6 +230,21 @@ describe('Microsoft signed-token authorization', () => {
         await assert.rejects(() => callback({ groups: 'MCP.Reader' }, { claim: 'groups' }), /groups claim/);
     });
 
+    it('logs the UPN, a short client and why access was refused', async () => {
+        const entries = async (claims, options) => {
+            const logs = [];
+            await callback(claims, { ...options, log: entry => logs.push(JSON.parse(entry)) });
+            return logs.find(entry => entry.event === 'oauth.sign_in');
+        };
+        const upn = { preferred_username: 'user@example.test', email: 'user.mail@example.test' };
+        assert.deepEqual(await entries({ ...upn, roles: ['MCP.Reader'] }), { event: 'oauth.sign_in', outcome: 'success',
+            user: 'user@example.test', client: 'client.example.test' });
+        assert.deepEqual(await entries({ ...upn, roles: ['Other'] }), { event: 'oauth.sign_in', outcome: 'denied',
+            reason: 'no_match', claim: 'roles', user: 'user@example.test', client: 'client.example.test' });
+        assert.equal((await entries(upn, { claim: 'groups' })).reason, 'no_claim');
+        assert.equal((await entries({ roles: ['Other'] })).user, 'test-subject');
+    });
+
     it('refuses a groups overage without a Graph lookup', async () => {
         for (const claims of [{ hasgroups: true }, { _claim_names: { groups: 'src1' }, roles: ['MCP.Reader'] }]) {
             const logs = [];

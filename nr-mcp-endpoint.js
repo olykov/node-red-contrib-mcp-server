@@ -8,7 +8,7 @@ module.exports = function (RED)
     const { randomUUID: uuidv4 } = require('crypto');
     const { normalizeIp, parseCidr, ipInCidr } = require('./lib/cidr');
     const { createAdminTools } = require('./lib/admin-tools');
-    const { auditLog } = require('./lib/audit');
+    const { auditLog, clientLabel } = require('./lib/audit');
     const executions = require('./lib/executions');
     const PACKAGE_VERSION = require('./package.json').version;
     const PROTOCOL_VERSION = '2026-07-28';
@@ -382,16 +382,6 @@ module.exports = function (RED)
         if (Array.isArray(result)) return { content: result };
         if (typeof result === 'string') return textResult(result);
         return textResult(JSON.stringify(result));
-    }
-
-    // Bounded client label for metrics: the MCP client product, not its metadata URL.
-    function clientLabel(clientId)
-    {
-        let url;
-        try { url = new URL(String(clientId || '')); } catch { return 'unknown'; }
-        if (url.hostname === 'claude.ai') return 'claude';
-        if (url.hostname === 'chatgpt.com') return url.pathname.includes('/codex/') ? 'codex' : 'chatgpt';
-        return url.hostname;
     }
 
     function responseBytes(res)
@@ -898,7 +888,7 @@ module.exports = function (RED)
         {
             if (result.error === 'missing_token') return;
             const claims = result.claims || {};
-            auditLog(node, 'mcp.auth', { outcome: 'denied', reason: result.error, subject: claims.subject,
+            auditLog(node, 'mcp.auth', { outcome: 'denied', reason: result.error, user: claims.user,
                 client: claims.client, session: claims.session, endpoint: node.serverName,
                 ip: clientIp(req, node.runtime && node.runtime.trustedProxies) });
         };
@@ -916,7 +906,7 @@ module.exports = function (RED)
             if (node.activeToolCalls >= node.maxConcurrentCalls)
             {
                 auditLog(node, 'mcp.tool_call', { outcome: 'rejected', reason: 'too_many_calls', tool: name,
-                    endpoint: node.serverName, subject: claims.subject, client: claims.client, session: claims.session }, 'warn');
+                    endpoint: node.serverName, user: claims.user, client: claims.client, session: claims.session }, 'warn');
                 return node.rpcError(res, request.id, -32000, 'Too many concurrent tool calls');
             }
             node.activeToolCalls++;
@@ -969,12 +959,9 @@ module.exports = function (RED)
                 if (legacyKey && node.legacyCalls.get(legacyKey) === cancel) node.legacyCalls.delete(legacyKey);
                 node.activeToolCalls--;
                 const meta = adminResult && adminResult.structuredContent && adminResult.structuredContent.meta;
-                auditLog(node, 'mcp.tool_call', { outcome: status, tool: toolName, endpoint: node.serverName,
-                    subject: claims.subject, client: claims.client, session: claims.session,
-                    durationMs: Math.round(Number(process.hrtime.bigint() - started) / 1e6) });
                 node.publishToolTelemetry({
                     tool: toolName,
-                    user: claims.email || claims.subject || 'unknown',
+                    user: claims.user || 'unknown',
                     client: clientLabel(claims.client),
                     mode: adminTool && adminResult && adminResult.structuredContent ? adminResult.structuredContent.mode : (adminTool ? 'unknown' : 'flow'),
                     status,

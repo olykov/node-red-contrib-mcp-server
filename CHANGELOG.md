@@ -13,6 +13,11 @@ the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1
   Code Roles while the selected Microsoft auth checks app roles. Stored properties are unchanged.
 - Editor: saving a runtime with Admin Tools disabled clears its Auth, so an auth node no endpoint uses
   appears in Unused config nodes.
+- Audit log: `user` (Microsoft UPN, OIDC user claim or subject) replaces `subject`, and `client` is a
+  short name (`claude`, `codex`, `chatgpt` or the metadata host) instead of the metadata URL. Refused
+  sign-ins add `claim` and `reason` `no_claim`/`no_match`/`groups_overage`; revoked refreshes add
+  `access_changed`/`expired`/`provider_denied`. Successful tool calls are no longer logged; only
+  calls rejected by the concurrency limit are. Update log parsers that read `subject` or `client`.
 
 ## 4.2.0 - 2026-10-19
 

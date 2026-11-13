@@ -1723,7 +1723,7 @@ describe('audit log and OAuth hardening', () => {
         .filter(entry => entry && entry.event === name);
 
     // MCP-KEEP-6
-    it('audits tool calls with the caller and passes the identity to the flow, never the arguments', async () => {
+    it('passes the caller to the flow and keeps tool calls and arguments out of the audit log', async () => {
         const { RED, server, nodeMap } = createRuntime();
         nodeMap['default-auth'].readAccessToken = async token => token === 'test-token' ? { groups: ['test-group'],
             scopes: ['openid'], subject: 'user-1', email: 'user@example.test', client_id: 'https://claude.ai/meta', sessionId: 'session-1' } : null;
@@ -1739,11 +1739,7 @@ describe('audit log and OAuth hardening', () => {
         assert.deepStrictEqual(exec.payload, { secret: 'argument-value' });
         await respond(RED, { payload: 'ok', mcp: { executionId: exec.mcp.executionId } });
         await pending;
-        const [call] = events(server.logs, 'mcp.tool_call');
-        assert.strictEqual(call.outcome, 'success');
-        assert.strictEqual(call.subject, 'user-1');
-        assert.strictEqual(call.client, 'https://claude.ai/meta');
-        assert.match(call.session, /^[0-9a-f]{12}$/);
+        assert.strictEqual(events(server.logs, 'mcp.tool_call').length, 0);
         assert.ok(!server.logs.join('\n').includes('argument-value'));
         assert.ok(!server.logs.join('\n').includes('session-1'));
     });
@@ -1902,10 +1898,10 @@ describe('tool result tolerance', () => {
 });
 
 describe('telemetry identity', () => {
-    it('reports the caller e-mail and a bounded client label in tool telemetry', async () => {
+    it('reports the caller UPN and a bounded client label in tool telemetry', async () => {
         const { RED, server, nodeMap, runtimeNode } = createRuntime();
         nodeMap['default-auth'].readAccessToken = async () => ({ groups: ['test-group'], scopes: ['openid'],
-            subject: 'user-1', email: 'user@example.test', client_id: 'https://chatgpt.com/oauth/codex/abc/client.json' });
+            subject: 'user-1', email: 'mail@example.test', user: 'user@example.test', client_id: 'https://chatgpt.com/oauth/codex/abc/client.json' });
         const events = [];
         runtimeNode.subscribeToolTelemetry(event => events.push(event));
         registerTool(RED, { name: 'ping', description: 'Ping', inputSchema: { type: 'object', properties: {} } });

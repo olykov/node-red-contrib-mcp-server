@@ -162,7 +162,7 @@ With **Cancel Output** enabled, the MCP Tool node gets a second output that rece
 
 Configuration nodes have no status of their own: an endpoint that cannot start logs the error and its tools show `endpoint error`. Tool telemetry comes from `nr-mcp-metrics`.
 
-`nr-mcp-metrics` is a source node with no input and one output. Select the same `nr-mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits one `mcp-tool-telemetry` message for each `tools/call` request across those endpoints, including failed calls and authentication failures. Its payload contains `endpoint`, `tool`, `user`, `client`, `mode`, `status`, `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. `user` is the caller's e-mail (subject when no e-mail is known) and `client` the MCP client (`claude`, `codex`, `chatgpt` or the client host); unauthenticated calls report `unknown`. Unknown and unauthenticated tool names are reported as `unknown` to bound metric cardinality. `user` is personal data: use it as a metric label only while the set of users is small and the metrics store is access-controlled. It does not poll Node-RED or expose a metrics route.
+`nr-mcp-metrics` is a source node with no input and one output. Select the same `nr-mcp-runtime` used by the MCP endpoints, then connect its output to metric writers. Use one metrics node per runtime. It emits one `mcp-tool-telemetry` message for each `tools/call` request across those endpoints, including failed calls and authentication failures. Its payload contains `endpoint`, `tool`, `user`, `client`, `mode`, `status`, `durationMs`, `responseBytes`, `scannedNodes`, and `cached`. `user` is the same caller identity as in the audit log (Microsoft UPN, else e-mail, else subject) and `client` the MCP client (`claude`, `codex`, `chatgpt` or the client host); unauthenticated calls report `unknown`. Unknown and unauthenticated tool names are reported as `unknown` to bound metric cardinality. `user` is personal data: use it as a metric label only while the set of users is small and the metrics store is access-controlled. It does not poll Node-RED or expose a metrics route.
 
 ## Configuration Notes
 
@@ -370,15 +370,27 @@ No callback or proxy route change is needed for the refresh grant.
 
 Security events are written to the Node-RED log as one JSON line each, through the node that
 handled them. Lines never contain tokens, authorization codes, PKCE values or tool arguments;
-sessions appear only as a 12-character hash.
+sessions appear only as a 12-character hash. `user` is the Microsoft UPN (`preferred_username`) or the
+OIDC user claim, and the provider subject when neither is present; `client` is `claude`, `codex`,
+`chatgpt` or the client metadata host.
 
 | `event` | When | Main fields |
 | --- | --- | --- |
-| `oauth.sign_in` | callback completes or is refused | `outcome`, `reason`, `subject`, `client`, `endpoint` |
-| `oauth.token` | authorization code exchange | `outcome`, `reason`, `subject`, `client`, `session` |
-| `oauth.refresh` | refresh grant | `outcome`, `subject`, `client`, `session` |
-| `mcp.auth` | rejected token or insufficient access (missing tokens are not logged) | `reason`, `subject`, `client`, `ip` |
-| `mcp.tool_call` | every `tools/call` | `outcome`, `tool`, `subject`, `client`, `session`, `durationMs` |
+| `oauth.sign_in` | callback completes or is refused | `outcome`, `reason`, `claim`, `user`, `client`, `endpoint` |
+| `oauth.token` | authorization code exchange | `outcome`, `reason`, `user`, `client`, `session` |
+| `oauth.refresh` | refresh grant | `outcome`, `reason`, `user`, `client`, `session` |
+| `mcp.auth` | rejected token or insufficient access (missing tokens are not logged) | `reason`, `user`, `client`, `ip` |
+| `mcp.tool_call` | call rejected by the concurrency limit | `outcome`, `reason`, `tool`, `user`, `client`, `session` |
+
+A refused sign-in names the checked `claim` and a `reason`: `no_claim` (the token carries no
+values), `no_match` (no value matches the endpoint Groups) or `groups_overage`. A revoked refresh
+gives `access_changed` (claim values or endpoint no longer match), `expired` or `provider_denied`.
+Successful tool calls are not logged; `nr-mcp-metrics` counts them.
+
+```text
+{"event":"oauth.sign_in","outcome":"denied","reason":"no_match","claim":"groups","user":"user@example.test","client":"claude","endpoint":"reports"}
+{"event":"oauth.refresh","outcome":"revoked","reason":"access_changed","user":"user@example.test","client":"claude","session":"3f2a9c1e7b40","endpoint":"reports"}
+```
 
 The flow also receives the caller in `msg.mcp` (`subject`, `email`, `groups`, `client`) with
 each tool call. Retention and forwarding of the Node-RED log belong to the
