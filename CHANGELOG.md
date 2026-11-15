@@ -4,7 +4,7 @@ All notable changes, newest first. Each entry names its release date. From 3.1.0
 package uses plain SemVer and every release gets its own version; earlier versions used
 the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1`.
 
-## Unreleased (4.4.0)
+## 4.4.0 - 2026-11-15
 
 - Endpoints: **Additional URLs** serve one endpoint on other full URLs (another path or host behind a
   proxy or VPN). OAuth metadata, issuer, provider callback and `iss` follow the configured URL of the
