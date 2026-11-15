@@ -55,7 +55,7 @@
 | --- | --- | --- | --- |
 | MCP-NET-1 (REV-9) | HTTP-сервер має слухача `error` весь час життя. Помилка після старту переводить ендпоінти порту в червоний статус `error` і логується через ноду; процес не падає | Тест емітує `error` на сервері після `listening`: процес живий, статус червоний | integration |
 | MCP-NET-2 (REV-8) | `mcp-runtime` має поле `bindHost`. Нові ноди з редактора отримують `127.0.0.1`; наявні конфігурації без поля слухають усі інтерфейси, як раніше, і один раз на старті пишуть попередження | Слухач на заданій адресі; попередження для конфігурації без поля | integration |
-| MCP-NET-3 (REV-8) | Запит на MCP-шлях з `Origin`, що не збігається з origin Base URL і не входить у поле `allowedOrigins` `mcp-runtime`, отримує 403 до парсингу тіла. Запити без `Origin` проходять | Три запити: чужий `Origin`, origin Base URL, без `Origin` | integration |
+| MCP-NET-3 (REV-8) | Запит на MCP-шлях з `Origin`, що не збігається з origin жодного URL endpoint (Base URL або Additional URLs) і не входить у поле `allowedOrigins` `mcp-runtime`, отримує 403 до парсингу тіла. Запити без `Origin` проходять | Три запити: чужий `Origin`, origin Base URL, без `Origin` | integration |
 
 ### 3.5 get_flow
 
@@ -151,6 +151,7 @@
 | MCP-NAME-2 (REV-16) | Фолбек `NODE_RED_ADMIN_API_TOKEN` прибрано; токен лише з credential або `adminTokenEnv` | Без credential і `adminTokenEnv` admin-інструменти не оголошуються | unit |
 | MCP-MIG-1 | CLI міграції за зразком `redkern-gateway-migrate` перетворює flows.json 3.x на 4.0 і зберігає id конфіг-нод та імена полів credentials, тож `flows_cred.json` лишається чинним без розшифрування. Маршрутизацію через switch і вузли відповіді CLI не переписує, а видає списком id для ручної заміни | Прогін на прикладі і на копії реальних флоу: усі конфіги і інструменти перенесено, список ручних кроків повний | integration |
 | MCP-MIG-2 | README має «Upgrading to 4.0» з кроками, ручними замінами і rollback на 3.5 | Розділ присутній, rollback перевірено на копії | review |
+| MCP-URL-1 | `<prefix>-endpoint` має необовʼязкові Additional URLs: інші повні URL того самого endpoint (інший шлях або хост через проксі чи VPN). Кожен шлях обслуговується на порту runtime; OAuth metadata, `resource`, issuer, callback в IdP і `iss` беруться з URL, яким прийшов запит, лише зі списку endpoint за Host і шляхом (без збігу — URL цього шляху, інакше основний); префікс шляху Base URL зберігається; документ сервера авторизації відповідає endpoint, що має цей Host; токен прийнятний тільки на своєму URL (audience binding, не мережева межа). Токен прийнятний лише своїм endpoint (`endpointId`). Невалідні URL, шлях під `/oauth/` чи `/.well-known/`, шлях іншого endpoint на тому ж порту і URL (без урахування регістру, типового порту й крапки в кінці), який уже обслуговує інший endpoint або Admin Tools будь-якого runtime, що стартував раніше, дають помилку старту | metadata за хостом і шляхом; вхід через додатковий URL; токен на чужому URL — `wrong_resource`; невалідні URL і конфлікт шляхів | integration |
 
 ## 6. Інваріанти
 

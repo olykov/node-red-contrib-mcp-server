@@ -14,7 +14,7 @@
         <dd>Address used by the listener. New runtimes default to <code>127.0.0.1</code>; set an
         explicit address when remote clients must connect.</dd>
         <dt>Allowed Origins</dt>
-        <dd>Exact browser origins in addition to the Base URL origin. Requests without an
+        <dd>Exact browser origins in addition to the origins of each endpoint's URLs. Requests without an
         <code>Origin</code> header are not restricted by this setting.</dd>
         <dt>Trusted Proxies</dt>
         <dd>CIDR ranges of trusted reverse proxies. Forwarded client addresses are used in audit
@@ -70,6 +70,14 @@
         <dd>Server name reported in <code>serverInfo</code> of every result.</dd>
         <dt>MCP Path</dt>
         <dd>HTTP JSON-RPC path, for example <code>/mcp/ops</code>. Only POST is served.</dd>
+        <dt>Additional URLs</dt>
+        <dd>Other full URLs that reach this endpoint, for example through an internal proxy or a VPN:
+        <code>https://vpn.example.com/mcp/ops</code>. Each path is served on the runtime port, so proxies must
+        forward the path and the <code>Host</code> header unchanged. OAuth metadata, sign-in and tokens follow the
+        URL a client uses; a token is bound to its URL (audience binding, not network separation). Register each
+        new host's <code>/oauth/&lt;slug&gt;/callback</code> with the identity provider. Paths under
+        <code>/oauth/</code> or <code>/.well-known/</code> and a URL another endpoint or Admin Tools already serve are
+        refused.</dd>
         <dt>Groups / Roles</dt>
         <dd>Required groups separated by commas; a group name may contain spaces. A user needs at least one of them; an
         endpoint without groups does not start. Labelled Roles when the selected Microsoft auth checks app roles

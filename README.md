@@ -105,7 +105,7 @@ A 4.0 or 4.1 flow with an Admin Endpoint Path is converted the same way.
 
 ## Flow Server Extensions
 
-`nr-mcp-runtime` owns the local HTTP listener: port, bind host, base URL and optional admin API settings. New runtimes bind to loopback; use a reverse proxy or configure an explicit address when remote clients must connect. Endpoints start automatically on Node-RED's `flows:started` event. Browser requests are restricted to the Base URL origin and explicitly allowed origins.
+`nr-mcp-runtime` owns the local HTTP listener: port, bind host, base URL and optional admin API settings. New runtimes bind to loopback; use a reverse proxy or configure an explicit address when remote clients must connect. Endpoints start automatically on Node-RED's `flows:started` event. Browser requests are restricted to the origins of the endpoint's URLs (Base URL and Additional URLs) and explicitly allowed origins.
 
 Base URL is required. It is the address clients and their browsers use to reach the MCP runtime,
 directly or through a proxy. It may be VPN-only; public internet exposure is not
@@ -114,6 +114,21 @@ provider callback registration and client endpoint URLs, not OAuth code.
 The runtime listener currently serves HTTP. HTTPS must terminate outside that
 listener; removing TLS termination entirely requires separate HTTPS runtime
 support. This is independent of whether the endpoint is VPN-only or internet-facing.
+
+An endpoint can also be reached through other proxies or networks, for example a public path, a
+whitelisted path and a VPN host such as Tailscale. List those full URLs in the endpoint's **Additional URLs**:
+`https://mcp.example.com/internal/ops, https://vpn.example.com/mcp/ops`. Each path is served on the runtime
+port, so proxies must forward the path and the `Host` header unchanged. OAuth metadata, the issuer, the provider
+callback and `iss` follow the configured URL that matches the request Host and path; a request that matches
+none gets a configured URL for its path, otherwise the primary URL (Base URL + MCP Path). Nothing is taken from
+request headers beyond choosing among configured URLs. A token is bound to the URL it was issued for, so a client
+signs in once per URL; this is OAuth audience binding, not network separation, because the Host is chosen by
+the client. Register each new host's `/oauth/<slug>/callback` with the identity provider. Tools, auth and Groups
+are the same on every URL. The runtime Admin Path has no Additional URLs. MCP paths under `/oauth/` or
+`/.well-known/` are refused, and an endpoint does not start when one of its URLs (compared without case,
+default port or trailing dot) is already served by an endpoint or Admin Tools that started first, on any
+runtime. Access tokens are also bound to the endpoint that issued them; tokens issued before 4.4 carry no
+endpoint and stay valid until they expire (at most the Access TTL).
 
 `nr-mcp-auth-storage` defines storage for short-lived authorization state and opaque access tokens. Memory mode is for local development only. Redis-backed modes are intended for shared or restarted runtimes.
 
@@ -129,7 +144,7 @@ Register `https://mcp.example.test/oauth/team-login/callback` with the selected 
 Authorize, token and authorization-server metadata routes use the same slug, not the
 Node-RED node ID. Keep the slug when replacing an auth node; the registered callback
 stays unchanged and, with the same provider settings, existing sessions continue. Separate auth configurations cannot
-share a slug on the same listener or base URL. Multiple endpoints can share
+share a slug on the same listener or on a shared URL origin. Multiple endpoints can share
 one auth configuration. There is no fallback or alias for node-ID routes.
 
 OIDC uses an HTTPS issuer URL, client ID and UserInfo claim names;
@@ -178,7 +193,8 @@ Tool execution always requires OAuth and checks endpoint roles/groups. Provider 
 Editor-supplied environment variable names (`URL Env`, `Password Env`, `Secret Env`) must start with `MCP_`, so a flow editor cannot point a configuration at other process secrets such as `NODE_RED_CREDENTIAL_SECRET`.
 
 
-The authorization server issuer is the Base URL origin. Authorization responses carry it as `iss`
+The authorization server issuer is the origin of the URL a client uses (Base URL or an Additional URL).
+Authorization responses carry it as `iss`
 (RFC 9207). Keep one `nr-mcp-auth` configuration per runtime port: the root
 `/.well-known/oauth-authorization-server` document answers only while a single configuration
 serves the port.
@@ -411,12 +427,15 @@ editor port. Expose it through a Service port and route only the MCP and OAuth p
 - `/.well-known/oauth-authorization-server` and `/.well-known/oauth-authorization-server/*`;
 - `/oauth/*/authorize`, `/oauth/*/callback` (GET) and `/oauth/*/token` (POST).
 
+Every host in an endpoint's Additional URLs needs the same routes: its MCP path and the
+`/.well-known/*` and `/oauth/*` paths above, all sent to the runtime port with the original Host.
+
 | Setting | Value |
 |---|---|
 | **Bind Host** | The pod IP or `0.0.0.0`, not `127.0.0.1`: traffic from the Service arrives on the pod address |
 | **Base URL** | The public origin that clients use |
 | **Trusted Proxies** | CIDR ranges of the ingress, load balancer and mesh proxies, so the audit log and metrics record the real client address |
-| **Allowed Origins** | Origins of browser-based MCP clients other than the Base URL origin, if any |
+| **Allowed Origins** | Origins of browser-based MCP clients other than the endpoint URL origins, if any |
 | `nr-mcp-auth-storage` | Redis mode. Memory mode keeps authorization state and opaque access tokens in process memory, so a second pod, a restarted pod or a rolling update loses sessions and tokens issued by another pod |
 | Retries on `/oauth/*/token` | Off in the ingress and mesh, or only on connect failures: a retried authorization code or refresh token counts as reuse, and reuse revokes the session |
 | Route timeout | Longer than **Tool Timeout** |

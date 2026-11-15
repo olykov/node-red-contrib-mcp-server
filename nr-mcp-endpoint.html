@@ -96,6 +96,15 @@
             serverName: { value: 'node-red-mcp-server', required: true },
             serverPath: { value: '/mcp', required: true },
             allowedGroups: { value: '', required: true },
+            additionalUrls: { value: '', validate: function(v) {
+                return String(v || '').split(/[\s,]+/).filter(Boolean).every(function(value) {
+                    try {
+                        var url = new URL(value);
+                        return ['http:', 'https:'].indexOf(url.protocol) !== -1 && !url.username && !url.password && !url.search && !url.hash &&
+                            !/^\/(oauth|\.well-known)(\/|$)/.test(url.pathname);
+                    } catch (_) { return false; }
+                });
+            } },
             toolTimeoutMs: { value: 30000, required: true, validate: function(v) {
                 return RED.validators.number()(v) && Number.isInteger(Number(v)) && v >= 1000 && v <= 600000;
             } },
@@ -231,6 +240,10 @@
     <div class="form-row">
         <label for="node-config-input-serverPath"><i class="fa fa-link"></i> <span data-i18n="nr-mcp-endpoint.label.serverPath"></span></label>
         <input type="text" id="node-config-input-serverPath" data-i18n="[placeholder]nr-mcp-endpoint.label.serverPathPlaceholder">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-additionalUrls"><i class="fa fa-link"></i> <span data-i18n="nr-mcp-endpoint.label.additionalUrls"></span></label>
+        <input type="text" id="node-config-input-additionalUrls" data-i18n="[placeholder]nr-mcp-endpoint.label.additionalUrlsPlaceholder">
     </div>
     <div class="form-row">
         <label for="node-config-input-allowedGroups"><i class="fa fa-users"></i> <span id="mcp-label-allowedGroups" data-i18n="nr-mcp-endpoint.label.allowedGroups"></span></label>

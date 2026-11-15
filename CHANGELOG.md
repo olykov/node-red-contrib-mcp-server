@@ -6,6 +6,15 @@ the `-upstream.N` prerelease suffix, and several builds shared `2.0.0-upstream.1
 
 ## Unreleased (4.4.0)
 
+- Endpoints: **Additional URLs** serve one endpoint on other full URLs (another path or host behind a
+  proxy or VPN). OAuth metadata, issuer, provider callback and `iss` follow the configured URL of the
+  request; a token is accepted only on its URL and by its endpoint. Proxies must forward the path and Host
+  unchanged. MCP paths under `/oauth/` or `/.well-known/`, and a URL already served by another endpoint or
+  by Admin Tools on any runtime, stop the endpoint from starting. Access tokens issued before 4.4 carry no
+  endpoint and remain valid until they expire.
+- Compatibility: two endpoints that publish the same URL, for example on two runtimes with the same Base URL
+  and MCP Path, no longer both start; the one that starts second reports the URL. A Base URL with a path
+  prefix now accepts its own origin as a browser `Origin` (previously refused).
 - Dependencies: `jose` 6 and `ioredis` 6. `jose` 6 ships only ES modules, so the package now needs
   Node.js 22.12 or later (Node-RED 5 images ship Node.js 24). Redis connections keep RESP2
   (`protocol: 2`), so replies and supported Redis servers are unchanged.

@@ -25,11 +25,13 @@ module.exports = function (RED)
     }
     const { authRouteSlug, mcpEnvName } = require('./lib/auth-provider');
     const {
-        absoluteUrl,
         authorizeMetadata,
         beginAuthorization,
         completeAuthorization,
+        endpointUrls,
         exchangeClientCode,
+        sameHost,
+        urlKey,
         oauthScopes,
         protectedResourceMetadata,
         parseGroupNames,
@@ -53,6 +55,39 @@ module.exports = function (RED)
         {
             return '';
         }
+    }
+
+    // Additional URLs are the same endpoint behind other proxies or networks; Node-RED must see each path unchanged.
+    function parseAdditionalUrls(value)
+    {
+        const urls = [];
+        for (const item of String(value || '').split(/[\s,]+/).filter(Boolean))
+        {
+            let url;
+            try { url = new URL(item); } catch { url = null; }
+            if (!url || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)
+                throw new Error('Additional URLs must be absolute http(s) URLs without credentials, query or fragment: ' + item);
+            const href = url.origin + (url.pathname.replace(/\/+$/, '') || '/');
+            if (!urls.includes(href)) urls.push(href);
+        }
+        return urls;
+    }
+
+    function endpointPaths(node)
+    {
+        return [...new Set([node.serverPath, ...node.additionalUrls.map(url => new URL(url).pathname)])];
+    }
+
+    function endpointOrigins(node)
+    {
+        return new Set(endpointUrls({ headers: {} }, node).map(url => url.issuer));
+    }
+
+    // OAuth routes belong to an auth configuration; the endpoint that lists the request Host answers for it.
+    function endpointForHost(candidates, req)
+    {
+        return candidates.find(candidate => endpointUrls(req, candidate).some(url => sameHost(url.base, req.headers.host))) ||
+            candidates[0] || null;
     }
 
     function requestSize(req, error)
@@ -162,9 +197,8 @@ module.exports = function (RED)
             const node = state.routes.get(req.path);
             if (!node || req.method !== 'POST' || !req.headers.origin) return next();
             const requestOrigin = origin(req.headers.origin);
-            const baseOrigin = origin(node.publicBaseUrl);
             const allowedOrigins = node.runtime && node.runtime.allowedOrigins || [];
-            if (!requestOrigin || (requestOrigin !== baseOrigin && !allowedOrigins.includes(requestOrigin)))
+            if (!requestOrigin || (!endpointOrigins(node).has(requestOrigin) && !allowedOrigins.includes(requestOrigin)))
                 return res.status(403).json({ error: 'origin_not_allowed' });
             return next();
         });
@@ -177,20 +211,20 @@ module.exports = function (RED)
             const serverPath = requestedPath ? normalizePath(requestedPath) : '';
             const node = serverPath ? state.routes.get(serverPath) : (() =>
             {
-                const protectedNodes = Array.from(state.routes.values()).filter(candidate => candidate.authConfig);
+                const protectedNodes = Array.from(state.nodes).filter(candidate => candidate.authConfig);
                 return protectedNodes.length === 1 ? protectedNodes[0] : null;
             })();
             if (!node || !node.authConfig) return res.status(404).json({ error: 'MCP protected resource not found' });
-            res.json(protectedResourceMetadata(req, node));
+            res.json(protectedResourceMetadata(req, node, serverPath || undefined));
         });
 
         state.app.get(/^\/\.well-known\/oauth-authorization-server(\/.*)?$/, (req, res) =>
         {
             let slug = req.params && req.params[0] ? String(req.params[0]).replace(/^\//, '') : '';
             if (slug.startsWith('oauth/')) slug = slug.slice('oauth/'.length);
-            const matches = Array.from(state.routes.values()).filter(candidate =>
+            const matches = Array.from(state.nodes).filter(candidate =>
                 candidate.authConfig && (!slug || candidate.authConfig.oauthSlug === slug));
-            const node = new Set(matches.map(candidate => candidate.authConfig)).size === 1 ? matches[0] : null;
+            const node = new Set(matches.map(candidate => candidate.authConfig)).size === 1 ? endpointForHost(matches, req) : null;
             if (!node) return res.status(404).json({ error: 'MCP authorization server not found' });
             res.json(authorizeMetadata(req, node));
         });
@@ -199,9 +233,9 @@ module.exports = function (RED)
         {
             const slug = req.params[0];
             const resource = req.query && req.query.resource;
-            const node = Array.from(state.routes.values()).find(candidate =>
+            const node = endpointForHost(Array.from(state.nodes).filter(candidate =>
                 candidate.authConfig && candidate.authConfig.oauthSlug === slug &&
-                (!resource || resource === absoluteUrl(req, candidate.publicBaseUrl, candidate.serverPath)));
+                (!resource || endpointUrls(req, candidate).some(url => url.href === resource))), req);
             if (!node) return res.status(404).json({ error: 'MCP authorization endpoint not found' });
             try
             {
@@ -216,14 +250,14 @@ module.exports = function (RED)
         state.app.get(/^\/oauth\/([^/]+)\/callback$/, async (req, res) =>
         {
             const slug = req.params[0];
-            const owner = Array.from(state.routes.values())
+            const owner = Array.from(state.nodes)
                 .find(candidate => candidate.authConfig && candidate.authConfig.oauthSlug === slug);
             const auth = owner && owner.authConfig;
             let node = null;
             try
             {
                 const stateRecord = auth && req.query && req.query.state ? await auth.readState(req.query.state) : null;
-                node = stateRecord ? Array.from(state.routes.values()).find(candidate =>
+                node = stateRecord ? Array.from(state.nodes).find(candidate =>
                     candidate.authConfig && candidate.authConfig === auth && candidate.endpointId === stateRecord.endpointId) : null;
             } catch (error)
             {
@@ -252,7 +286,7 @@ module.exports = function (RED)
             let owner = null;
             try
             {
-                for (const candidate of state.routes.values())
+                for (const candidate of state.nodes)
                 {
                     if (!candidate.authConfig || candidate.authConfig.oauthSlug !== slug) continue;
                     owner = owner || candidate;
@@ -260,7 +294,7 @@ module.exports = function (RED)
                     const record = body.grant_type === 'refresh_token' ?
                         (auth.refreshStore && typeof body.refresh_token === 'string' && await auth.refreshStore.read(body.refresh_token)) :
                         (typeof body.code === 'string' && await auth.readCode(body.code));
-                    const node = record && Array.from(state.routes.values()).find(item =>
+                    const node = record && Array.from(state.nodes).find(item =>
                         item.authConfig && item.authConfig === auth && item.endpointId === record.endpointId);
                     if (node) return await exchangeClientCode(req, res, node);
                 }
@@ -288,7 +322,7 @@ module.exports = function (RED)
         state.app.use((error, req, res, next) =>
         {
             if (res.headersSent) return next(error);
-            const node = state.routes.get(req.path) || Array.from(state.routes.values()).find(candidate =>
+            const node = state.routes.get(req.path) || Array.from(state.nodes).find(candidate =>
                 candidate.authConfig && req.path.startsWith('/oauth/' + candidate.authConfig.oauthSlug + '/'));
             const isMcp = Boolean(state.routes.get(req.path) && req.method === 'POST');
             const isOAuth = req.path.startsWith('/oauth/');
@@ -444,12 +478,16 @@ module.exports = function (RED)
         {
             if (!node.listener) node.listener = createListener(node.serverPort);
             const state = node.listener;
-            const existingRoute = state.routes.get(endpoint.serverPath);
-            if (existingRoute && existingRoute !== endpoint)
-                throw new Error('MCP server path already registered on this port: ' + endpoint.serverPath);
+            const paths = endpointPaths(endpoint);
+            for (const path of paths)
+            {
+                const existingRoute = state.routes.get(path);
+                if (existingRoute && existingRoute !== endpoint)
+                    throw new Error('MCP server path already registered on this port: ' + path);
+            }
             state.runtimeId = node.id;
             state.bindHost = node.bindHost || '';
-            state.routes.set(endpoint.serverPath, endpoint);
+            for (const path of paths) state.routes.set(path, endpoint);
             state.nodes.add(endpoint);
             return state;
         };
@@ -458,7 +496,7 @@ module.exports = function (RED)
         {
             const state = node.listener;
             if (!state) return callback();
-            if (state.routes.get(endpoint.serverPath) === endpoint) state.routes.delete(endpoint.serverPath);
+            for (const [path, owner] of state.routes) if (owner === endpoint) state.routes.delete(path);
             state.nodes.delete(endpoint);
             if (state.nodes.size) return callback();
             node.listener = null;
@@ -635,6 +673,15 @@ module.exports = function (RED)
         node.serverPath = normalizePath(config.serverPath);
         node.serverPort = runtime ? runtime.serverPort : 0;
         node.publicBaseUrl = runtime ? runtime.publicBaseUrl : '';
+        node.additionalUrls = [];
+        try
+        {
+            node.additionalUrls = parseAdditionalUrls(config.additionalUrls);
+        } catch (error)
+        {
+            node.configError = error.message;
+            node.error('MCP endpoint configuration is invalid: ' + node.configError);
+        }
         node.allowedGroups = parseGroupNames(config.allowedGroups || '');
         node.adminToolsEnabled = admin;
         node.adminPort = runtime ? runtime.adminPort : 0;
@@ -697,16 +744,28 @@ module.exports = function (RED)
                 throw new Error('MCP endpoint Groups are required');
             if (admin && !runtimeAdminToken(node.runtime))
                 throw new Error('MCP runtime Admin Token or Admin Token Env is required');
+            // OAuth and metadata routes take precedence on the listener; an endpoint there would never answer.
+            const reserved = endpointPaths(node).find(path => /^\/(oauth|\.well-known)(\/|$)/.test(path));
+            if (reserved) throw new Error('MCP path is reserved for OAuth routes: ' + reserved);
+            // One URL belongs to the endpoint that started first, across every runtime and its Admin Tools.
+            const keys = new Set(endpointUrls({ headers: {} }, node).map(url => urlKey(url.href)));
+            for (const runtime of runtimes)
+                for (const other of runtime.listener ? runtime.listener.nodes : [])
+                {
+                    if (other === node) continue;
+                    const shared = endpointUrls({ headers: {} }, other).find(url => keys.has(urlKey(url.href)));
+                    if (shared) throw new Error('MCP URL is already served by another MCP endpoint: ' + shared.href);
+                }
             const slug = authRouteSlug(node.authConfig);
-            const base = String(node.publicBaseUrl || '').replace(/\/+$/, '');
+            const origins = endpointOrigins(node);
             for (const runtime of runtimes)
             {
                 if (!runtime.listener) continue;
-                for (const candidate of runtime.listener.routes.values())
+                for (const candidate of runtime.listener.nodes)
                 {
                     if (candidate.authConfig === node.authConfig) continue;
-                    const sameBase = base && base === String(candidate.publicBaseUrl || '').replace(/\/+$/, '');
-                    if ((runtime === node.runtime || sameBase) && candidate.authConfig.oauthSlug === slug)
+                    const sharedOrigin = [...endpointOrigins(candidate)].some(value => origins.has(value));
+                    if ((runtime === node.runtime || sharedOrigin) && candidate.authConfig.oauthSlug === slug)
                     {
                         throw new Error('OAuth slug already registered by another auth configuration: ' + slug);
                     }

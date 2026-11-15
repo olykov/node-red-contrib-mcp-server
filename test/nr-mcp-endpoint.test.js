@@ -834,7 +834,7 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
     it('does not let an endpoint take the Admin Tools path', () => {
         const { server, runtimeNode } = buildServer({ serverPath: '/mcp/ops', __runtime: adminRuntime({ serverPort: 18181 }) });
         runtimeNode.adminEndpoint.initializeServer();
-        assert.throws(() => server.initializeServer(), /path already registered/);
+        assert.throws(() => server.initializeServer(), /already served by another MCP endpoint/);
         runtimeNode.releaseListener(runtimeNode.adminEndpoint, () => {});
     });
 
@@ -995,6 +995,94 @@ describe('upstream nr-mcp-endpoint local extensions', () => {
         {
             await new Promise(resolve => server.stopServer(() => resolve()));
         }
+    });
+
+    // MCP-URL-1
+    it('serves one endpoint on its additional URLs: own paths, metadata per address, allowed origins', async () => {
+        const authNode = { id: 'auth-1', oauthSlug: 'test-login', baseScopes: 'openid profile email', readAccessToken: async () => null };
+        const { RED, nodeMap, server } = buildServer({
+            auth: 'auth-1', __nodes: { 'auth-1': authNode },
+            additionalUrls: 'https://mcp.example.test/internal/test, https://tail.example.test/mcp/test',
+            __runtime: { serverPort: 18112, publicBaseUrl: 'https://mcp.example.test' }
+        });
+        await new Promise((resolve, reject) => server.startServer(error => error ? reject(error) : resolve()));
+        // fetch() replaces Host, so these requests go through node:http.
+        const request = (method, path, headers, body) => new Promise((resolve, reject) => {
+            const req = require('node:http').request({ host: '127.0.0.1', port: 18112, method, path, headers }, res => {
+                let data = '';
+                res.on('data', chunk => { data += chunk; });
+                res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data ? JSON.parse(data) : null }));
+            });
+            req.on('error', reject);
+            req.end(body);
+        });
+        try {
+            const metadata = async (path, host) => (await request('GET', '/.well-known/oauth-protected-resource' + path, { host })).body;
+            assert.equal((await metadata('/internal/test', 'mcp.example.test')).resource, 'https://mcp.example.test/internal/test');
+            assert.deepEqual((await metadata('/mcp/test', 'tail.example.test')).authorization_servers, ['https://tail.example.test']);
+            assert.equal((await metadata('', 'tail.example.test')).resource, 'https://tail.example.test/mcp/test');
+            const rpc = require('./helpers/mcp-request').prepare({ jsonrpc: '2.0', id: 1, method: 'tools/list' },
+                { host: 'mcp.example.test', origin: 'https://tail.example.test', 'content-type': 'application/json' });
+            const challenge = await request('POST', '/internal/test', rpc.headers, JSON.stringify(rpc.body));
+            assert.equal(challenge.status, 401);
+            assert.match(challenge.headers['www-authenticate'], /oauth-protected-resource\/internal\/test"/);
+            // A second endpoint on the same auth: the authorization server document follows the endpoint listing the Host.
+            const second = new RED.types['nr-mcp-endpoint']({ id: 'endpoint-2', runtime: 'runtime-1', auth: 'auth-1',
+                serverName: 'second', serverPath: '/mcp/second', additionalUrls: 'https://second.example.test/mcp/second' });
+            nodeMap['endpoint-2'] = second;
+            second.initializeServer();
+            const issuer = (await request('GET', '/.well-known/oauth-authorization-server', { host: 'second.example.test' })).body;
+            assert.equal(issuer.issuer, 'https://second.example.test');
+            assert.equal(issuer.token_endpoint, 'https://second.example.test/oauth/test-login/token');
+            await new Promise(resolve => second.emit('close', resolve));
+            assert.equal(server.portState.routes.has('/mcp/second'), false);
+            assert.equal(server.portState.routes.has('/internal/test'), true);
+        } finally {
+            await new Promise(resolve => server.emit('close', resolve));
+        }
+    });
+
+    it('refuses OAuth and well-known paths and a URL another endpoint already serves', () => {
+        for (const config of [{ additionalUrls: 'https://mcp.example.test/oauth/x' }, { serverPath: '/.well-known/x' }]) {
+            const { server } = buildServer(config);
+            assert.throws(() => server.initializeServer(), /reserved/, JSON.stringify(config));
+        }
+        const { types, nodeMap, server } = buildServer();
+        server.initializeServer();
+        nodeMap['runtime-2'] = new types['nr-mcp-runtime']({ id: 'runtime-2', serverPort: 18021, bindHost: '127.0.0.1',
+            publicBaseUrl: 'https://other.example.test' });
+        const copy = new types['nr-mcp-endpoint']({ id: 'endpoint-2', runtime: 'runtime-2', auth: 'default-auth',
+            serverName: 'copy', serverPath: '/mcp/copy', additionalUrls: 'https://MCP.example.test.:443/mcp/test' });
+        assert.throws(() => copy.initializeServer(), /already served by another MCP endpoint/);
+
+        // Same runtime: a Base URL path prefix makes one URL reachable through two different listener paths.
+        const prefixed = buildServer({ __runtime: { publicBaseUrl: 'https://h.example.test/p' }, serverPath: '/mcp' });
+        prefixed.server.initializeServer();
+        const twin = new prefixed.types['nr-mcp-endpoint']({ id: 'endpoint-3', runtime: 'runtime-1', auth: 'default-auth',
+            serverName: 'twin', serverPath: '/twin', additionalUrls: 'https://h.example.test/p/mcp' });
+        assert.throws(() => twin.initializeServer(), /already served by another MCP endpoint/);
+
+        // The runtime Admin Tools URL counts as well.
+        const admin = buildServer({ __runtime: adminRuntime() });
+        admin.runtimeNode.adminEndpoint.initializeServer();
+        admin.nodeMap['runtime-2'] = new admin.types['nr-mcp-runtime']({ id: 'runtime-2', serverPort: 18022, bindHost: '127.0.0.1',
+            publicBaseUrl: 'https://other.example.test' });
+        const claimant = new admin.types['nr-mcp-endpoint']({ id: 'endpoint-4', runtime: 'runtime-2', auth: 'default-auth',
+            serverName: 'claimant', serverPath: '/mcp/claimant', additionalUrls: 'https://mcp.example.test/mcp/ops' });
+        assert.throws(() => claimant.initializeServer(), /already served by another MCP endpoint/);
+    });
+
+    it('refuses malformed additional URLs and paths another endpoint serves', () => {
+        for (const additionalUrls of ['ftp://mcp.example.test/x', 'https://mcp.example.test/x?query=1', 'not a url']) {
+            const { server } = buildServer({ additionalUrls });
+            assert.throws(() => server.initializeServer(), /Additional URLs/, additionalUrls);
+        }
+        // Different URLs, same listener path: the listener refuses the second route.
+        const { types, server } = buildServer({ additionalUrls: 'https://tail.example.test/mcp/other' });
+        server.initializeServer();
+        const other = new types['nr-mcp-endpoint']({ id: 'endpoint-2', runtime: 'runtime-1', auth: 'default-auth',
+            serverName: 'other', serverPath: '/mcp/other' });
+        assert.throws(() => other.initializeServer(), /path already registered/);
     });
 
     it('serves root protected resource metadata for a single OAuth endpoint', async () => {

@@ -44,6 +44,8 @@
             "serverNamePlaceholder": "node-red-mcp-server",
             "serverPath": "MCP Path",
             "serverPathPlaceholder": "/mcp",
+            "additionalUrls": "Additional URLs",
+            "additionalUrlsPlaceholder": "Optional, comma-separated full URLs",
             "allowedGroups": "Groups",
             "allowedRoles": "Roles",
             "allowedGroupsPlaceholder": "Required, comma-separated",

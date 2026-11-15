@@ -155,10 +155,10 @@ describe('Microsoft signed-token authorization', () => {
         auth.jwks = createLocalJWKSet({ keys: [jwk] });
         const node = { endpointId: 'endpoint-test', authConfig: auth,
             publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test', allowedGroups: options.allowedGroups || 'MCP.Reader',
-            log: options.log };
+            additionalUrls: options.additionalUrls, log: options.log };
         const state = { client_id: 'https://client.example.test/metadata.json', redirect_uri: 'https://client.example.test/callback',
-            client_state: 'client-state', code_challenge: sha256Base64Url(VERIFIER),
-            resource: 'https://mcp.example.test/mcp/test', nonce: 'test-nonce', browserBinding: hashToken('test-binding') };
+            client_state: 'client-state', code_challenge: sha256Base64Url(VERIFIER), endpointId: 'endpoint-test',
+            resource: options.resource || 'https://mcp.example.test/mcp/test', nonce: 'test-nonce', browserBinding: hashToken('test-binding') };
         await auth.writeState('state', state);
         const token = await new SignJWT({ sub: 'test-subject', tid: tenant, nonce: 'test-nonce', ...claims })
             .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
@@ -181,7 +181,7 @@ describe('Microsoft signed-token authorization', () => {
             const form = new URLSearchParams(body);
             assert.equal(form.get('client_id'), client);
             assert.equal(form.get('client_secret'), 'test-secret');
-            assert.equal(form.get('redirect_uri'), 'https://mcp.example.test/oauth/test-login/callback');
+            assert.equal(form.get('redirect_uri'), new URL(state.resource).origin + '/oauth/test-login/callback');
             return { data: { access_token: 'unused-upstream-token', id_token: token } };
         };
         const res = response();
@@ -220,6 +220,24 @@ describe('Microsoft signed-token authorization', () => {
             assert.equal(res.location, undefined);
             assert.equal(await auth.readCode('code'), null);
         }
+    });
+
+    it('signs in through an additional URL and binds the token to it', async () => {
+        const tailnet = 'https://tail.example.test/mcp/test';
+        const { res, auth, node, state } = await callback({ roles: ['MCP.Reader'] }, { additionalUrls: [tailnet], resource: tailnet });
+        assert.equal(new URL(res.location).searchParams.get('iss'), 'https://tail.example.test');
+        const code = new URL(res.location).searchParams.get('code');
+        assert.equal((await auth.readCode(code)).resource, tailnet);
+        const tokenRes = response();
+        await exchangeClientCode({ body: { grant_type: 'authorization_code', code, client_id: state.client_id,
+            redirect_uri: state.redirect_uri, code_verifier: VERIFIER } }, tokenRes, node);
+        const bearer = 'Bearer ' + tokenRes.body.access_token;
+        assert.equal((await validateRequest(node, { path: '/mcp/test', headers: { host: 'tail.example.test', authorization: bearer } })).ok, true);
+        assert.equal((await validateRequest(node, { path: '/mcp/test', headers: { host: 'mcp.example.test', authorization: bearer } })).error,
+            'wrong_resource');
+        const otherEndpoint = { ...node, endpointId: 'endpoint-other' };
+        assert.equal((await validateRequest(otherEndpoint, { path: '/mcp/test', headers: { host: 'tail.example.test', authorization: bearer } })).error,
+            'wrong_resource');
     });
 
     it('uses the selected groups claim and ignores roles', async () => {

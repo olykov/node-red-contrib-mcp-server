@@ -100,6 +100,66 @@ describe('mcp auth token exchange', () => {
         assert.equal(protectedResourceMetadata(direct, node).resource, 'https://mcp.example.test/mcp/test');
     });
 
+    it('answers with the configured URL that matches the request host and path', () => {
+        const node = { publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test',
+            additionalUrls: ['https://tail.example.test/mcp/test', 'https://mcp.example.test/internal/test'],
+            authConfig: { oauthSlug: 'test-login', baseScopes: 'openid profile email' } };
+        const tailnet = { headers: { host: 'tail.example.test' } };
+        assert.equal(protectedResourceMetadata(tailnet, node, '/mcp/test').resource, 'https://tail.example.test/mcp/test');
+        assert.deepEqual(protectedResourceMetadata(tailnet, node, '/mcp/test').authorization_servers, ['https://tail.example.test']);
+        assert.equal(authorizeMetadata(tailnet, node).token_endpoint, 'https://tail.example.test/oauth/test-login/token');
+        const internal = { headers: { host: 'mcp.example.test' } };
+        assert.equal(protectedResourceMetadata(internal, node, '/internal/test').resource, 'https://mcp.example.test/internal/test');
+        const forged = { headers: { host: 'attacker.example.test', 'x-forwarded-proto': 'http' } };
+        assert.equal(protectedResourceMetadata(forged, node, '/mcp/test').resource, 'https://mcp.example.test/mcp/test');
+        assert.equal(authorizeMetadata(forged, node).issuer, 'https://mcp.example.test');
+    });
+
+    it('keeps a Base URL path prefix and matches hosts with a default port or a trailing dot', () => {
+        const { bearerChallenge } = require('../lib/mcp-auth');
+        const node = { publicBaseUrl: 'https://h.example.test/nr', serverPath: '/mcp/a',
+            additionalUrls: ['https://tail.example.test/mcp/a'], authConfig: { oauthSlug: 'test-login', baseScopes: 'openid' } };
+        const primary = { path: '/mcp/a', headers: { host: 'h.example.test' } };
+        assert.equal(protectedResourceMetadata(primary, node, '/mcp/a').resource, 'https://h.example.test/nr/mcp/a');
+        assert.equal(authorizeMetadata(primary, node).token_endpoint, 'https://h.example.test/nr/oauth/test-login/token');
+        assert.equal(bearerChallenge(primary, node), 'Bearer resource_metadata="https://h.example.test/nr/.well-known/oauth-protected-resource/mcp/a"');
+        for (const host of ['tail.example.test:443', 'tail.example.test.', 'TAIL.example.test'])
+            assert.equal(protectedResourceMetadata({ headers: { host } }, node, '/mcp/a').resource, 'https://tail.example.test/mcp/a', host);
+    });
+
+    it('starts sign-in for a listed additional URL and refuses an unlisted one', async () => {
+        const originalGet = httpMock.get;
+        httpMock.get = async url => url === 'https://client.example.test/metadata.json'
+            ? { data: { client_id: url, redirect_uris: ['https://client.example.test/callback'] } }
+            : { data: { issuer: 'https://issuer.example.test/oidc', authorization_endpoint: 'https://issuer.example.test/authorize',
+                token_endpoint: 'https://issuer.example.test/token', userinfo_endpoint: 'https://issuer.example.test/userinfo',
+                jwks_uri: 'https://issuer.example.test/jwks' } };
+        const store = {};
+        const node = { endpointId: 'endpoint-1', publicBaseUrl: 'https://mcp.example.test', serverPath: '/mcp/test',
+            additionalUrls: ['https://tail.example.test/mcp/test'],
+            authConfig: { oauthSlug: 'test-login', provider: 'oidc', issuerUrl: 'https://issuer.example.test/oidc', clientId: 'upstream-client',
+                baseScopes: 'openid profile email', allowedClientHosts: 'client.example.test', writeState: async (key, value) => { store[key] = value; } } };
+        const query = resource => ({ headers: { host: 'tail.example.test' }, query: { response_type: 'code', code_challenge_method: 'S256',
+            code_challenge: sha256Base64Url(VERIFIER), client_id: 'https://client.example.test/metadata.json',
+            redirect_uri: 'https://client.example.test/callback', state: 'client-state', scope: 'openid', resource } });
+        try {
+            const res = mockRes();
+            await beginAuthorization(query('https://tail.example.test/mcp/test'), res, node);
+            assert.equal(new URL(res.location).searchParams.get('redirect_uri'), 'https://tail.example.test/oauth/test-login/callback');
+            assert.equal(Object.values(store)[0].resource, 'https://tail.example.test/mcp/test');
+            const refused = mockRes();
+            await beginAuthorization(query('https://other.example.test/mcp/test'), refused, node);
+            assert.equal(refused.body.error, 'invalid_target');
+            const withoutResource = mockRes();
+            await beginAuthorization({ ...query(), headers: { host: 'tail.example.test' } }, withoutResource,
+                { ...node, additionalUrls: ['https://tail.example.test/mcp/other'] });
+            assert.equal(new URL(withoutResource.location).searchParams.get('redirect_uri'), 'https://tail.example.test/oauth/test-login/callback');
+            assert.equal(Object.values(store).at(-1).resource, 'https://tail.example.test/mcp/other');
+        } finally {
+            httpMock.get = originalGet;
+        }
+    });
+
     it('bridges authorize and callback through OIDC discovery and userinfo', async () => {
         const originalGet = httpMock.get;
         const originalPost = httpMock.post;
@@ -304,7 +364,8 @@ describe('provider denial', () => {
     it('returns the provider error to the registered client redirect', async () => {
         let deleted = null;
         const auth = { readState: async state => state === 'server-state' ?
-            { redirect_uri: 'http://127.0.0.1:53682/callback', client_state: 'client-state', browserBinding: hashToken('binding') } : null,
+            { redirect_uri: 'http://127.0.0.1:53682/callback', client_state: 'client-state', browserBinding: hashToken('binding'),
+                resource: 'https://mcp.example.test/mcp/test' } : null,
             deleteState: async state => { deleted = state; } };
         const redirectTo = async query => {
             const res = { status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; },
